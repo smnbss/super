@@ -6,7 +6,7 @@ PREFIX ?= $(HOME)/.super
 install:
 	@echo "Installing super to $(PREFIX)..."
 	@mkdir -p $(PREFIX)
-	@cp -r super lib hooks README.md $(PREFIX)/
+	@cp -r super lib hooks README.md VERSION $(PREFIX)/
 	@chmod +x $(PREFIX)/super
 	@chmod +x $(PREFIX)/hooks/*/*.sh
 	@echo "Installed. Add $(PREFIX) to your PATH."

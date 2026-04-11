@@ -19,9 +19,9 @@ fi
 
 set -euo pipefail
 
-SUPER_VERSION="$(cat "$SUPER_HOME/VERSION" 2>/dev/null || echo "unknown")"
 SUPER_HOME="${SUPER_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export SUPER_HOME
+SUPER_VERSION="$(cat "$SUPER_HOME/VERSION" 2>/dev/null || echo "unknown")"
 
 source "$SUPER_HOME/lib/session.sh"
 
@@ -233,7 +233,12 @@ cmd_resume() {
     session_file="$(session_resume "$picked")"
   fi
 
+  echo ""
   info "Resumed: $(basename "$session_file")"
+  _pick_cli_for_session
+}
+
+_pick_cli_for_session() {
   echo ""
   echo -e "${BOLD}Launch with which CLI?${RESET}"
   echo ""
@@ -246,10 +251,12 @@ cmd_resume() {
     fi
   done
   echo ""
-  read -rp "  Choice: " choice
+  read -rp "  Choice (or q): " choice
+  [[ "$choice" == "q" || -z "$choice" ]] && { info "Bye!"; exit 0; }
 
   if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
     local chosen="${options[$((choice-1))]}"
+    local session_file; session_file="$(_super_session_file)"
     session_inject_context "$chosen"
     echo ""
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -395,33 +402,42 @@ cmd_menu() {
 
   echo -e "${BOLD}What would you like to do?${RESET}"
   echo ""
-  local options=() labels=() i=1
+  echo -e "  ${BOLD}[1]${RESET}  🆕  Start a new session"
+  if [[ "$has_sessions" -eq 1 ]]; then
+    echo -e "  ${BOLD}[2]${RESET}  ↩️   Resume a previous session"
+  fi
+  echo ""
+  read -rp "  Choice (or q): " choice
+  [[ "$choice" == "q" || -z "$choice" ]] && { info "Bye!"; exit 0; }
 
+  case "$choice" in
+    1) _pick_cli_and_launch ;;
+    2) [[ "$has_sessions" -eq 1 ]] && cmd_resume || die "Invalid choice" ;;
+    *) die "Invalid choice: $choice" ;;
+  esac
+}
+
+# ─── Pick CLI and launch ──────────────────────────────────────────────────────
+
+_pick_cli_and_launch() {
+  echo ""
+  echo -e "${BOLD}Which CLI would you like to use?${RESET}"
+  echo ""
+  local options=() i=1
   for cli in claude gemini codex kimi; do
     if is_installed "$cli"; then
-      options+=("launch:$cli")
-      labels+=("${CLI_ICON[$cli]}  New session with ${CLI_LABEL[$cli]}")
+      options+=("$cli")
+      echo -e "  ${BOLD}[$i]${RESET}  ${CLI_ICON[$cli]}  ${CLI_LABEL[$cli]}"
+      ((i++))
     fi
-  done
-
-  if [[ "$has_sessions" -eq 1 ]]; then
-    options+=("resume")
-    labels+=("↩️   Resume a previous session")
-  fi
-
-  for label in "${labels[@]}"; do
-    echo -e "  ${BOLD}[$i]${RESET}  $label"; ((i++))
   done
   echo ""
   read -rp "  Choice (or q): " choice
   [[ "$choice" == "q" || -z "$choice" ]] && { info "Bye!"; exit 0; }
 
   if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
-    local sel="${options[$((choice-1))]}"
-    case "$sel" in
-      launch:*) cmd_launch "${sel#launch:}" ;;
-      resume)   cmd_resume ;;
-    esac
+    local chosen="${options[$((choice-1))]}"
+    cmd_launch "$chosen"
   else
     die "Invalid choice: $choice"
   fi
