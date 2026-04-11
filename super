@@ -22,6 +22,7 @@ set -euo pipefail
 SUPER_HOME="${SUPER_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export SUPER_HOME
 SUPER_VERSION="$(cat "$SUPER_HOME/VERSION" 2>/dev/null || echo "unknown")"
+GUM_AVAILABLE="$(command -v gum >/dev/null 2>&1 && echo "true" || echo "false")"
 
 # Source libraries
 source "$SUPER_HOME/lib/session.sh"
