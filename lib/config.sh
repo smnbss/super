@@ -136,3 +136,63 @@ _super_session_max_age() {
 _super_session_cleanup() {
   _super_config_enabled "session.cleanupOnStart"
 }
+
+# Initialize config file in current directory
+_super_config_init() {
+  local config_file="$(pwd)/$SUPER_CONFIG_FILE"
+  if [[ -f "$config_file" ]]; then
+    echo "Config already exists at $config_file"
+    return 1
+  fi
+  default_config > "$config_file"
+  echo "$config_file"
+}
+
+# Set config value (path like "security.yoloMode", value like "true")
+_super_config_set() {
+  local path="$1"
+  local value="$2"
+  local config_file="$(_super_find_config)"
+  
+  # Create config if it doesn't exist
+  if [[ -z "$config_file" ]]; then
+    config_file="$(pwd)/$SUPER_CONFIG_FILE"
+    default_config > "$config_file"
+  fi
+  
+  if command -v yq &>/dev/null; then
+    yq -i ".${path} = ${value}" "$config_file" 2>/dev/null || \
+    yq -i ".${path} = \"${value}\"" "$config_file" 2>/dev/null
+  else
+    # Fallback to Python
+    python3 -c "
+import yaml
+import sys
+
+with open('$config_file') as f:
+    d = yaml.safe_load(f)
+
+# Set nested value
+keys = '$path'.split('.')
+current = d
+for key in keys[:-1]:
+    if key not in current:
+        current[key] = {}
+    current = current[key]
+
+# Try to parse as boolean/number, else string
+val = '$value'
+if val.lower() == 'true':
+    val = True
+elif val.lower() == 'false':
+    val = False
+elif val.isdigit():
+    val = int(val)
+
+current[keys[-1]] = val
+
+with open('$config_file', 'w') as f:
+    yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+" 2>/dev/null
+  fi
+}

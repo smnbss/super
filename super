@@ -756,7 +756,7 @@ cmd_config() {
   local action="${1:-show}"
   case "$action" in
     show)
-      local cfg; cfg="$(_super_config_file)"
+      local cfg; cfg="$(_super_find_config)"
       if [[ -f "$cfg" ]]; then
         ui_section "Configuration"
         cat "$cfg"
@@ -767,12 +767,153 @@ cmd_config() {
       ;;
     init)
       _super_config_init
-      ui_success "Created $(_super_config_file)"
+      ui_success "Created super.config.yaml"
       ;;
     edit)
-      ${EDITOR:-vim} "$(_super_config_file)"
+      ${EDITOR:-vim} "$(_super_find_config)"
       ;;
-    *) die "Usage: super config [show|init|edit]" ;;
+    interactive|i)
+      cmd_config_interactive
+      ;;
+    *) die "Usage: super config [show|init|edit|interactive]" ;;
+  esac
+}
+
+cmd_config_interactive() {
+  print_banner
+  ui_section "Interactive Configuration"
+  
+  # Ensure config exists
+  local cfg; cfg="$(_super_find_config)"
+  [[ -f "$cfg" ]] || _super_config_init
+  
+  while true; do
+    ui_spacer
+    ui_print "  $(ui_bold "Configuration Options")"
+    ui_spacer
+    ui_menu_item "1" "" "Session settings" "cleanup, transcripts"
+    ui_menu_item "2" "" "Security settings" "yolo mode, path restrictions"
+    ui_menu_item "3" "" "UI settings" "interactive mode"
+    ui_menu_item "4" "" "View current config"
+    ui_menu_item "5" "" "Edit config in editor"
+    ui_menu_item "q" "" "Quit"
+    ui_spacer
+    ui_prompt "Choice:"
+    read -r choice
+    
+    case "$choice" in
+      1) _config_interactive_sessions ;;
+      2) _config_interactive_security ;;
+      3) _config_interactive_ui ;;
+      4) cmd_config show ;;
+      5) cmd_config edit ;;
+      q|Q) ui_info "Done!"; return ;;
+      *) ui_warn "Invalid choice" ;;
+    esac
+  done
+}
+
+_config_interactive_sessions() {
+  ui_spacer
+  ui_print "  $(ui_bold "Session Settings")"
+  ui_spacer
+  
+  # Get current values
+  local cleanup_enabled; cleanup_enabled="$(_super_config_enabled "session.cleanup" && echo "yes" || echo "no")"
+  local max_age; max_age="$(_super_session_max_age)"
+  [[ -z "$max_age" ]] && max_age="7"
+  
+  ui_print "  Auto-cleanup: $(_c $([[ "$cleanup_enabled" == "yes" ]] && echo $UI_SUCCESS || echo $UI_MUTED); echo "$cleanup_enabled"${UI_RESET})"
+  ui_print "  Max age: $max_age days"
+  ui_spacer
+  
+  ui_menu_item "1" "" "Toggle auto-cleanup"
+  ui_menu_item "2" "" "Change max age"
+  ui_menu_item "b" "" "Back"
+  ui_spacer
+  ui_prompt "Choice:"
+  read -r subchoice
+  
+  case "$subchoice" in
+    1)
+      if [[ "$cleanup_enabled" == "yes" ]]; then
+        _super_config_set "session.cleanup" "false"
+        ui_success "Auto-cleanup disabled"
+      else
+        _super_config_set "session.cleanup" "true"
+        ui_success "Auto-cleanup enabled"
+      fi
+      ;;
+    2)
+      ui_prompt "Enter max age in days (current: $max_age):"
+      read -r new_age
+      if [[ "$new_age" =~ ^[0-9]+$ ]]; then
+        _super_config_set "session.maxAge" "$new_age"
+        ui_success "Max age set to $new_age days"
+      else
+        ui_warn "Invalid number"
+      fi
+      ;;
+    b|B) return ;;
+  esac
+}
+
+_config_interactive_security() {
+  ui_spacer
+  ui_print "  $(ui_bold "Security Settings")"
+  ui_spacer
+  
+  # Get current values
+  local yolo_enabled; yolo_enabled="$(_super_config_enabled "security.yolo" && echo "yes" || echo "no")"
+  
+  ui_print "  Yolo mode: $(_c $([[ "$yolo_enabled" == "yes" ]] && echo $UI_WARNING || echo $UI_SUCCESS); echo "$yolo_enabled"${UI_RESET})"
+  ui_print "  $(_c $UI_MUTED)(Yolo mode disables confirmation prompts for destructive actions)${UI_RESET}"
+  ui_spacer
+  
+  ui_menu_item "1" "" "Toggle yolo mode"
+  ui_menu_item "b" "" "Back"
+  ui_spacer
+  ui_prompt "Choice:"
+  read -r subchoice
+  
+  case "$subchoice" in
+    1)
+      if [[ "$yolo_enabled" == "yes" ]]; then
+        _super_config_set "security.yolo" "false"
+        ui_success "Yolo mode disabled — confirmations enabled"
+      else
+        ui_warn "Enabling yolo mode — this is dangerous!"
+        ui_prompt "Are you sure? (yes/no):"
+        read -r confirm
+        if [[ "$confirm" == "yes" ]]; then
+          _super_config_set "security.yolo" "true"
+          ui_success "Yolo mode enabled — no confirmations"
+        else
+          ui_info "Cancelled"
+        fi
+      fi
+      ;;
+    b|B) return ;;
+  esac
+}
+
+_config_interactive_ui() {
+  ui_spacer
+  ui_print "  $(ui_bold "UI Settings")"
+  ui_spacer
+  
+  ui_print "  These settings control the super UI behavior"
+  ui_spacer
+  
+  ui_menu_item "1" "" "Initialize config file"
+  ui_menu_item "b" "" "Back"
+  ui_spacer
+  ui_prompt "Choice:"
+  read -r subchoice
+  
+  case "$subchoice" in
+    1) cmd_config init ;;
+    b|B) return ;;
   esac
 }
 
