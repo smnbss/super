@@ -504,6 +504,13 @@ COMMANDS
   transcript [list|save]
       Manage session transcripts.
 
+  save [note]
+      Save context of the current conversation to the session file.
+      Optional note to attach to the save.
+
+  catchup
+      Show a summary of the current session and recent activity.
+
 EXAMPLES
   super install
   super claude                                  # new untitled session
@@ -617,6 +624,91 @@ cmd_transcript() {
   esac
 }
 
+# ─── Save command ─────────────────────────────────────────────────────────────
+# Saves context of the current conversation to the session file
+
+cmd_save() {
+  local note="${1:-}"
+  local session_file
+  session_file="$(_super_session_file)"
+  
+  if [[ -z "$session_file" || ! -f "$session_file" ]]; then
+    die "No active session. Start a session first with: super launch <cli>"
+  fi
+  
+  local ts
+  ts="$(date '+%Y-%m-%d %H:%M:%S')"
+  
+  # Append save marker to session
+  printf '\n---\n\n## 💾 Manual Save `[%s]`\n\n' "$ts" >> "$session_file"
+  
+  if [[ -n "$note" ]]; then
+    printf '> **Note:** %s\n\n' "$note" >> "$session_file"
+  fi
+  
+  # Count turns in session
+  local turns
+  turns="$(grep -c '^## ' "$session_file" 2>/dev/null || echo 0)"
+  
+  ok "Session saved: $(basename "$session_file")"
+  info "Total turns: $turns"
+  
+  # Also save transcript if enabled
+  if _super_config_enabled "session.transcriptLog"; then
+    session_save_transcript
+  fi
+}
+
+# ─── Catchup command ──────────────────────────────────────────────────────────
+# Reads the session file and gives a summary of where things stand
+
+cmd_catchup() {
+  local session_file
+  session_file="$(_super_session_file)"
+  
+  if [[ -z "$session_file" || ! -f "$session_file" ]]; then
+    warn "No active session."
+    info "Start one with: super launch <cli>"
+    return 1
+  fi
+  
+  echo ""
+  echo -e "${BOLD}📋 Session Catchup${RESET}"
+  echo ""
+  
+  # Session metadata
+  local basename turns last_save
+  basename="$(basename "$session_file")"
+  turns="$(grep -c '^## ' "$session_file" 2>/dev/null || echo 0)"
+  last_save="$(grep -E '^## 💾 Manual Save' "$session_file" | tail -1 | sed 's/.*\[\(.*\)\].*/\1/')"
+  
+  echo -e "  Session: ${BOLD}$basename${RESET}"
+  echo -e "  Turns: $turns"
+  [[ -n "$last_save" ]] && echo -e "  Last save: $last_save"
+  echo ""
+  
+  # Recent activity (last 5 turns)
+  echo -e "${BOLD}Recent activity:${RESET}"
+  echo ""
+  
+  # Extract recent user prompts and assistant responses
+  grep -E '^## .*User|^### .*Assistant' "$session_file" | tail -10 | while read -r line; do
+    if [[ "$line" == *"User"* ]]; then
+      # Extract first line of user message
+      local content
+      content="$(echo "$line" | sed 's/.*User//' | head -c 80)"
+      [[ ${#content} -eq 80 ]] && content="${content}..."
+      echo "  👤 $content"
+    elif [[ "$line" == *"Assistant"* ]]; then
+      echo "  🤖 (response)"
+    fi
+  done
+  
+  echo ""
+  echo -e "${DIM}Use 'super log' to view full session${RESET}"
+  echo ""
+}
+
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 main() {
@@ -636,6 +728,8 @@ main() {
     validate|lint)     cmd_validate ;;
     cleanup)           cmd_cleanup "$@" ;;
     transcript|trans)  cmd_transcript "$@" ;;
+    save)              cmd_save "$@" ;;
+    catchup|status)    cmd_catchup ;;
     --version|-v)      echo "super v$SUPER_VERSION"; exit 0 ;;
     help|--help|-h)    cmd_help ;;
     menu)              print_banner; cmd_menu ;;
