@@ -319,3 +319,84 @@ with open(path,'w') as fh: fh.writelines(out)
   done
   _log "Cleared injections"
 }
+
+
+# ─── Transcript saving ────────────────────────────────────────────────────────
+
+_transcript_dir() {
+  echo "$(_super_base_dir)/transcripts"
+}
+
+session_save_transcript() {
+  # Save rolling transcript as JSONL
+  local session_file="$(_super_session_file)"
+  [[ -f "$session_file" ]] || return
+  
+  local transcript_dir="$(_transcript_dir)"
+  mkdir -p "$transcript_dir"
+  
+  local transcript_file="$transcript_dir/$(basename "$session_file" .md).jsonl"
+  
+  # Convert markdown session to JSONL format
+  python3 - "$session_file" "$transcript_file" << 'PYEOF'
+import sys, json, re
+from datetime import datetime
+
+session_file = sys.argv[1]
+transcript_file = sys.argv[2]
+
+entries = []
+with open(session_file) as f:
+    content = f.read()
+
+# Parse turns (simplified)
+for match in re.finditer(r'## \[(.*?)\].*?User\n\n(.*?)(?=\n---|\Z)', content, re.DOTALL):
+    cli_ts = match.group(1)
+    user_content = match.group(2).strip()
+    entries.append({
+        "role": "user",
+        "content": user_content,
+        "cli": cli_ts.split()[0] if ' ' in cli_ts else cli_ts,
+        "timestamp": datetime.now().isoformat()
+    })
+
+# Write JSONL
+with open(transcript_file, 'w') as f:
+    for entry in entries:
+        f.write(json.dumps(entry) + '\n')
+PYEOF
+  _log "Saved transcript → $transcript_file"
+}
+
+session_save_final_transcript() {
+  # Save complete transcript on session end
+  local session_file="$(_super_session_file)"
+  [[ -f "$session_file" ]] || return
+  
+  local transcript_dir="$(_transcript_dir)"
+  mkdir -p "$transcript_dir"
+  
+  local final_file="$transcript_dir/$(basename "$session_file" .md)-final.md"
+  cp "$session_file" "$final_file"
+  _log "Saved final transcript → $final_file"
+}
+
+# ─── Session cleanup ──────────────────────────────────────────────────────────
+
+session_cleanup_old() {
+  local max_age="${1:-7}"
+  local sessions_dir="$(_super_sessions_dir)"
+  [[ -d "$sessions_dir" ]] || return
+  
+  local count=0
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    local age=$(( ($(date +%s) - $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)) / 86400 ))
+    if [[ $age -gt $max_age ]]; then
+      rm "$f"
+      ((count++))
+    fi
+  done < <(find "$sessions_dir" -name "*.md" -type f 2>/dev/null)
+  
+  [[ $count -gt 0 ]] && _log "Cleaned up $count old session(s)"
+}

@@ -6,7 +6,7 @@ PREFIX ?= $(HOME)/.super
 install:
 	@echo "Installing super to $(PREFIX)..."
 	@mkdir -p $(PREFIX)
-	@cp -r super lib hooks README.md VERSION $(PREFIX)/
+	@cp -r super lib hooks README.md VERSION super.config.yaml $(PREFIX)/
 	@chmod +x $(PREFIX)/super
 	@chmod +x $(PREFIX)/hooks/*/*.sh
 	@echo "Installed. Add $(PREFIX) to your PATH."
@@ -14,7 +14,7 @@ install:
 package:
 	@mkdir -p dist
 	@tar czf "dist/super-$(VERSION).tar.gz" \
-		super lib/ hooks/ README.md install.sh VERSION
+		super lib/ hooks/ README.md install.sh VERSION super.config.yaml
 	@echo "Packaged: dist/super-$(VERSION).tar.gz"
 
 test:

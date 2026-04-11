@@ -1,47 +1,33 @@
 #!/usr/bin/env bash
 # super/hooks/claude/post_tool_use.sh
-# Hook event: PostToolUse
-# Install: add to .claude/settings.json under "PostToolUse"
-# Fires: after each tool call completes
+# Post-tool validation hook
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../../lib/config.sh"
+source "$SCRIPT_DIR/../../lib/validators.sh"
 source "$SCRIPT_DIR/../../lib/session.sh"
 
 INPUT="$(cat)"
 
-# Extract tool name and key input fields
-TOOL_INFO="$(echo "$INPUT" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    tool = d.get('tool_name', 'unknown')
-    inp  = d.get('tool_input', {})
+# Only process if postToolUse hook is enabled
+if ! _super_config_enabled "hooks.postToolUse.enabled"; then
+  exit 0
+fi
 
-    # Format depending on tool type
-    if tool == 'Bash':
-        cmd = inp.get('command', '')[:300]
-        print(f'Bash: {cmd}')
-    elif tool in ('Write', 'Edit', 'MultiEdit'):
-        path = inp.get('file_path', inp.get('path', ''))
-        print(f'{tool}: {path}')
-    elif tool == 'Read':
-        path = inp.get('file_path', inp.get('path', ''))
-        # Skip logging reads - too noisy
-        sys.exit(0)
-    elif tool == 'WebSearch':
-        q = inp.get('query', '')
-        print(f'WebSearch: {q}')
-    else:
-        print(f'{tool}')
-except SystemExit:
-    pass
-except:
-    pass
-" 2>/dev/null || echo "")"
+# Extract tool info
+TOOL_NAME="$(echo "$INPUT" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("tool_name",""))' 2>/dev/null || echo "")"
 
-if [[ -n "$TOOL_INFO" ]]; then
-  session_append_turn "Claude Code" "tool" "$TOOL_INFO"
+# Log the tool use to session
+if _super_config_enabled "session.sessionLog"; then
+  session_append_turn "Claude Code" "tool" "$TOOL_NAME"
+fi
+
+# Run validators if configured
+if _super_config_enabled "hooks.postToolUse.runValidators"; then
+  if _super_should_validate "$TOOL_NAME"; then
+    _super_run_validators || true  # Don't block on validation failure
+  fi
 fi
 
 exit 0

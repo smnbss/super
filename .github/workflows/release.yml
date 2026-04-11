@@ -25,7 +25,8 @@ jobs:
             hooks/ \
             README.md \
             install.sh \
-            VERSION
+            VERSION \
+            super.config.yaml
           
           # Checksum for verification
           cd dist && sha256sum *.tar.gz > checksums.txt

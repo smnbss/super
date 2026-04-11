@@ -24,6 +24,7 @@ export SUPER_HOME
 SUPER_VERSION="$(cat "$SUPER_HOME/VERSION" 2>/dev/null || echo "unknown")"
 
 source "$SUPER_HOME/lib/session.sh"
+source "$SUPER_HOME/lib/config.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
@@ -188,6 +189,12 @@ cmd_launch() {
   cli="${cli,,}"
   [[ -z "${CLI_CMD[$cli]+_}" ]] && die "Unknown CLI: $cli"
   is_installed "$cli" || die "${CLI_LABEL[$cli]} is not installed"
+
+  # Cleanup old sessions if configured
+  if _super_session_cleanup; then
+    local max_age="$(_super_session_max_age)"
+    [[ -n "$max_age" ]] && session_cleanup_old "$max_age" &>/dev/null || true
+  fi
 
   local session_file
 
@@ -485,6 +492,18 @@ COMMANDS
   status
       Show CLI availability and session info.
 
+  config [show|init|edit]
+      Manage super configuration (super.config.yaml).
+
+  validate
+      Run project validators (lint/typecheck).
+
+  cleanup [days]
+      Remove sessions older than N days (default: 7).
+
+  transcript [list|save]
+      Manage session transcripts.
+
 EXAMPLES
   super install
   super claude                                  # new untitled session
@@ -509,6 +528,93 @@ HOOKS COVERAGE
 HELPEOF
 }
 
+# ─── Config command ───────────────────────────────────────────────────────────
+
+cmd_config() {
+  local action="${1:-show}"
+  local config_file="$(_super_find_config)"
+  
+  case "$action" in
+    show)
+      if [[ -n "$config_file" ]]; then
+        echo "Configuration: $config_file"
+        echo ""
+        cat "$config_file"
+      else
+        echo "No configuration file found."
+        echo "Creating default at $(pwd)/super.config.yaml..."
+        cp "$SUPER_HOME/super.config.yaml" ./super.config.yaml
+        ok "Created super.config.yaml"
+      fi
+      ;;
+    init)
+      if [[ -f "./super.config.yaml" ]]; then
+        warn "super.config.yaml already exists"
+        read -rp "Overwrite? (y/N): " confirm
+        [[ "$confirm" == "y" ]] || { info "Cancelled"; return; }
+      fi
+      cp "$SUPER_HOME/super.config.yaml" ./super.config.yaml
+      ok "Created super.config.yaml"
+      ;;
+    edit)
+      local editor="${EDITOR:-vi}"
+      if [[ -n "$config_file" ]]; then
+        $editor "$config_file"
+      else
+        die "No config file found. Run: super config init"
+      fi
+      ;;
+    *) die "Usage: super config [show|init|edit]" ;;
+  esac
+}
+
+# ─── Validate command ─────────────────────────────────────────────────────────
+
+cmd_validate() {
+  source "$SUPER_HOME/lib/validators.sh"
+  info "Running project validators..."
+  if _super_run_validators; then
+    ok "All validators passed"
+  else
+    warn "Some validators failed"
+    return 1
+  fi
+}
+
+# ─── Cleanup command ──────────────────────────────────────────────────────────
+
+cmd_cleanup() {
+  local max_age="${1:-$(_super_session_max_age)}"
+  [[ -z "$max_age" ]] && max_age=7
+  
+  info "Cleaning up sessions older than $max_age days..."
+  session_cleanup_old "$max_age"
+  ok "Cleanup complete"
+}
+
+# ─── Transcript command ───────────────────────────────────────────────────────
+
+cmd_transcript() {
+  local action="${1:-list}"
+  local transcript_dir="$(_super_base_dir)/transcripts"
+  
+  case "$action" in
+    list|ls)
+      if [[ -d "$transcript_dir" ]]; then
+        echo "Transcripts in $transcript_dir:"
+        ls -la "$transcript_dir"/*.jsonl "$transcript_dir"/*-final.md 2>/dev/null || echo "No transcripts yet"
+      else
+        echo "No transcripts directory"
+      fi
+      ;;
+    save)
+      session_save_transcript
+      ok "Transcript saved"
+      ;;
+    *) die "Usage: super transcript [list|save]" ;;
+  esac
+}
+
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 main() {
@@ -524,6 +630,10 @@ main() {
     clean)             cmd_clean ;;
     uninstall)         cmd_uninstall ;;
     status|s)          print_banner; print_status ;;
+    config|cfg)        cmd_config "$@" ;;
+    validate|lint)     cmd_validate ;;
+    cleanup)           cmd_cleanup "$@" ;;
+    transcript|trans)  cmd_transcript "$@" ;;
     --version|-v)      echo "super v$SUPER_VERSION"; exit 0 ;;
     help|--help|-h)    cmd_help ;;
     menu)              print_banner; cmd_menu ;;

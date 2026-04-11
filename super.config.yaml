@@ -1,0 +1,100 @@
+version: "1.0"
+
+# Super - Cross-CLI Session Bridge Configuration
+# Works with: Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI
+
+security:
+  yoloMode: false               # Skip all permission prompts (security hook still enforces rules)
+  yoloAllowedTools: []          # Restrict yolo to specific tools (empty = all tools allowed)
+  writesOutsideProject: ask     # block | allow | ask — writes outside project root
+  readsOutsideProject: allow    # block | allow | ask — reads outside project root
+  bashExternalCalls: ask        # block | allow | ask — curl POST, npm publish, docker push
+  changeOwner: block            # block | allow | ask — chmod, chown commands
+  githubCommands: allow         # block | allow | ask — git push, gh pr create, etc.
+  dangerousRm: block            # block | allow | ask — rm -rf with risky paths
+  envAccess: block              # block | allow | ask — reading .env files
+  sensitivePaths: block         # block | allow | ask — ~/.ssh, ~/.aws, credentials
+
+session:
+  autoName: true                # Generate creative session names
+  sessionLog: true              # Log user prompts to session directory
+  transcriptLog: true           # Save rolling transcript after each turn
+  cleanupOnStart: true          # Remove old sessions on startup
+  maxAgeDays: 7                 # Delete sessions older than this
+  injectContext: true           # Inject session history into CLI context files
+
+skills:
+  # Install skills from GitHub repos (owner/repo/path)
+  # Example:
+  # gstack: garrytan/gstack
+  # security-review: affaan-m/everything-claude-code/security-review
+
+plugins:
+  # Plugin repos to clone and symlink (owner/repo or local path)
+  # Example:
+  # weroad-ai: weroad/ai
+
+mcps:
+  # MCP server configurations per CLI
+  # Note: Not all CLIs support MCP servers equally
+  claude:
+    # context7:
+    #   type: npm
+    #   command: npx
+    #   args: ["-y", "@upstash/context7-mcp"]
+  gemini:
+    # Gemini has its own extension system
+  codex:
+    # Codex supports MCP via config
+  kimi:
+    # Kimi supports MCP via config
+
+project:
+  lintCommand: ""               # Run after code changes (empty = skip)
+  typeCheckCommand: ""          # Run after code changes (empty = skip)
+  autoLintOnSave: false         # Auto-run lint after Write/Edit
+
+hooks:
+  # Cross-CLI hook configuration
+  preToolUse:
+    enabled: true
+    enforceSecurity: true       # Block unsafe operations
+  
+  permissionRequest:
+    enabled: true
+    autoAllowReads: true        # Auto-allow Read, Glob, Grep
+    autoAllowSafeBash: true     # Auto-allow safe bash (ls, git status, etc.)
+  
+  userPromptSubmit:
+    enabled: true
+    logPrompts: true
+    validatePrompts: false
+    blockedPatterns: []
+  
+  postToolUse:
+    enabled: true
+    runValidators: true         # Run lint/typecheck after Write/Edit
+  
+  sessionStart:
+    enabled: true
+    loadGitContext: false       # Inject git info into session
+    loadProjectFiles: false     # Inject README into session
+  
+  sessionEnd:
+    enabled: true
+    saveTranscript: true
+    cleanup: true
+  
+  stop:
+    enabled: true
+    saveTranscript: true        # Save rolling transcript each turn
+
+statusLine:
+  enabled: true                 # Show status bar (Claude only - uses native)
+  # For other CLIs, this is handled via their native status displays
+
+crossAgent:
+  # Cross-agent specific settings
+  syncMcpServers: false         # Sync MCP configs across CLIs
+  shareContext: true            # Share session context across CLIs
+  unifiedSkills: true           # Use same skills folder for all CLIs
