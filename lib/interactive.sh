@@ -1,96 +1,273 @@
 #!/usr/bin/env bash
-# super/lib/interactive.sh
+# super/lib/interactive.sh — Interactive selection menus
+#
+# Three tiers: gum (if installed) → arrow-key TUI → plain numbered prompt
+# Arrow-key TUI works in any bash 4+ terminal that supports ANSI escapes.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SINGLE SELECT
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage: idx=$(ui_select_single "Title" default_idx "opt1" "opt2" ...)
+# Returns: 0-based index on stdout, exit 0 on confirm, exit 1 on quit/cancel
 
 ui_select_single() {
   local title="$1" default_idx="${2:-0}"
   shift 2; local options=("$@")
-  
+
   if command -v gum >/dev/null 2>&1; then
-    local result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title")
-    local i=0; for opt in "${options[@]}"; do [[ "$opt" == "$result" ]] && echo "$i" && return; ((i++)); done; echo ""
+    _ui_single_gum "$title" "$default_idx" "${options[@]}"
+  elif [[ -t 0 && -t 2 ]]; then
+    _ui_single_arrows "$title" "$default_idx" "${options[@]}"
   else
-    _ui_select_simple "$title" "$default_idx" "${options[@]}"
+    _ui_single_numbered "$title" "$default_idx" "${options[@]}"
   fi
 }
 
-_ui_select_simple() {
-  local title="$1" default="$2"; shift 2; local options=("$@")
-  local total=${#options[@]}
-  
-  echo "$title" >&2
-  echo "" >&2
-  for ((i=0; i<total; i++)); do
-    local marker="  "
-    [[ $i -eq $default ]] && marker="> "
-    echo "$marker$((i+1)). ${options[$i]}" >&2
+# ── gum ───────────────────────────────────────────────────────────────────────
+
+_ui_single_gum() {
+  local title="$1" default_idx="$2"; shift 2; local options=("$@")
+  local result
+  result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title")
+  [[ -z "$result" ]] && return 1
+  local i=0
+  for opt in "${options[@]}"; do
+    [[ "$opt" == "$result" ]] && { echo "$i"; return 0; }
+    ((i++))
   done
-  echo "" >&2
-  echo -n "Select (1-$total, or Q to quit): " >&2
-  
+  return 1
+}
+
+# ── arrow-key TUI ─────────────────────────────────────────────────────────────
+
+_ui_single_arrows() {
+  local title="$1" cur="$2"; shift 2; local options=("$@")
+  local total=${#options[@]}
+  ((cur < 0)) && cur=0
+  ((cur >= total)) && cur=$((total - 1))
+
+  # lines to move up when redrawing (title + blank + N options + help)
+  local up=$((total + 2))
+
+  printf '\033[?25l' >&2                   # hide cursor
+  trap 'printf "\033[?25h" >&2' RETURN     # show cursor on any return
+
+  _render_single "$title" "$cur" "${options[@]}"
+
   while true; do
-    read -r input
-    [[ "$input" == "q" || "$input" == "Q" ]] && echo "" && return 1
-    [[ "$input" =~ ^[0-9]+$ ]] && ((input >= 1 && input <= total)) && echo "$((input-1))" && return 0
-    echo -n "Invalid selection. Try again (1-$total): " >&2
+    _read_key
+    case "$_KEY" in
+      up)    ((cur > 0)) && ((cur--)) ;;
+      down)  ((cur < total-1)) && ((cur++)) ;;
+      home)  cur=0 ;;
+      end)   cur=$((total-1)) ;;
+      enter) echo "$cur"; return 0 ;;
+      quit)  return 1 ;;
+      [1-9]) ((${_KEY} >= 1 && ${_KEY} <= total)) && cur=$((_KEY-1)) ;;
+    esac
+    printf '\033[%dA\r' "$up" >&2
+    _render_single "$title" "$cur" "${options[@]}"
   done
 }
+
+_render_single() {
+  local title="$1" cur="$2"; shift 2; local options=("$@")
+  local total=${#options[@]}
+
+  printf '\033[2K%s\n'  "$title"  >&2
+  printf '\033[2K\n'              >&2
+  for ((i=0; i<total; i++)); do
+    if ((i == cur)); then
+      printf '\033[2K  \033[36m❯ %s\033[0m\n' "${options[$i]}" >&2
+    else
+      printf '\033[2K    %s\n' "${options[$i]}" >&2
+    fi
+  done
+  printf '\033[2K\033[90m  ↑/↓ navigate · enter confirm · q quit\033[0m' >&2
+}
+
+# ── plain numbered (no TTY) ──────────────────────────────────────────────────
+
+_ui_single_numbered() {
+  local title="$1" default="$2"; shift 2; local options=("$@")
+  local total=${#options[@]}
+
+  echo "$title" >&2; echo "" >&2
+  for ((i=0; i<total; i++)); do
+    local m="  "; ((i == default)) && m="> "
+    echo "$m$((i+1)). ${options[$i]}" >&2
+  done
+  echo "" >&2
+  printf "Select (1-%d): " "$total" >&2
+
+  while true; do
+    read -r input
+    [[ "$input" == [qQ] ]] && return 1
+    [[ "$input" =~ ^[0-9]+$ && $input -ge 1 && $input -le $total ]] && {
+      echo "$((input-1))"; return 0
+    }
+    printf "Invalid. (1-%d): " "$total" >&2
+  done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MULTI SELECT
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage: indices=$(ui_select_multi "Title" "opt1" "opt2" ...)
+# Returns: space-separated 0-based indices on stdout
 
 ui_select_multi() {
   local title="$1"; shift; local options=("$@")
-  local defaults="${2:-}"
-  
+
   if command -v gum >/dev/null 2>&1; then
-    local result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title")
-    [[ -z "$result" ]] && return 1
-    local indices=(); while IFS= read -r sel; do local i=0; for opt in "${options[@]}"; do [[ "$opt" == "$sel" ]] && indices+=("$i") && break; ((i++)); done; done <<< "$result"
-    printf '%s\n' "${indices[@]}"
+    _ui_multi_gum "$title" "${options[@]}"
+  elif [[ -t 0 && -t 2 ]]; then
+    _ui_multi_arrows "$title" "${options[@]}"
   else
-    _ui_multi_simple "$title" "$defaults" "${options[@]}"
+    _ui_multi_numbered "$title" "${options[@]}"
   fi
 }
 
-_ui_multi_simple() {
-  local title="$1" defaults="$2"; shift 2; local options=("$@")
-  local total=${#options[@]} selected=()
-  
-  for ((i=0; i<total; i++)); do selected[$i]=0; done
-  for idx in $defaults; do [[ "$idx" =~ ^[0-9]+$ ]] && ((idx<total)) && selected[$idx]=1; done
-  
-  while true; do
-    clear >&2 || printf '\033[2J\033[H' >&2
-    echo "$title" >&2
-    echo "" >&2
-    echo "SPACE to toggle, A=all, N=none, ENTER to confirm, Q=quit" >&2
-    echo "" >&2
-    for ((i=0; i<total; i++)); do
-      local marker="○"
-      [[ ${selected[$i]} -eq 1 ]] && marker="◉"
-      echo "  $marker $((i+1)). ${options[$i]}" >&2
+# ── gum ───────────────────────────────────────────────────────────────────────
+
+_ui_multi_gum() {
+  local title="$1"; shift; local options=("$@")
+  local result
+  result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title")
+  [[ -z "$result" ]] && return 1
+  local indices=()
+  while IFS= read -r sel; do
+    local i=0
+    for opt in "${options[@]}"; do
+      [[ "$opt" == "$sel" ]] && { indices+=("$i"); break; }
+      ((i++))
     done
-    echo "" >&2
-    echo -n "Command (SPACE/A/N/ENTER/Q): " >&2
-    
-    IFS= read -rs -n1 key
-    case "$key" in
-      ' ')
-        echo "Toggle not supported in simple mode. Use numbers (e.g., '1 3') or: " >&2
-        echo -n "Enter selections (space-separated, e.g., '1 3'): " >&2
-        read -r nums
-        for n in $nums; do [[ "$n" =~ ^[0-9]+$ ]] && ((n>=1 && n<=total)) && selected[$((n-1))]=1; done
-        ;;
-      'a'|'A') for ((i=0; i<total; i++)); do selected[$i]=1; done ;;
-      'n'|'N') for ((i=0; i<total; i++)); do selected[$i]=0; done ;;
-      '')
-        local any=0 result=""
-        for ((i=0; i<total; i++)); do [[ ${selected[$i]} -eq 1 ]] && any=1 && result="$result$i "; done
+  done <<< "$result"
+  echo "${indices[*]}"
+}
+
+# ── arrow-key TUI ─────────────────────────────────────────────────────────────
+
+_ui_multi_arrows() {
+  local title="$1"; shift; local options=("$@")
+  local total=${#options[@]} cur=0
+  # _sel is used by _render_multi via bash dynamic scoping
+  local _sel=()
+  for ((i=0; i<total; i++)); do _sel[$i]=0; done
+
+  local up=$((total + 2))
+
+  printf '\033[?25l' >&2
+  trap 'printf "\033[?25h" >&2' RETURN
+
+  _render_multi "$title" "$cur" "${options[@]}"
+
+  while true; do
+    _read_key
+    case "$_KEY" in
+      up)    ((cur > 0)) && ((cur--)) ;;
+      down)  ((cur < total-1)) && ((cur++)) ;;
+      home)  cur=0 ;;
+      end)   cur=$((total-1)) ;;
+      space) ((_sel[cur] ^= 1)) ;;
+      a|A)   for ((i=0; i<total; i++)); do _sel[$i]=1; done ;;
+      n|N)   for ((i=0; i<total; i++)); do _sel[$i]=0; done ;;
+      enter)
+        local result="" any=0
+        for ((i=0; i<total; i++)); do
+          ((_sel[i])) && { result+="$i "; any=1; }
+        done
         echo "$result"
-        [[ $any -eq 0 ]] && return 1
-        return 0
+        ((any)) && return 0 || return 1
         ;;
-      'q'|'Q') echo "" && return 1 ;;
+      quit) return 1 ;;
     esac
+    printf '\033[%dA\r' "$up" >&2
+    _render_multi "$title" "$cur" "${options[@]}"
   done
 }
+
+_render_multi() {
+  local title="$1" cur="$2"; shift 2; local options=("$@")
+  local total=${#options[@]}
+
+  printf '\033[2K%s\n'  "$title"  >&2
+  printf '\033[2K\n'              >&2
+  for ((i=0; i<total; i++)); do
+    local ck="○"; ((_sel[i])) && ck="◉"
+    if ((i == cur)); then
+      printf '\033[2K  \033[36m❯ %s %s\033[0m\n' "$ck" "${options[$i]}" >&2
+    else
+      printf '\033[2K    %s %s\n' "$ck" "${options[$i]}" >&2
+    fi
+  done
+  printf '\033[2K\033[90m  ↑/↓ navigate · space toggle · a all · n none · enter confirm · q quit\033[0m' >&2
+}
+
+# ── plain numbered (no TTY) ──────────────────────────────────────────────────
+
+_ui_multi_numbered() {
+  local title="$1"; shift; local options=("$@")
+  local total=${#options[@]}
+
+  echo "$title" >&2; echo "" >&2
+  for ((i=0; i<total; i++)); do
+    echo "  $((i+1)). ${options[$i]}" >&2
+  done
+  echo "" >&2
+  printf "Enter selections (space-separated, e.g. '1 3'), q to quit: " >&2
+
+  read -r nums
+  [[ "$nums" == [qQ] || -z "$nums" ]] && return 1
+  local result=""
+  for n in $nums; do
+    [[ "$n" =~ ^[0-9]+$ ]] && ((n >= 1 && n <= total)) && result+="$((n-1)) "
+  done
+  [[ -z "$result" ]] && return 1
+  echo "$result"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KEY READER
+# ─────────────────────────────────────────────────────────────────────────────
+# Sets global $_KEY to one of:
+#   up  down  left  right  home  end  enter  space  quit  escape
+#   or the literal character (a, n, 1, 2, ...)
+
+_read_key() {
+  _KEY=""
+  local byte
+
+  IFS= read -rsn1 byte 2>/dev/null
+
+  case "$byte" in
+    $'\e')
+      # Escape sequence: read up to 2 more bytes with tight timeout
+      local s1="" s2=""
+      IFS= read -rsn1 -t 0.05 s1 2>/dev/null
+      IFS= read -rsn1 -t 0.05 s2 2>/dev/null
+      case "${s1}${s2}" in
+        '[A') _KEY=up    ;;
+        '[B') _KEY=down  ;;
+        '[C') _KEY=right ;;
+        '[D') _KEY=left  ;;
+        '[H') _KEY=home  ;;
+        '[F') _KEY=end   ;;
+        *)    _KEY=escape ;;
+      esac
+      ;;
+    '')   _KEY=enter ;;
+    ' ')  _KEY=space ;;
+    q|Q)  _KEY=quit  ;;
+    k)    _KEY=up    ;;   # vim
+    j)    _KEY=down  ;;   # vim
+    *)    _KEY="$byte" ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INSTALL INTERACTIVE
+# ─────────────────────────────────────────────────────────────────────────────
 
 cmd_install_interactive() {
   ui_banner
@@ -101,45 +278,18 @@ cmd_install_interactive() {
       available_clis+=("${CLI_ICON[$cli]} ${CLI_LABEL[$cli]}")
     fi
   done
-  
+
   if [[ ${#available_clis[@]} -eq 0 ]]; then
     ui_warn "No supported CLIs detected."
     return 1
   fi
-  
-  if command -v gum >/dev/null 2>&1; then
-    _install_with_gum "${available_clis[@]}" "${cli_keys[@]}"
-  else
-    _install_simple "$title" "${available_clis[@]}" "${cli_keys[@]}"
-  fi
-}
 
-_install_with_gum() {
-  local options=() keys=()
-  while [[ "$1" != "" && ! "$1" =~ ^[a-z]+$ ]]; do options+=("$1"); shift; done
-  keys=("$@")
-  
-  ui_print "Select CLIs to install:"
-  local selected=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=6)
-  [[ -z "$selected" ]] && { ui_warn "Cancelled."; return 1; }
-  
-  echo "$selected" | while read -r line; do
-    for i in "${!options[@]}"; do
-      [[ "${options[$i]}" == "$line" ]] && _install_cli "${keys[$i]}"
-    done
-  done
-}
-
-_install_simple() {
-  shift; local options=() keys=()
-  while [[ "$1" != "" && ! "$1" =~ ^claude|gemini|codex|kimi$ ]]; do options+=("$1"); shift; done
-  keys=("$@")
-  
-  local indices=$(ui_select_multi "Select CLIs to install:" "" "${options[@]}")
+  local indices
+  indices=$(ui_select_multi "Select CLIs to install:" "${available_clis[@]}")
   [[ -z "$indices" ]] && { ui_warn "Cancelled."; return 1; }
-  
+
   for idx in $indices; do
-    [[ "$idx" =~ ^[0-9]+$ ]] && ((idx < ${#keys[@]})) && _install_cli "${keys[$idx]}"
+    [[ "$idx" =~ ^[0-9]+$ ]] && ((idx < ${#cli_keys[@]})) && _install_cli "${cli_keys[$idx]}"
   done
 }
 
@@ -149,7 +299,7 @@ _install_cli() {
   case "$cli" in
     claude) install_hooks_claude 2>/dev/null ;;
     gemini) install_hooks_gemini 2>/dev/null ;;
-    codex) install_hooks_codex 2>/dev/null ;;
-    kimi) install_hooks_kimi 2>/dev/null ;;
+    codex)  install_hooks_codex  2>/dev/null ;;
+    kimi)   install_hooks_kimi   2>/dev/null ;;
   esac && printf "✓\n" || printf "✗\n"
 }
