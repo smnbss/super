@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/kimi/post_tool_use.sh
+# super/hooks/kimi/post_tool_use.sh
 # Kimi hook event: PostToolUse
 
 set -euo pipefail

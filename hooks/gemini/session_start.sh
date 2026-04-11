@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/gemini/session_start.sh
+# super/hooks/gemini/session_start.sh
 # Gemini CLI hook event: SessionStart
 # Install: add to .gemini/settings.json under "hooks.SessionStart"
 

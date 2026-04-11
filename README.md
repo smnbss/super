@@ -1,8 +1,8 @@
-# supercli
+# super
 
 A cross-CLI session bridge for **Claude Code**, **Gemini CLI**, **Codex CLI**, and **Kimi Code CLI**.
 
-Each CLI runs its hooks, writes turns to a shared `.supercli/session.md`, and when you switch to a different CLI the session history gets injected into its context file automatically.
+Each CLI runs its hooks, writes turns to a shared `.super/session.md`, and when you switch to a different CLI the session history gets injected into its context file automatically.
 
 ---
 
@@ -10,9 +10,9 @@ Each CLI runs its hooks, writes turns to a shared `.supercli/session.md`, and wh
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  supercli launch claude                                  │
+│  super launch claude                                  │
 │                                                          │
-│  1. Injects .supercli/session.md → CLAUDE.md             │
+│  1. Injects .super/session.md → CLAUDE.md             │
 │  2. Launches claude                                      │
 │  3. Hooks fire on every turn:                            │
 │       UserPromptSubmit → append user msg to session.md  │
@@ -21,9 +21,9 @@ Each CLI runs its hooks, writes turns to a shared `.supercli/session.md`, and wh
 └─────────────────────────────────────────────────────────┘
          ↓ switch ↓
 ┌─────────────────────────────────────────────────────────┐
-│  supercli launch gemini                                  │
+│  super launch gemini                                  │
 │                                                          │
-│  1. Injects .supercli/session.md → GEMINI.md             │
+│  1. Injects .super/session.md → GEMINI.md             │
 │  2. Launches gemini                                      │
 │  3. Gemini sees full prior conversation in its context  │
 └─────────────────────────────────────────────────────────┘
@@ -42,34 +42,34 @@ Each CLI runs its hooks, writes turns to a shared `.supercli/session.md`, and wh
 
 ## Installation
 
-### 1. Clone / place supercli
+### 1. Clone / place super
 
 ```bash
-git clone https://github.com/you/supercli ~/.supercli
-# or just put the supercli/ folder anywhere you like
+git clone https://github.com/you/super ~/.super
+# or just put the super/ folder anywhere you like
 ```
 
-### 2. Set SUPERCLI_HOME and add to PATH
+### 2. Set SUPER_HOME and add to PATH
 
 Add to your `~/.zshrc` or `~/.bashrc`:
 
 ```bash
-export SUPERCLI_HOME="$HOME/.supercli"
-export PATH="$SUPERCLI_HOME:$PATH"
+export SUPER_HOME="$HOME/.super"
+export PATH="$SUPER_HOME:$PATH"
 ```
 
 ### 3. Make scripts executable
 
 ```bash
-chmod +x ~/.supercli/supercli
-chmod +x ~/.supercli/hooks/**/*.sh
+chmod +x ~/.super/super
+chmod +x ~/.super/hooks/**/*.sh
 ```
 
 ### 4. Install hooks in your project
 
 ```bash
 cd ~/my-project
-supercli install
+super install
 ```
 
 This writes hooks into:
@@ -78,7 +78,7 @@ This writes hooks into:
 - `.codex/hooks.json`      (Codex CLI)
 - `.kimi/config.toml`      (Kimi Code CLI)
 
-If those files already exist, supercli merges the hooks without overwriting your existing config.
+If those files already exist, super merges the hooks without overwriting your existing config.
 
 ---
 
@@ -86,29 +86,29 @@ If those files already exist, supercli merges the hooks without overwriting your
 
 ```bash
 # Start with Claude Code
-supercli launch claude
+super launch claude
 
 # or shorthand
-supercli claude
+super claude
 
 # When you want to switch to Gemini
-supercli switch claude gemini
+super switch claude gemini
 
 # Check what's been logged
-supercli log
+super log
 
 # Last 5 turns only
-supercli log 5
+super log 5
 
 # See installed CLIs and session info
-supercli status
+super status
 ```
 
 ---
 
 ## Session file format
 
-`.supercli/session.md` is plain Markdown, readable by any AI:
+`.super/session.md` is plain Markdown, readable by any AI:
 
 ```markdown
 # SuperCLI Session
@@ -157,16 +157,16 @@ Continue the auth refactor, focus on the token validation part
 
 ## Context injection
 
-When you run `supercli launch <cli>`, the last ~80 lines of `.supercli/session.md` are injected into the CLI's context file between special markers:
+When you run `super launch <cli>`, the last ~80 lines of `.super/session.md` are injected into the CLI's context file between special markers:
 
 ```
-<!-- supercli:session-context -->
+<!-- super:session-context -->
 ## 📋 SuperCLI Cross-Session Context
 ...history...
-<!-- /supercli:session-context -->
+<!-- /super:session-context -->
 ```
 
-On the next launch, the old block is replaced with a fresh one. Run `supercli clean` to remove injection blocks without uninstalling hooks.
+On the next launch, the old block is replaced with a fresh one. Run `super clean` to remove injection blocks without uninstalling hooks.
 
 ---
 
@@ -176,10 +176,10 @@ If you want hooks active in every new project automatically, install at user sco
 
 ```bash
 # Claude Code - user scope
-supercli install claude  # then copy .claude/settings.json to ~/.claude/settings.json
+super install claude  # then copy .claude/settings.json to ~/.claude/settings.json
 
 # Gemini CLI - user scope
-supercli install gemini  # then copy .gemini/settings.json to ~/.gemini/settings.json
+super install gemini  # then copy .gemini/settings.json to ~/.gemini/settings.json
 ```
 
 ---
@@ -188,10 +188,10 @@ supercli install gemini  # then copy .gemini/settings.json to ~/.gemini/settings
 
 ```bash
 # Remove from one CLI
-supercli uninstall claude
+super uninstall claude
 
 # Remove from all
-supercli uninstall
+super uninstall
 
 # The session.md file is kept - you don't lose history
 ```
@@ -204,6 +204,6 @@ All hook scripts are plain bash in `hooks/<cli>/`. To add a new event:
 
 1. Write `hooks/<cli>/your_event.sh` — read JSON from stdin, call `session_append_turn`
 2. Add the event to the corresponding config template
-3. Re-run `supercli install`
+3. Re-run `super install`
 
 The `lib/session.sh` library is the only shared dependency.

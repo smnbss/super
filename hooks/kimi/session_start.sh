@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/kimi/session_start.sh
+# super/hooks/kimi/session_start.sh
 # Kimi hook event: SessionStart
 
 set -euo pipefail

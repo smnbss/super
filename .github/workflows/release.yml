@@ -19,8 +19,8 @@ jobs:
           mkdir -p dist
           VERSION=${GITHUB_REF_NAME#v}
           # Single tarball — bash is portable
-          tar czf "dist/supercli-${VERSION}.tar.gz" \
-            supercli \
+          tar czf "dist/super-${VERSION}.tar.gz" \
+            super \
             lib/ \
             hooks/ \
             README.md \

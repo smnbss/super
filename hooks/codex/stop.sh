@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/codex/stop.sh
+# super/hooks/codex/stop.sh
 # Codex hook event: Stop
 
 set -euo pipefail

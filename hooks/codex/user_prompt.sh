@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/codex/user_prompt.sh
+# super/hooks/codex/user_prompt.sh
 # Codex hook event: UserPromptSubmit
 
 set -euo pipefail

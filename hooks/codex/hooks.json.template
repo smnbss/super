@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/codex/session_start.sh",
-            "statusMessage": "supercli: recording session start",
+            "command": "$SUPER_HOME/hooks/codex/session_start.sh",
+            "statusMessage": "super: recording session start",
             "timeout": 5000
           }
         ]
@@ -18,8 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/codex/user_prompt.sh",
-            "statusMessage": "supercli: logging prompt",
+            "command": "$SUPER_HOME/hooks/codex/user_prompt.sh",
+            "statusMessage": "super: logging prompt",
             "timeout": 5000
           }
         ]
@@ -37,8 +37,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/codex/post_tool_use.sh",
-            "statusMessage": "supercli: logging tool use",
+            "command": "$SUPER_HOME/hooks/codex/post_tool_use.sh",
+            "statusMessage": "super: logging tool use",
             "timeout": 5000
           }
         ]
@@ -49,8 +49,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/codex/stop.sh",
-            "statusMessage": "supercli: logging response",
+            "command": "$SUPER_HOME/hooks/codex/stop.sh",
+            "statusMessage": "super: logging response",
             "timeout": 10000
           }
         ]

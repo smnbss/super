@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# supercli/lib/session.sh
+# super/lib/session.sh
 # Core session management library — sourced by all hook scripts and the launcher
 #
 # Layout:
-#   .supercli/
+#   .super/
 #     sessions/
 #       2026-04-11_143201_auth-refactor.md
 #       2026-04-11_160042_untitled.md
 #     active          <- plain text: absolute path to active session file
-#     supercli.log
+#     super.log
 
 # ─── Project root discovery ──────────────────────────────────────────────────
 
-_supercli_find_root() {
-  local dir="${SUPERCLI_PROJECT_DIR:-$(pwd)}"
+_super_find_root() {
+  local dir="${SUPER_PROJECT_DIR:-$(pwd)}"
   while [[ "$dir" != "/" ]]; do
-    if [[ -d "$dir/.supercli" ]]; then
+    if [[ -d "$dir/.super" ]]; then
       echo "$dir"; return 0
     fi
     if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then
@@ -26,29 +26,29 @@ _supercli_find_root() {
   echo "$(pwd)"
 }
 
-_supercli_base_dir()     { echo "$(_supercli_find_root)/.supercli"; }
-_supercli_sessions_dir() { echo "$(_supercli_base_dir)/sessions"; }
-_supercli_active_ptr()   { echo "$(_supercli_base_dir)/active"; }
-_supercli_log_file()     { echo "$(_supercli_base_dir)/supercli.log"; }
+_super_base_dir()     { echo "$(_super_find_root)/.super"; }
+_super_sessions_dir() { echo "$(_super_base_dir)/sessions"; }
+_super_active_ptr()   { echo "$(_super_base_dir)/active"; }
+_super_log_file()     { echo "$(_super_base_dir)/super.log"; }
 
 # ─── Active session path ─────────────────────────────────────────────────────
 # All hooks call this to know which file to write to.
 
-_supercli_session_file() {
+_super_session_file() {
   local ptr
-  ptr="$(_supercli_active_ptr)"
+  ptr="$(_super_active_ptr)"
   if [[ -f "$ptr" ]]; then
     cat "$ptr"
   else
     # Fallback: newest session, or empty
-    ls -t "$(_supercli_sessions_dir)"/*.md 2>/dev/null | head -1 || echo ""
+    ls -t "$(_super_sessions_dir)"/*.md 2>/dev/null | head -1 || echo ""
   fi
 }
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
 
 _log() {
-  echo "[$(date '+%H:%M:%S')] $*" >> "$(_supercli_log_file)" 2>/dev/null
+  echo "[$(date '+%H:%M:%S')] $*" >> "$(_super_log_file)" 2>/dev/null
 }
 
 # ─── Icons ───────────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ session_new() {
   ts="$(date '+%Y-%m-%d_%H%M%S')"
 
   local sessions_dir
-  sessions_dir="$(_supercli_sessions_dir)"
+  sessions_dir="$(_super_sessions_dir)"
   mkdir -p "$sessions_dir"
 
   local filepath="$sessions_dir/${ts}_${safe_title}.md"
@@ -87,7 +87,7 @@ session_new() {
   cat > "$filepath" << EOF
 # SuperCLI Session: $title
 
-**Project:** $(basename "$(_supercli_find_root)")
+**Project:** $(basename "$(_super_find_root)")
 **Started:** $(date '+%Y-%m-%d %H:%M:%S')
 **Directory:** $(pwd)
 **File:** ${ts}_${safe_title}.md
@@ -96,7 +96,7 @@ session_new() {
 
 EOF
 
-  echo "$filepath" > "$(_supercli_active_ptr)"
+  echo "$filepath" > "$(_super_active_ptr)"
   _log "New session: $filepath"
   echo "$filepath"
 }
@@ -107,7 +107,7 @@ session_resume() {
   # session_resume <filepath>
   local filepath="$1"
   [[ -f "$filepath" ]] || { echo "Session not found: $filepath" >&2; return 1; }
-  echo "$filepath" > "$(_supercli_active_ptr)"
+  echo "$filepath" > "$(_super_active_ptr)"
   printf '\n---\n\n> ↩️  **Resumed** %s\n\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$filepath"
   _log "Resumed: $filepath"
   echo "$filepath"
@@ -118,11 +118,11 @@ session_resume() {
 session_list() {
   # Prints all sessions, newest first. Used by cmd_sessions and cmd_log.
   local sessions_dir
-  sessions_dir="$(_supercli_sessions_dir)"
+  sessions_dir="$(_super_sessions_dir)"
   [[ -d "$sessions_dir" ]] || return 0
 
   local active
-  active="$(_supercli_session_file)"
+  active="$(_super_session_file)"
 
   local i=1
   while IFS= read -r f; do
@@ -144,7 +144,7 @@ session_list() {
 session_pick() {
   # Prompts the user to pick a session. Echoes the chosen filepath, or "" for new.
   local sessions_dir
-  sessions_dir="$(_supercli_sessions_dir)"
+  sessions_dir="$(_super_sessions_dir)"
 
   local files=()
   while IFS= read -r f; do
@@ -156,7 +156,7 @@ session_pick() {
   fi
 
   local active
-  active="$(_supercli_session_file)"
+  active="$(_super_session_file)"
 
   echo ""
   echo -e "\033[1mSaved sessions  (newest first)\033[0m"
@@ -202,7 +202,7 @@ session_append_turn() {
   local cli="$1" role="$2" content="$3"
   local file ts icon
 
-  file="$(_supercli_session_file)"
+  file="$(_super_session_file)"
   if [[ -z "$file" || ! -f "$file" ]]; then
     file="$(session_new "auto")"
   fi
@@ -240,7 +240,7 @@ session_append_turn() {
 session_get_summary() {
   local n="${1:-50}"
   local file
-  file="$(_supercli_session_file)"
+  file="$(_super_session_file)"
   [[ -f "$file" ]] || { echo "No active session."; return; }
   grep -v '^---$' "$file" | tail -n "$n"
 }
@@ -248,13 +248,13 @@ session_get_summary() {
 session_inject_context() {
   local cli="$1"
   local root
-  root="$(_supercli_find_root)"
+  root="$(_super_find_root)"
   local summary
   summary="$(session_get_summary 80)"
-  local header="<!-- supercli:session-context -->"
-  local footer="<!-- /supercli:session-context -->"
+  local header="<!-- super:session-context -->"
+  local footer="<!-- /super:session-context -->"
   local session_file active_name
-  session_file="$(_supercli_session_file)"
+  session_file="$(_super_session_file)"
   active_name="$(basename "${session_file:-unknown}")"
 
   _inject_to_file() {
@@ -262,7 +262,7 @@ session_inject_context() {
     if [[ -f "$target" ]]; then
       python3 -c "
 import sys
-path,hdr,ftr = sys.argv[1],'<!-- supercli:session-context -->','<!-- /supercli:session-context -->'
+path,hdr,ftr = sys.argv[1],'<!-- super:session-context -->','<!-- /super:session-context -->'
 with open(path) as fh: lines = fh.readlines()
 out,skip = [],False
 for line in lines:
@@ -300,13 +300,13 @@ EOF
 
 session_clear_injections() {
   local root
-  root="$(_supercli_find_root)"
+  root="$(_super_find_root)"
   for f in CLAUDE.md GEMINI.md AGENTS.md; do
     local target="$root/$f"
     [[ -f "$target" ]] || continue
     python3 -c "
 import sys
-path,hdr,ftr = sys.argv[1],'<!-- supercli:session-context -->','<!-- /supercli:session-context -->'
+path,hdr,ftr = sys.argv[1],'<!-- super:session-context -->','<!-- /super:session-context -->'
 with open(path) as fh: lines = fh.readlines()
 out,skip = [],False
 for line in lines:

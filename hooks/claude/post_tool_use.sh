@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/claude/post_tool_use.sh
+# super/hooks/claude/post_tool_use.sh
 # Hook event: PostToolUse
 # Install: add to .claude/settings.json under "PostToolUse"
 # Fires: after each tool call completes

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/kimi/user_prompt.sh
+# super/hooks/kimi/user_prompt.sh
 # Kimi hook event: UserPromptSubmit
 
 set -euo pipefail

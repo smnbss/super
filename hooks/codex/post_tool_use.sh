@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/codex/post_tool_use.sh
+# super/hooks/codex/post_tool_use.sh
 # Codex hook event: PostToolUse (currently Bash only)
 
 set -euo pipefail

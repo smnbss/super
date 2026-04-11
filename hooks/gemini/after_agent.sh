@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/gemini/after_agent.sh
+# super/hooks/gemini/after_agent.sh
 # Gemini CLI hook event: AfterAgent
 # Fires: when the agent completes its turn
 

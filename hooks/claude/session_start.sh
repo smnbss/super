@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/claude/session_start.sh
+# super/hooks/claude/session_start.sh
 # Hook event: SessionStart
 # Install: add to .claude/settings.json under "SessionStart"
 

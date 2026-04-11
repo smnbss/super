@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/claude/user_prompt.sh
+# super/hooks/claude/user_prompt.sh
 # Hook event: UserPromptSubmit
 # Install: add to .claude/settings.json under "UserPromptSubmit"
 # Fires: when the user submits a prompt, before Claude processes it

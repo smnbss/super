@@ -1,23 +1,23 @@
 # Append this block to your ~/.kimi/config.toml or project config.toml
-# supercli hooks for Kimi Code CLI
+# super hooks for Kimi Code CLI
 
 [[hooks]]
 event = "SessionStart"
-command = "$SUPERCLI_HOME/hooks/kimi/session_start.sh"
+command = "$SUPER_HOME/hooks/kimi/session_start.sh"
 timeout = 5000
 
 [[hooks]]
 event = "UserPromptSubmit"
-command = "$SUPERCLI_HOME/hooks/kimi/user_prompt.sh"
+command = "$SUPER_HOME/hooks/kimi/user_prompt.sh"
 timeout = 5000
 
 [[hooks]]
 event = "PostToolUse"
 matcher = "shell|bash|run_command|write_file|edit_file|replace|web_search"
-command = "$SUPERCLI_HOME/hooks/kimi/post_tool_use.sh"
+command = "$SUPER_HOME/hooks/kimi/post_tool_use.sh"
 timeout = 5000
 
 [[hooks]]
 event = "Stop"
-command = "$SUPERCLI_HOME/hooks/kimi/stop.sh"
+command = "$SUPER_HOME/hooks/kimi/stop.sh"
 timeout = 10000

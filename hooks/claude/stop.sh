@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/claude/stop.sh
+# super/hooks/claude/stop.sh
 # Hook event: Stop
 # Install: add to .claude/settings.json under "Stop"
 # Fires: when Claude finishes responding (end of turn)

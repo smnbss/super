@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$SUPERCLI_HOME/hooks/claude/session_start.sh\"",
+            "command": "\"$SUPER_HOME/hooks/claude/session_start.sh\"",
             "timeout": 5000
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$SUPERCLI_HOME/hooks/claude/user_prompt.sh\"",
+            "command": "\"$SUPER_HOME/hooks/claude/user_prompt.sh\"",
             "timeout": 5000
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$SUPERCLI_HOME/hooks/claude/post_tool_use.sh\"",
+            "command": "\"$SUPER_HOME/hooks/claude/post_tool_use.sh\"",
             "timeout": 5000
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$SUPERCLI_HOME/hooks/claude/stop.sh\"",
+            "command": "\"$SUPER_HOME/hooks/claude/stop.sh\"",
             "timeout": 10000
           }
         ]

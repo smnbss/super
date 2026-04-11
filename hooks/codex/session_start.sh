@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/codex/session_start.sh
+# super/hooks/codex/session_start.sh
 # Codex hook event: SessionStart
 # Install: add to hooks.json under "SessionStart"
 

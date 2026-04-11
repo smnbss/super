@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/kimi/stop.sh
+# super/hooks/kimi/stop.sh
 # Kimi hook event: Stop
 
 set -euo pipefail

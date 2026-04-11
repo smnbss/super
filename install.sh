@@ -1,11 +1,11 @@
 #!/bin/bash
 # SuperCLI Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/simonebasso/supercli/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/simonebasso/super/main/install.sh | bash
 
 set -e
 
-REPO="simonebasso/supercli"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.supercli}"
+REPO="simonebasso/super"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.super}"
 VERSION="${1:-latest}"
 
 # Colors
@@ -15,15 +15,15 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 log() {
-  echo -e "${GREEN}[supercli]${NC} $1"
+  echo -e "${GREEN}[super]${NC} $1"
 }
 
 warn() {
-  echo -e "${YELLOW}[supercli]${NC} $1"
+  echo -e "${YELLOW}[super]${NC} $1"
 }
 
 error() {
-  echo -e "${RED}[supercli]${NC} $1" >&2
+  echo -e "${RED}[super]${NC} $1" >&2
   exit 1
 }
 
@@ -34,7 +34,7 @@ command -v tar >/dev/null 2>&1 || error "tar is required but not installed"
 # Check bash version (need 4+ for associative arrays)
 BASH_MAJOR=${BASH_VERSION%%.*}
 if [ "$BASH_MAJOR" -lt 4 ]; then
-  warn "macOS ships with bash 3.x. You need bash 4+ for supercli."
+  warn "macOS ships with bash 3.x. You need bash 4+ for super."
   warn "Install with: brew install bash"
   exit 1
 fi
@@ -51,16 +51,16 @@ else
   VERSION="${VERSION#v}"
 fi
 
-URL="https://github.com/$REPO/releases/download/v${VERSION}/supercli-${VERSION}.tar.gz"
+URL="https://github.com/$REPO/releases/download/v${VERSION}/super-${VERSION}.tar.gz"
 
 # Download and extract
-log "Installing supercli v$VERSION to $INSTALL_DIR..."
+log "Installing super v$VERSION to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 
 curl -fsSL "$URL" | tar -xz -C "$INSTALL_DIR" --strip-components=0
 
 # Make executable
-chmod +x "$INSTALL_DIR/supercli"
+chmod +x "$INSTALL_DIR/super"
 chmod +x "$INSTALL_DIR/hooks"/*/*.sh 2>/dev/null || true
 
 # Check if in PATH
@@ -72,7 +72,7 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     *) RC_FILE="$HOME/.profile" ;;
   esac
   
-  warn "Add supercli to your PATH by running:"
+  warn "Add super to your PATH by running:"
   echo ""
   echo "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> $RC_FILE"
   echo "  source $RC_FILE"
@@ -80,7 +80,7 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
 fi
 
 log "SuperCLI v$VERSION installed successfully!"
-log "Run 'supercli --help' to get started"
+log "Run 'super --help' to get started"
 
 # Check for CLIs
 log "Detected CLIs:"

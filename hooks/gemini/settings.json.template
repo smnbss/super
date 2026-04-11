@@ -5,9 +5,9 @@
         "matcher": "startup|resume|clear",
         "hooks": [
           {
-            "name": "supercli-session-start",
+            "name": "super-session-start",
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/gemini/session_start.sh",
+            "command": "$SUPER_HOME/hooks/gemini/session_start.sh",
             "timeout": 5000
           }
         ]
@@ -17,9 +17,9 @@
       {
         "hooks": [
           {
-            "name": "supercli-user-prompt",
+            "name": "super-user-prompt",
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/gemini/user_prompt.sh",
+            "command": "$SUPER_HOME/hooks/gemini/user_prompt.sh",
             "timeout": 5000
           }
         ]
@@ -30,9 +30,9 @@
         "matcher": "run_shell_command|write_file|replace|web_search|edit_file",
         "hooks": [
           {
-            "name": "supercli-after-tool",
+            "name": "super-after-tool",
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/gemini/after_tool.sh",
+            "command": "$SUPER_HOME/hooks/gemini/after_tool.sh",
             "timeout": 5000
           }
         ]
@@ -42,9 +42,9 @@
       {
         "hooks": [
           {
-            "name": "supercli-after-agent",
+            "name": "super-after-agent",
             "type": "command",
-            "command": "$SUPERCLI_HOME/hooks/gemini/after_agent.sh",
+            "command": "$SUPER_HOME/hooks/gemini/after_agent.sh",
             "timeout": 10000
           }
         ]

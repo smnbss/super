@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/gemini/user_prompt.sh
+# super/hooks/gemini/user_prompt.sh
 # Gemini CLI hook event: UserPromptSubmit
 # Fires: after user submits prompt, before agent planning
 

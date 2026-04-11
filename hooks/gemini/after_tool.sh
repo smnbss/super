@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# supercli/hooks/gemini/after_tool.sh
+# super/hooks/gemini/after_tool.sh
 # Gemini CLI hook event: AfterTool
 # Fires: after each tool call
 
