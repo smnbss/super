@@ -1,55 +1,31 @@
-# super
+# super 🔀
 
 A cross-CLI session bridge for **Claude Code**, **Gemini CLI**, **Codex CLI**, and **Kimi Code CLI**.
 
-Each CLI runs its hooks, writes turns to a shared `.super/session.md`, and when you switch to a different CLI the session history gets injected into its context file automatically.
+Each CLI runs its hooks, writes turns to a shared session log, and when you switch to a different CLI the session history gets injected into its context file automatically.
 
 ---
 
-## How it works
+## What's New in v1.2
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  super launch claude                                  │
-│                                                          │
-│  1. Injects .super/session.md → CLAUDE.md             │
-│  2. Launches claude                                      │
-│  3. Hooks fire on every turn:                            │
-│       UserPromptSubmit → append user msg to session.md  │
-│       PostToolUse      → append tool calls              │
-│       Stop             → append AI response             │
-└─────────────────────────────────────────────────────────┘
-         ↓ switch ↓
-┌─────────────────────────────────────────────────────────┐
-│  super launch gemini                                  │
-│                                                          │
-│  1. Injects .super/session.md → GEMINI.md             │
-│  2. Launches gemini                                      │
-│  3. Gemini sees full prior conversation in its context  │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## Requirements
-
-- **bash** 4+  (macOS ships bash 3 — use `brew install bash`)
-- **python3** in PATH (for JSON parsing in hooks)
-- **envsubst** (part of `gettext` — `brew install gettext` on macOS)
-- At least one of: `claude`, `gemini`, `codex`, `kimi`
+- **🔍 `super doctor`** — Health check for your super installation
+- **⚡ Quick shortcuts** — `super @` (active), `super !` (new), `super ?` (search)
+- **🎯 FZF integration** — Fuzzy session picker with preview (falls back gracefully)
+- **✨ Beautiful UI** — Consistent colors, icons, and progress indicators
+- **📊 Enhanced status** — Recent activity, session sizes, quick actions
+- **⚠️ Health warnings** — Alerts for large/slow sessions
 
 ---
 
 ## Installation
 
-### 1. Clone / place super
+### 1. Clone super
 
 ```bash
-git clone https://github.com/you/super ~/.super
-# or just put the super/ folder anywhere you like
+git clone https://github.com/smnbss/super ~/.super
 ```
 
-### 2. Set SUPER_HOME and add to PATH
+### 2. Add to PATH
 
 Add to your `~/.zshrc` or `~/.bashrc`:
 
@@ -58,152 +34,289 @@ export SUPER_HOME="$HOME/.super"
 export PATH="$SUPER_HOME:$PATH"
 ```
 
-### 3. Make scripts executable
-
-```bash
-chmod +x ~/.super/super
-chmod +x ~/.super/hooks/**/*.sh
-```
-
-### 4. Install hooks in your project
+### 3. Install hooks in your project
 
 ```bash
 cd ~/my-project
 super install
 ```
 
-This writes hooks into:
-- `.claude/settings.json`  (Claude Code)
-- `.gemini/settings.json`  (Gemini CLI)
-- `.codex/hooks.json`      (Codex CLI)
-- `.kimi/config.toml`      (Kimi Code CLI)
-
-If those files already exist, super merges the hooks without overwriting your existing config.
+This sets up:
+- CLI hooks in `.claude/`, `.gemini/`, `.codex/`, `.kimi/`
+- Context files: `AGENTS.md` (master), `CLAUDE.md` and `GEMINI.md` (symlinks)
+- Sessions folder: `.super/sessions/`
 
 ---
 
-## Usage
+## Quick Start
 
 ```bash
-# Start with Claude Code
-super launch claude
+# Launch with any CLI
+super claude              # New session with Claude
+super gemini              # New session with Gemini
+super codex               # New session with Codex
+super kimi                # New session with Kimi
 
-# or shorthand
-super claude
+# Resume work
+super resume              # Fuzzy picker for sessions
+super @                   # Jump to active session (fast!)
 
-# When you want to switch to Gemini
-super switch claude gemini
+# Switch CLIs mid-stream
+super switch gemini       # Continue in Gemini
+super switch claude       # Back to Claude
 
-# Check what's been logged
-super log
+# Session management
+super status              # See active session + recent activity
+super log                 # View full session
+super log 5               # Last 5 turns only
+super save "checkpoint"   # Save with note
+super catchup             # Quick summary
 
-# Last 5 turns only
-super log 5
-
-# See installed CLIs and session info
-super status
+# Health & maintenance
+super doctor              # Check installation health
+super cleanup 30          # Remove sessions older than 30 days
 ```
 
 ---
 
-## Session file format
+## Quick Shortcuts
 
-`.super/session.md` is plain Markdown, readable by any AI:
+| Shortcut | Action | When to use |
+|----------|--------|-------------|
+| `super @` | Jump to active session | "I want to continue where I left off" |
+| `super !` | New session, pick CLI | "Start something new" |
+| `super ?` | Fuzzy search sessions | "Find that session from last week" |
 
-```markdown
-# Super Session
-
-**Project:** my-project
-**Started:** 2026-04-11 14:32:00
+These are designed for muscle memory — no menus, just flow.
 
 ---
 
-## 🟠 `[Claude Code 14:32:15]` 👤 User
+## FZF Integration
+
+If you have [fzf](https://github.com/junegunn/fzf) installed, super uses it automatically:
+
+```bash
+# Session picker with preview
+super resume
+# Shows: fuzzy search + preview of last 3 turns
+
+# CLI picker
+super !
+# Shows: interactive CLI selector
+```
+
+**Install fzf:**
+```bash
+brew install fzf
+```
+
+Without fzf, super falls back to clean text menus.
+
+---
+
+## The Flow
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  $ super claude                                         │
+│  🔀  Starting session: auth-refactor.md                 │
+│  🟠  Claude Code                                        │
+│      24 turns                                           │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          │ work, work, work
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│  $ super switch gemini                                  │
+│  🔀  Crossing the bridge to Gemini CLI...               │
+│      Session: auth-refactor.md                          │
+│  🔵  Gemini CLI                                         │
+│                                                          │
+│  [Gemini sees full conversation history in GEMINI.md]   │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Commands Reference
+
+### Core Commands
+
+| Command | Description |
+|---------|-------------|
+| `super` | Main menu (shows active session if exists) |
+| `super <cli>` | Launch CLI directly (claude, gemini, codex, kimi) |
+| `super resume [file]` | Resume session (with fzf picker if no file) |
+| `super switch <cli>` | Continue active session in different CLI |
+
+### Session Management
+
+| Command | Description |
+|---------|-------------|
+| `super status` | Show CLIs, sessions, recent activity |
+| `super sessions` | List all sessions |
+| `super log [N\|file]` | View session (last N turns or specific file) |
+| `super save [note]` | Save checkpoint to session |
+| `super catchup` | Quick summary of active session |
+
+### Shortcuts
+
+| Command | Description |
+|---------|-------------|
+| `super @` | Jump to active session |
+| `super !` | New session, pick CLI |
+| `super ?` | Fuzzy search all sessions |
+
+### Maintenance
+
+| Command | Description |
+|---------|-------------|
+| `super doctor` | Health check: hooks, symlinks, sessions |
+| `super cleanup [days]` | Remove old sessions (default: 7 days) |
+| `super clean` | Remove context injections |
+| `super uninstall` | Remove all super hooks |
+
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `super install [target]` | Install hooks (all or specific CLI) |
+| `super config [show\|init\|edit]` | Manage super.config.yaml |
+| `super validate` | Run project validators |
+
+---
+
+## Session File Format
+
+`.super/sessions/2026-04-11_auth-refactor.md`:
+
+```markdown
+# Super Session: auth-refactor
+
+**Project:** my-project
+**Started:** 2026-04-11 14:32:00
+**Directory:** ~/Projects/my-project
+**File:** 2026-04-11_143200_auth-refactor.md
+
+---
+
+## 🟠 `[14:32:15]` 👤 User
 
 How do I refactor this auth module?
 
-### 🟠 `[Claude Code 14:32:18]` 🤖 Assistant
+### 🟠 `[14:32:18]` 🤖 Assistant
 
 I'd suggest splitting it into three concerns...
 
-> **Tool** `Claude Code` `[14:32:19]`
+> **Tool** `[14:32:19]`
 > ```
 > Bash: grep -r "authMiddleware" src/
 > ```
 
 ---
 
-## 🔵 `[Gemini CLI 14:45:02]` 👤 User
+## 💾 Manual Save `[2026-04-11 15:00:00]`
 
-Continue the auth refactor, focus on the token validation part
-```
+> **Note:** checkpoint before major changes
 
 ---
 
-## Hooks coverage per CLI
+## 🔵 `[14:45:02]` 👤 User
+
+Continue the auth refactor, focus on token validation
+```
+
+Plain Markdown. Readable by any AI. Trackable in git.
+
+---
+
+## Context Injection
+
+When you run `super <cli>`, the last ~80 lines of your session are injected:
+
+```markdown
+<!-- super:session-context -->
+## 📋 SuperCLI Cross-Session Context
+
+Session: `2026-04-11_auth-refactor.md`
+
+You are continuing a conversation that may have started in a different AI coding
+assistant. The history below is the shared session log. Pick up where things
+left off.
+
+[...session history...]
+<!-- /super:session-context -->
+```
+
+The injection block is automatically replaced on each launch.
+
+---
+
+## Hooks Coverage
 
 | Event | Claude Code | Gemini CLI | Codex CLI | Kimi Code |
 |---|:---:|:---:|:---:|:---:|
 | Session start | ✅ | ✅ | ✅ | ✅ |
 | User prompt | ✅ | ✅ | ✅ | ✅ |
-| AI response | ✅ Stop hook | ✅ AfterAgent | ⚠️ partial | ✅ Stop hook |
+| AI response | ✅ Stop | ✅ AfterAgent | ⚠️ partial | ✅ Stop |
 | Shell commands | ✅ | ✅ | ✅ Bash only | ✅ |
 | File writes | ✅ | ✅ | ❌ not yet | ✅ |
 | Session end | ✅ | ✅ | ❌ | ✅ |
 
-**Codex CLI limitation:** As of April 2026, `PreToolUse`/`PostToolUse` only fire for Bash calls, not file writes via `apply_patch`. This is a known upstream issue (#16732). The session will still capture prompts, AI responses, and shell commands.
+---
+
+## Design Philosophy
+
+super is designed for **flow**:
+
+1. **Minimal friction** — `super @` continues your work
+2. **No lock-in** — Plain Markdown sessions, standard hooks
+3. **Invisible when not needed** — Hooks log silently
+4. **Helpful when needed** — Doctor, status, catchup
 
 ---
 
-## Context injection
+## Troubleshooting
 
-When you run `super launch <cli>`, the last ~80 lines of `.super/session.md` are injected into the CLI's context file between special markers:
+### super doctor
 
-```
-<!-- super:session-context -->
-## 📋 SuperCLI Cross-Session Context
-...history...
-<!-- /super:session-context -->
-```
+Run `super doctor` to check:
+- ✓ CLI hooks installed
+- ✓ Context files symlinked correctly
+- ✓ Sessions healthy (no huge files)
+- ⚠️ Old sessions that need cleanup
 
-On the next launch, the old block is replaced with a fresh one. Run `super clean` to remove injection blocks without uninstalling hooks.
+### Large sessions
 
----
-
-## Global install for all projects
-
-If you want hooks active in every new project automatically, install at user scope too:
+If a session grows >1MB, context injection slows down. super warns you:
 
 ```bash
-# Claude Code - user scope
-super install claude  # then copy .claude/settings.json to ~/.claude/settings.json
-
-# Gemini CLI - user scope
-super install gemini  # then copy .gemini/settings.json to ~/.gemini/settings.json
+⚠️  auth-refactor.md is 2.3MB — context injection may be slow
 ```
 
----
+Start a new session or archive old turns.
 
-## Uninstall
+### No fzf?
+
+super works fine without it. Install for fuzzy finding:
 
 ```bash
-# Remove from one CLI
-super uninstall claude
-
-# Remove from all
-super uninstall
-
-# The session.md file is kept - you don't lose history
+brew install fzf
 ```
 
 ---
 
 ## Extending
 
-All hook scripts are plain bash in `hooks/<cli>/`. To add a new event:
+All hook scripts are plain bash in `hooks/<cli>/`. To add events:
 
-1. Write `hooks/<cli>/your_event.sh` — read JSON from stdin, call `session_append_turn`
-2. Add the event to the corresponding config template
+1. Write `hooks/<cli>/your_event.sh` — read JSON from stdin
+2. Add to config template
 3. Re-run `super install`
 
-The `lib/session.sh` library is the only shared dependency.
+---
+
+## License
+
+MIT — use it, fork it, make it better.

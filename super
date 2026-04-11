@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║  super v1.1  — cross-CLI session bridge                      ║
-# ║  Claude Code · Gemini CLI · Codex CLI · Kimi Code CLI           ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  super v1.2 — cross-CLI session bridge                                       ║
+# ║  Claude Code · Gemini CLI · Codex CLI · Kimi Code CLI                       ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # Handle --version before anything else (works even on bash 3)
 if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
@@ -23,61 +23,198 @@ SUPER_HOME="${SUPER_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export SUPER_HOME
 SUPER_VERSION="$(cat "$SUPER_HOME/VERSION" 2>/dev/null || echo "unknown")"
 
+# Source libraries
 source "$SUPER_HOME/lib/session.sh"
 source "$SUPER_HOME/lib/config.sh"
+source "$SUPER_HOME/lib/ui.sh"
+source "$SUPER_HOME/lib/fzf.sh"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+# Legacy color compatibility (deprecated, use ui_* functions)
+RED="\033[0;31m"; GREEN="\033[0;32m"; YELLOW="\033[1;33m"
+CYAN="\033[0;36m"; BOLD="\033[1m"; DIM="\033[2m"; RESET="\033[0m"
 
 declare -A CLI_CMD=(   [claude]="claude" [gemini]="gemini" [codex]="codex" [kimi]="kimi" )
 declare -A CLI_ICON=(  [claude]="🟠"     [gemini]="🔵"     [codex]="🟢"    [kimi]="🟡"  )
 declare -A CLI_LABEL=( [claude]="Claude Code" [gemini]="Gemini CLI" [codex]="Codex CLI" [kimi]="Kimi Code CLI" )
 declare -A CLI_CTX=(   [claude]="CLAUDE.md"   [gemini]="GEMINI.md"  [codex]="AGENTS.md" [kimi]="AGENTS.md"    )
 
-die()  { echo -e "${RED}error:${RESET} $*" >&2; exit 1; }
-info() { echo -e "${CYAN}super:${RESET} $*"; }
-ok()   { echo -e "${GREEN}✓${RESET} $*"; }
-warn() { echo -e "${YELLOW}warning:${RESET} $*"; }
+# Legacy helpers (deprecated, use ui_*)
+die()  { ui_error "$*"; exit 1; }
+info() { ui_brand "$*"; }
+ok()   { ui_success "$*"; }
+warn() { ui_warn "$*"; }
+
 is_installed() { command -v "${CLI_CMD[$1]}" &>/dev/null; }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# BANNER & STATUS
+# ═══════════════════════════════════════════════════════════════════════════════
+
 print_banner() {
-  echo -e "${BOLD}"
-  echo "  ╭──────────────────────────────────────────╮"
-  echo "  │  🔀  super v${SUPER_VERSION}                   │"
-  echo "  │  Cross-CLI session bridge                │"
-  echo "  ╰──────────────────────────────────────────╯"
-  echo -e "${RESET}"
+  ui_spacer
+  ui_print "  ╭──────────────────────────────────────────╮"
+  ui_print "  │  🔀  super v${SUPER_VERSION}                   │"
+  ui_print "  │  Cross-CLI session bridge                │"
+  ui_print "  ╰──────────────────────────────────────────╯"
+  ui_spacer
 }
 
 print_status() {
-  echo ""
-  echo -e "${BOLD}CLIs:${RESET}"
+  ui_section "CLIs"
   for cli in claude gemini codex kimi; do
     local icon="${CLI_ICON[$cli]}" label="${CLI_LABEL[$cli]}"
     if is_installed "$cli"; then
-      echo -e "  $icon  ${GREEN}${label}${RESET}  ${DIM}$(command -v "${CLI_CMD[$cli]}")${RESET}"
+      ui_print "  $icon  $(_c $UI_SUCCESS)${label}${UI_RESET}  $(_c $UI_MUTED)$(command -v "${CLI_CMD[$cli]}")${UI_RESET}"
     else
-      echo -e "  $icon  ${RED}${label}${RESET}  ${DIM}(not installed)${RESET}"
+      ui_print "  $icon  $(_c $UI_ERROR)${label}${UI_RESET}  $(_c $UI_MUTED)(not installed)${UI_RESET}"
     fi
   done
-  echo ""
+  
+  ui_section "Sessions"
   local sessions_dir; sessions_dir="$(_super_sessions_dir)"
   local active; active="$(_super_session_file)"
-  echo -e "${BOLD}Sessions:${RESET}  ${DIM}$sessions_dir${RESET}"
+  
   if [[ -d "$sessions_dir" ]]; then
-    local count; count="$(ls "$sessions_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
-    echo -e "  $count session(s) on disk"
+    local total today week
+    total="$(ls "$sessions_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+    today="$(find "$sessions_dir" -name '*.md' -mtime -1 2>/dev/null | wc -l | tr -d ' ')"
+    week="$(find "$sessions_dir" -name '*.md' -mtime -7 2>/dev/null | wc -l | tr -d ' ')"
+    
+    ui_print "  📁 $total total  |  $today today  |  $week this week"
+    
     if [[ -n "$active" && -f "$active" ]]; then
-      local turns; turns="$(grep -c '^## ' "$active" 2>/dev/null || echo 0)"
-      echo -e "  ${GREEN}Active:${RESET} $(basename "$active")  ${DIM}($turns turns)${RESET}"
+      local turns size
+      turns="$(grep -c '^## ' "$active" 2>/dev/null || echo 0)"
+      size="$(stat -f %z "$active" 2>/dev/null || stat -c %s "$active" 2>/dev/null || echo 0)"
+      
+      ui_spacer
+      ui_print "  $(_c $UI_SUCCESS)${UI_ICON_ACTIVE}${UI_RESET} ${UI_BOLD}ACTIVE:${UI_RESET} $(basename "$active")"
+      ui_print "     $turns turns  |  $(ui_human_size $size)  |  Last: $(stat -f %Sm -t '%H:%M' "$active" 2>/dev/null || stat -c %y "$active" 2>/dev/null | cut -d' ' -f2 | cut -d':' -f1,2)"
+      
+      # Recent activity preview (last 3 turns)
+      ui_spacer
+      ui_print "  $(_c $UI_MUTED)Recent activity:${UI_RESET}"
+      grep -E '^## .*User|^### .*Assistant' "$active" | tail -6 | while read -r line; do
+        if [[ "$line" == *"User"* ]]; then
+          local content
+          content="$(echo "$line" | sed 's/.*User//' | head -c 50)"
+          [[ ${#content} -eq 50 ]] && content="${content}..."
+          ui_print "    $(_c $UI_MUTED)•${UI_RESET} 👤 $content"
+        fi
+      done
+      
+      ui_spacer
+      ui_muted "  Quick actions:"
+      ui_muted "    super resume    # Continue this session"
+      ui_muted "    super switch    # Continue in different CLI"
+      ui_muted "    super log 5     # Last 5 turns"
     fi
   else
-    echo -e "  ${YELLOW}No sessions yet.${RESET} Run: ${BOLD}super install${RESET}"
+    ui_warn "No sessions yet."
+    ui_muted "  Run: super install"
   fi
-  echo ""
+  
+  ui_spacer
+  fzf_status
+  ui_spacer
 }
 
-# ─── Hooks installation ───────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCTOR COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_doctor() {
+  print_banner
+  ui_section "Health Check"
+  
+  local issues=0
+  local root; root="$(_super_find_root)"
+  
+  # Check CLI hooks
+  ui_print "$(_c $UI_MUTED)Checking CLI hooks...${UI_RESET}"
+  for cli in claude gemini codex kimi; do
+    local config_file=""
+    local hook_type=""
+    case "$cli" in
+      claude) config_file="$root/.claude/settings.json"; hook_type="command" ;;
+      gemini) config_file="$root/.gemini/settings.json"; hook_type="name" ;;
+      codex)  config_file="$root/.codex/hooks.json";     hook_type="command" ;;
+      kimi)   config_file="$root/.kimi/config.toml";     ;;
+    esac
+    
+    if [[ -f "$config_file" ]]; then
+      if grep -q "super" "$config_file" 2>/dev/null; then
+        ui_success "${CLI_ICON[$cli]} ${CLI_LABEL[$cli]} hooks installed"
+      else
+        ui_warn "${CLI_ICON[$cli]} ${CLI_LABEL[$cli]} hooks not found"
+        ui_muted "      Run: super install $cli"
+        ((issues++))
+      fi
+    else
+      ui_muted "  ${CLI_ICON[$cli]} ${CLI_LABEL[$cli]} — no config file"
+    fi
+  done
+  
+  # Check context files
+  ui_spacer
+  ui_print "$(_c $UI_MUTED)Checking context files...${UI_RESET}"
+  
+  if [[ -L "$root/CLAUDE.md" && -L "$root/GEMINI.md" && -f "$root/AGENTS.md" ]]; then
+    ui_success "Context files correctly symlinked (AGENTS.md master)"
+  elif [[ -f "$root/CLAUDE.md" && ! -L "$root/CLAUDE.md" ]]; then
+    ui_warn "CLAUDE.md is a regular file (not symlinked)"
+    ui_muted "      Run: super install to fix"
+    ((issues++))
+  else
+    ui_warn "Context files not set up"
+    ui_muted "      Run: super install"
+    ((issues++))
+  fi
+  
+  # Check session health
+  ui_spacer
+  ui_print "$(_c $UI_MUTED)Checking sessions...${UI_RESET}"
+  
+  local sessions_dir; sessions_dir="$(_super_sessions_dir)"
+  if [[ -d "$sessions_dir" ]]; then
+    local count
+    count="$(ls "$sessions_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+    ui_success "$count session(s) found"
+    
+    # Check for old sessions
+    local old
+    old="$(find "$sessions_dir" -name '*.md' -mtime +30 2>/dev/null | wc -l | tr -d ' ')"
+    if ((old > 0)); then
+      ui_warn "$old session(s) older than 30 days"
+      ui_muted "      Run: super cleanup 30"
+    fi
+    
+    # Check for large sessions
+    local large
+    large="$(find "$sessions_dir" -name '*.md' -size +1M 2>/dev/null)"
+    if [[ -n "$large" ]]; then
+      ui_warn "Large sessions detected (slow context injection):"
+      echo "$large" | while read -r f; do
+        ui_muted "      $(basename "$f"): $(du -h "$f" 2>/dev/null | cut -f1)"
+      done
+    fi
+  else
+    ui_muted "  No sessions directory"
+  fi
+  
+  # Summary
+  ui_spacer
+  ui_rule
+  if [[ $issues -eq 0 ]]; then
+    ui_success "All checks passed — super is healthy!"
+  else
+    ui_warn "Found $issues issue(s) to address"
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HOOKS INSTALLATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
 _merge_json_hooks() {
   local file="$1" new_json="$2" id_field="$3"
@@ -90,19 +227,14 @@ if "hooks" not in existing: existing["hooks"] = {}
 
 for event, new_defs in new_hooks.items():
     if event not in existing["hooks"]:
-        # Event doesn't exist, add all
         existing["hooks"][event] = new_defs
     else:
-        # Event exists, check each new hook
         existing_hooks = existing["hooks"][event]
         for new_def in new_defs:
-            # Get command identifiers from new hook
             new_commands = [h.get(idf, "") for h in new_def.get("hooks", [])]
-            # Check if any of these commands already exist
             already_present = False
             for existing_def in existing_hooks:
                 existing_commands = [h.get(idf, "") for h in existing_def.get("hooks", [])]
-                # Check overlap
                 if any(nc in existing_commands for nc in new_commands if nc):
                     already_present = True
                     break
@@ -116,22 +248,22 @@ PYEOF
 install_hooks_claude() {
   local root; root="$(_super_find_root)"
   local dir="$root/.claude"; mkdir -p "$dir"
-  local settings="$dir/settings.json"
+  local sf="$dir/settings.json"
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
     < "$SUPER_HOME/hooks/claude/settings.json.template")"
-  if [[ -f "$settings" ]]; then _merge_json_hooks "$settings" "$expanded" "command"; ok "Updated $settings"
-  else echo "$expanded" > "$settings"; ok "Created $settings"; fi
+  if [[ -f "$sf" ]]; then _merge_json_hooks "$sf" "$expanded" "command"; ui_success "Updated $sf"
+  else echo "$expanded" > "$sf"; ui_success "Created $sf"; fi
   chmod +x "$SUPER_HOME"/hooks/claude/*.sh
 }
 
 install_hooks_gemini() {
   local root; root="$(_super_find_root)"
   local dir="$root/.gemini"; mkdir -p "$dir"
-  local settings="$dir/settings.json"
+  local gf="$dir/settings.json"
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
     < "$SUPER_HOME/hooks/gemini/settings.json.template")"
-  if [[ -f "$settings" ]]; then _merge_json_hooks "$settings" "$expanded" "name"; ok "Updated $settings"
-  else echo "$expanded" > "$settings"; ok "Created $settings"; fi
+  if [[ -f "$gf" ]]; then _merge_json_hooks "$gf" "$expanded" "name"; ui_success "Updated $gf"
+  else echo "$expanded" > "$gf"; ui_success "Created $gf"; fi
   chmod +x "$SUPER_HOME"/hooks/gemini/*.sh
 }
 
@@ -141,8 +273,8 @@ install_hooks_codex() {
   local hf="$dir/hooks.json"
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
     < "$SUPER_HOME/hooks/codex/hooks.json.template")"
-  if [[ -f "$hf" ]]; then _merge_json_hooks "$hf" "$expanded" "command"; ok "Updated $hf"
-  else echo "$expanded" > "$hf"; ok "Created $hf"; fi
+  if [[ -f "$hf" ]]; then _merge_json_hooks "$hf" "$expanded" "command"; ui_success "Updated $hf"
+  else echo "$expanded" > "$hf"; ui_success "Created $hf"; fi
   chmod +x "$SUPER_HOME"/hooks/codex/*.sh
 }
 
@@ -152,77 +284,69 @@ install_hooks_kimi() {
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
     < "$SUPER_HOME/hooks/kimi/config.toml.template")"
   if [[ -f "$cfg" ]]; then
-    # Check for specific super hook commands to avoid duplicates
     local already_present=0
     while IFS= read -r cmd; do
       if grep -qF "$cmd" "$cfg" 2>/dev/null; then
-        already_present=1
-        break
+        already_present=1; break
       fi
     done < <(echo "$expanded" | grep -E '^\s*command\s*=' | sed 's/.*=\s*["'\''"]//;s/["'\''"]$//')
     
     if [[ "$already_present" -eq 1 ]]; then
-      warn "super hooks already in $cfg — skipping"
+      ui_warn "super hooks already in $cfg — skipping"
     else
       printf '\n# super hooks\n%s\n' "$expanded" >> "$cfg"
-      ok "Updated $cfg"
+      ui_success "Updated $cfg"
     fi
   else
     printf '# Kimi config\n# super hooks\n%s\n' "$expanded" > "$cfg"
-    ok "Created $cfg"
+    ui_success "Created $cfg"
   fi
   chmod +x "$SUPER_HOME"/hooks/kimi/*.sh
 }
 
-# ─── Context files (CLAUDE.md, GEMINI.md, AGENTS.md) ──────────────────────────
-
 _setup_context_files() {
-  # Sets up symlinks for context files so all CLIs share the same AGENTS.md
   local root; root="$(_super_find_root)"
   local claude_md="$root/CLAUDE.md"
   local gemini_md="$root/GEMINI.md"
   local agents_md="$root/AGENTS.md"
 
-  # Check which files exist (not symlinks - we want real files)
   local existing=""
   [[ -f "$claude_md" && ! -L "$claude_md" ]] && existing="$claude_md"
   [[ -f "$gemini_md" && ! -L "$gemini_md" ]] && existing="$gemini_md"
   [[ -f "$agents_md" && ! -L "$agents_md" ]] && existing="$agents_md"
 
   if [[ -n "$existing" ]]; then
-    # One exists - make others symlinks to it
     local target="$existing"
     local target_name; target_name="$(basename "$target")"
-    info "Found existing $target_name — symlinking other context files"
+    ui_info "Found existing $target_name — symlinking other context files"
 
-    # Remove existing symlinks/files and create new symlinks
     if [[ "$target" != "$claude_md" ]]; then
       [[ -e "$claude_md" || -L "$claude_md" ]] && rm "$claude_md"
-      ln -s "$target_name" "$claude_md" && ok "CLAUDE.md → $target_name"
+      ln -s "$target_name" "$claude_md" && ui_success "CLAUDE.md → $target_name"
     fi
     if [[ "$target" != "$gemini_md" ]]; then
       [[ -e "$gemini_md" || -L "$gemini_md" ]] && rm "$gemini_md"
-      ln -s "$target_name" "$gemini_md" && ok "GEMINI.md → $target_name"
+      ln -s "$target_name" "$gemini_md" && ui_success "GEMINI.md → $target_name"
     fi
     if [[ "$target" != "$agents_md" ]]; then
       [[ -e "$agents_md" || -L "$agents_md" ]] && rm "$agents_md"
-      ln -s "$target_name" "$agents_md" && ok "AGENTS.md → $target_name"
+      ln -s "$target_name" "$agents_md" && ui_success "AGENTS.md → $target_name"
     fi
   else
-    # None exist - create AGENTS.md as master, symlink others to it
-    info "Creating context files (AGENTS.md as master)"
+    ui_info "Creating context files (AGENTS.md as master)"
     echo "# Agents Configuration" > "$agents_md"
-    ok "Created AGENTS.md"
+    ui_success "Created AGENTS.md"
 
-    ln -s "AGENTS.md" "$claude_md" && ok "CLAUDE.md → AGENTS.md"
-    ln -s "AGENTS.md" "$gemini_md" && ok "GEMINI.md → AGENTS.md"
+    ln -s "AGENTS.md" "$claude_md" && ui_success "CLAUDE.md → AGENTS.md"
+    ln -s "AGENTS.md" "$gemini_md" && ui_success "GEMINI.md → AGENTS.md"
   fi
 }
 
 cmd_install() {
   local target="${1:-all}"
-  info "Installing hooks (target: $target)"
-  echo ""
+  ui_brand "Installing hooks (target: $target)"
+  ui_spacer
+  
   case "$target" in
     all)    install_hooks_claude; install_hooks_gemini
             install_hooks_codex;  install_hooks_kimi ;;
@@ -232,14 +356,32 @@ cmd_install() {
     kimi)   install_hooks_kimi   ;;
     *) die "Unknown CLI: $target. Use: all|claude|gemini|codex|kimi" ;;
   esac
+  
   mkdir -p "$(_super_sessions_dir)"
   _setup_context_files
-  echo ""
-  ok "Sessions folder ready: $(_super_sessions_dir)"
-  info "Run ${BOLD}super launch <cli>${RESET} to start your first session"
+  
+  ui_spacer
+  ui_success "Sessions folder ready: $(_super_sessions_dir)"
+  ui_muted "Run $(ui_bold "super launch <cli>") to start your first session"
+  
+  # First-time help
+  if [[ ! -d "$(_super_sessions_dir)" ]] || [[ -z "$(ls -A "$(_super_sessions_dir)"/*.md 2>/dev/null)" ]]; then
+    ui_spacer
+    ui_box \
+      "What super does:" \
+      "" \
+      "1. Start: super claude" \
+      "2. Work — super logs silently" \
+      "3. Switch: super switch gemini" \
+      "4. Continue seamlessly" \
+      "" \
+      "Your conversation follows you."
+  fi
 }
 
-# ─── Launch ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAUNCH COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_launch() {
   local cli="${1:-}"
@@ -270,175 +412,204 @@ cmd_launch() {
     [[ -n "$max_age" ]] && session_cleanup_old "$max_age" &>/dev/null || true
   fi
 
+  # Check session size before launch
   local session_file
-
+  
   if [[ -n "$resume_file" ]]; then
     [[ -f "$resume_file" ]] || resume_file="$(_super_sessions_dir)/$resume_file"
     session_file="$(session_resume "$resume_file")"
   elif [[ "$do_resume" -eq 1 ]]; then
-    local picked; picked="$(session_pick)"
-    if [[ "$picked" == "QUIT" ]]; then info "Cancelled."; return
-    elif [[ -n "$picked" ]]; then session_file="$(session_resume "$picked")"
-    else session_file="$(session_new "${title:-untitled}")"
+    local picked; picked="$(fzf_pick_session)"
+    if [[ "$picked" == "QUIT" ]]; then ui_info "Cancelled."; return
+    elif [[ "$picked" == "NEW" || -z "$picked" ]]; then session_file="$(session_new "${title:-untitled}")"
+    else session_file="$(session_resume "$picked")"
     fi
   else
-    # Default: new session every time
     session_file="$(session_new "${title:-untitled}")"
+  fi
+  
+  # Warn about large sessions
+  local size; size="$(stat -f %z "$session_file" 2>/dev/null || stat -c %s "$session_file" 2>/dev/null || echo 0)"
+  if (( size > 1048576 )); then
+    ui_warn "Large session ($(ui_human_size $size)) — context injection may be slow"
   fi
 
   export SUPER_SESSION_FILE="$session_file"
   session_inject_context "$cli"
 
-  # Run catchup if resuming an existing session
+  # Run catchup if resuming
   if [[ "$do_resume" -eq 1 && -n "$session_file" ]]; then
-    # Pass session file explicitly to avoid race condition with active pointer
     SUPER_SESSION_FILE="$session_file" cmd_catchup
   fi
 
-  echo ""
-  echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  echo -e "  ${CLI_ICON[$cli]}  ${BOLD}${CLI_LABEL[$cli]}${RESET}"
-  echo -e "  📄  $(basename "$session_file")"
-  echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  echo ""
+  ui_spacer
+  ui_rule 60
+  ui_print "  ${CLI_ICON[$cli]}  $(ui_bold "${CLI_LABEL[$cli]}")"
+  ui_print "  📄  $(basename "$session_file")"
+  ui_rule 60
+  ui_spacer
 
-  exec "${CLI_CMD[$cli]}" "${passthrough[@]+"${passthrough[@]}"}"
+  exec "${CLI_CMD[$cli]}" "${passthrough[@]:-}"
 }
 
-# ─── Resume ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESUME COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_resume() {
-  local resume_file="${1:-}"
-  local session_file
-
-  if [[ -n "$resume_file" ]]; then
-    [[ -f "$resume_file" ]] || resume_file="$(_super_sessions_dir)/$resume_file"
-    session_file="$(session_resume "$resume_file")"
+  local input="${1:-}"
+  
+  if [[ -n "$input" ]]; then
+    local session_file
+    [[ -f "$input" ]] || input="$(_super_sessions_dir)/$input"
+    [[ -f "$input" ]] || die "Session not found: $1"
+    session_file="$input"
+    
+    ui_msg_resuming "$(basename "$session_file")"
+    echo "$session_file" > "$(_super_active_ptr)"
+    
+    # Pick CLI to resume in
+    ui_spacer
+    ui_print "$(ui_bold "Which CLI would you like to resume in?")"
+    ui_spacer
+    
+    local chosen; chosen="$(fzf_pick_cli)"
+    [[ "$chosen" == "QUIT" ]] && { ui_info "Cancelled."; return; }
+    [[ -z "$chosen" ]] && { ui_info "No CLI selected."; return; }
+    
+    is_installed "$chosen" || die "${CLI_LABEL[$chosen]} is not installed"
+    
+    cmd_launch "$chosen" --resume "$session_file"
   else
-    local picked; picked="$(session_pick)"
-    [[ "$picked" == "QUIT" || -z "$picked" ]] && { info "Cancelled."; return; }
-    session_file="$(session_resume "$picked")"
-  fi
-
-  echo ""
-  info "Resumed: $(basename "$session_file")"
-  _pick_cli_for_session
-}
-
-_pick_cli_for_session() {
-  echo ""
-  echo -e "${BOLD}Launch with which CLI?${RESET}"
-  echo ""
-  local options=() i=1
-  for cli in claude gemini codex kimi; do
-    if is_installed "$cli"; then
-      options+=("$cli")
-      echo -e "  ${BOLD}[$i]${RESET}  ${CLI_ICON[$cli]}  ${CLI_LABEL[$cli]}"
-      ((i++))
-    fi
-  done
-  echo ""
-  read -rp "  Choice (or q): " choice
-  [[ "$choice" == "q" || -z "$choice" ]] && { info "Bye!"; exit 0; }
-
-  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
-    local chosen="${options[$((choice-1))]}"
-    local session_file; session_file="$(_super_session_file)"
-    session_inject_context "$chosen"
-    echo ""
-    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "  ${CLI_ICON[$chosen]}  ${BOLD}${CLI_LABEL[$chosen]}${RESET}"
-    echo -e "  📄  $(basename "$session_file")"
-    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo ""
-    exec "${CLI_CMD[$chosen]}"
-  else
-    die "Invalid choice"
+    # Show picker
+    local picked; picked="$(fzf_pick_session)"
+    [[ "$picked" == "QUIT" ]] && { ui_info "Cancelled."; return; }
+    [[ -z "$picked" ]] && { cmd_menu; return; }
+    [[ "$picked" == "NEW" ]] && { cmd_menu; return; }
+    
+    cmd_resume "$picked"
   fi
 }
 
-# ─── Sessions list ────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# SESSIONS COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_sessions() {
   local sessions_dir; sessions_dir="$(_super_sessions_dir)"
+  local active; active="$(_super_session_file)"
+  
   if [[ ! -d "$sessions_dir" ]] || [[ -z "$(ls "$sessions_dir"/*.md 2>/dev/null)" ]]; then
-    info "No sessions yet. Run: super install && super launch <cli>"
+    ui_warn "No sessions found."
+    ui_muted "Run: super launch <cli> to create one"
     return
   fi
-
-  local active; active="$(_super_session_file)"
-  echo ""
-  echo -e "${BOLD}Sessions in $sessions_dir${RESET}"
-  echo ""
-  printf "  ${BOLD}%-4s  %-42s  %-20s  %s${RESET}\n" "#" "File" "Started" "Turns"
-  echo "  ───────────────────────────────────────────────────────────────────────"
-
-  while IFS=$'\t' read -r idx fname started turns marker; do
-    local col="$RESET"
-    [[ -n "${marker:-}" ]] && col="$GREEN"
-    printf "  ${col}%-4s  %-42s  %-20s  %s%s${RESET}\n" \
-      "$idx" "$fname" "$started" "$turns" "${marker:-}"
-  done < <(session_list)
-  echo ""
+  
+  ui_section "Sessions"
+  
+  local i=1
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    local title started turns marker is_active="false"
+    title="$(grep '^# Super Session:' "$f" | sed 's/# Super Session: //' | head -1)"
+    [[ -z "$title" ]] && title="$(basename "$f" .md)"
+    started="$(grep '^\*\*Started:\*\*' "$f" | sed 's/\*\*Started:\*\* //' | head -1)"
+    turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
+    [[ "$f" == "$active" ]] && is_active="true"
+    
+    # Extract CLI from session
+    local cli="unknown"
+    local first_turn; first_turn="$(grep -m1 '^## ' "$f" 2>/dev/null)"
+    [[ "$first_turn" == *"🟠"* ]] && cli="claude"
+    [[ "$first_turn" == *"🔵"* ]] && cli="gemini"
+    [[ "$first_turn" == *"🟢"* ]] && cli="codex"
+    [[ "$first_turn" == *"🟡"* ]] && cli="kimi"
+    
+    ui_session_line "$i" "$title" "$started" "$turns" "$cli" "$is_active"
+    ((i++))
+  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
+  
+  ui_spacer
+  ui_muted "Run 'super resume <number>' to resume a session"
 }
 
-# ─── Log viewer ───────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOG COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_log() {
   local arg="${1:-}"
-  local target_file
-
-  if [[ -n "$arg" && "$arg" =~ \.md$ ]]; then
-    local candidate="$(_super_sessions_dir)/$arg"
-    [[ -f "$candidate" ]] && target_file="$candidate" || target_file="$arg"
-  elif [[ -n "$arg" && "$arg" =~ ^[0-9]+$ ]]; then
-    local af; af="$(_super_session_file)"
-    [[ -f "$af" ]] || { warn "No active session."; return; }
-    echo ""; info "Last $arg turns — $(basename "$af")"; echo ""
-    grep -A 20 '^## ' "$af" | tail -n "$((arg * 20))"
-    return
+  local session_file
+  
+  if [[ -z "$arg" ]]; then
+    session_file="$(_super_session_file)"
+  elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+    # Number = last N turns of active session
+    session_file="$(_super_session_file)"
+    if [[ -n "$session_file" && -f "$session_file" ]]; then
+      ui_section "Last $arg turns"
+      grep -v '^---$' "$session_file" | tail -n "$((arg * 10))"
+      return
+    fi
   else
-    target_file="$(_super_session_file)"
+    # Filename
+    [[ -f "$arg" ]] || arg="$(_super_sessions_dir)/$arg"
+    session_file="$arg"
   fi
-
-  if [[ -z "$target_file" || ! -f "$target_file" ]]; then
-    warn "No session to show. Start one with: super launch <cli>"
-    return
-  fi
-
-  if command -v bat &>/dev/null; then bat --language=markdown "$target_file"
-  elif command -v less &>/dev/null; then less "$target_file"
-  else cat "$target_file"; fi
+  
+  [[ -f "$session_file" ]] || die "Session not found: ${1:-active}"
+  
+  ui_section "Session: $(basename "$session_file")"
+  cat "$session_file"
 }
 
-# ─── Switch ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# SWITCH COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_switch() {
   local to_cli="${1:-}"
+  
   [[ -z "$to_cli" ]] && die "Usage: super switch <cli>"
   to_cli="${to_cli,,}"
   [[ -z "${CLI_CMD[$to_cli]+_}" ]] && die "Unknown CLI: $to_cli"
   is_installed "$to_cli" || die "${CLI_LABEL[$to_cli]} is not installed"
 
   local sf; sf="$(_super_session_file)"
-  [[ -z "$sf" || ! -f "$sf" ]] && { warn "No active session — creating one"; sf="$(session_new "untitled")"; }
+  [[ -z "$sf" || ! -f "$sf" ]] && { sf="$(session_new "untitled")"; }
 
-  info "Switching to ${CLI_LABEL[$to_cli]}  ($(basename "$sf"))"
+  ui_msg_switching "${CLI_LABEL[$to_cli]}"
+  ui_muted "  Session: $(basename "$sf")"
+  
   session_inject_context "$to_cli"
-  echo ""
-  echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  echo -e "  ${CLI_ICON[$to_cli]}  ${BOLD}${CLI_LABEL[$to_cli]}${RESET}"
-  echo -e "  📄  $(basename "$sf")"
-  echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  echo ""
+  
+  ui_spacer
+  ui_rule 60
+  ui_print "  ${CLI_ICON[$to_cli]}  $(ui_bold "${CLI_LABEL[$to_cli]}")"
+  ui_print "  📄  $(basename "$sf")"
+  ui_rule 60
+  ui_spacer
+
   exec "${CLI_CMD[$to_cli]}"
 }
 
-cmd_clean() { info "Removing context injections..."; session_clear_injections; ok "Done"; }
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLEAN COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_clean() {
+  ui_info "Removing context injections..."
+  session_clear_injections
+  ui_success "Done"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UNINSTALL COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_uninstall() {
   local root; root="$(_super_find_root)"
-  info "Removing super hooks..."
+  ui_brand "Removing super hooks..."
 
   _strip_json_hooks() {
     local f="$1" idf="$2"
@@ -456,7 +627,7 @@ if "hooks" in data:
         if not data["hooks"][ev]: del data["hooks"][ev]
 with open(path,"w") as fh: json.dump(data,fh,indent=2); fh.write("\n")
 PYEOF
-    ok "Cleaned $f"
+    ui_success "Cleaned $f"
   }
 
   _strip_json_hooks "$root/.claude/settings.json" "command"
@@ -471,241 +642,175 @@ with open(sys.argv[1]) as f: c = f.read()
 c = re.sub(r'\n# super hooks\n.*?(?=\n\[|\Z)', '', c, flags=re.DOTALL)
 with open(sys.argv[1],"w") as f: f.write(c)
 PYEOF
-    ok "Cleaned $kf"
+    ui_success "Cleaned $kf"
   fi
 
   session_clear_injections
-  echo ""; info "Hooks removed. Sessions preserved at $(_super_sessions_dir)"
+  ui_spacer
+  ui_info "Hooks removed. Sessions preserved at $(_super_sessions_dir)"
 }
 
-# ─── Menu ─────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# MENU COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_menu() {
-  print_status
   local sessions_dir; sessions_dir="$(_super_sessions_dir)"
   local has_sessions=0
-  [[ -d "$sessions_dir" ]] && [[ -n "$(ls "$sessions_dir"/*.md 2>/dev/null)" ]] \
-    && has_sessions=1
-
-  echo -e "${BOLD}What would you like to do?${RESET}"
-  echo ""
-  echo -e "  ${BOLD}[1]${RESET}  🆕  Start a new session"
-  if [[ "$has_sessions" -eq 1 ]]; then
-    echo -e "  ${BOLD}[2]${RESET}  ↩️   Resume a previous session"
+  [[ -d "$sessions_dir" ]] && [[ -n "$(ls "$sessions_dir"/*.md 2>/dev/null)" ]] && has_sessions=1
+  
+  local active; active="$(_super_session_file)"
+  
+  # If there's an active session, offer quick continuation
+  if [[ -n "$active" && -f "$active" && "$has_sessions" -eq 1 ]]; then
+    local turns; turns="$(grep -c '^## ' "$active" 2>/dev/null || echo 0)"
+    local name; name="$(basename "$active" .md)"
+    
+    ui_spacer
+    ui_print "  $(_c $UI_SUCCESS)${UI_ICON_ACTIVE}${UI_RESET} $(_c $UI_BOLD)Active:${UI_RESET} $name ($turns turns)"
+    ui_spacer
+    ui_menu_item "↵" "" "Continue active session" "press Enter"
+    ui_menu_item "n" "$UI_ICON_NEW" "Start new session"
+    ui_menu_item "r" "$UI_ICON_RESUME" "Resume different session"
+    ui_menu_item "s" "" "View status"
+    ui_menu_item "d" "" "Run doctor"
+    ui_menu_item "q" "" "Quit"
+    ui_spacer
+    ui_prompt "Choice:"
+    read -r choice
+    
+    case "$choice" in
+      ""|↵|1) 
+        # Continue with same CLI or ask
+        local last_cli; last_cli="$(detect_last_cli)"
+        if [[ -n "$last_cli" ]]; then
+          cmd_launch "$last_cli" --resume
+        else
+          cmd_resume
+        fi
+        ;;
+      n|N|new|2) _pick_cli_and_launch ;;
+      r|R|resume|3) cmd_resume ;;
+      s|S|status|4) print_banner; print_status ;;
+      d|D|doctor|5) cmd_doctor ;;
+      q|Q|quit) ui_info "Bye!"; exit 0 ;;
+      *) cmd_menu ;;
+    esac
+    return
   fi
-  echo ""
-  read -rp "  Choice (or q): " choice
-  [[ "$choice" == "q" || -z "$choice" ]] && { info "Bye!"; exit 0; }
+  
+  # No active session — show standard menu
+  ui_spacer
+  ui_print "  $(ui_bold "What would you like to do?")"
+  ui_spacer
+  
+  ui_menu_item "1" "$UI_ICON_NEW" "Start a new session"
+  if [[ "$has_sessions" -eq 1 ]]; then
+    ui_menu_item "2" "$UI_ICON_RESUME" "Resume a previous session"
+  fi
+  ui_menu_item "d" "" "Run health check (doctor)"
+  ui_menu_item "q" "" "Quit"
+  ui_spacer
+  
+  ui_prompt "Choice:"
+  read -r choice
+  [[ "$choice" == "q" || -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
 
   case "$choice" in
-    1) _pick_cli_and_launch ;;
-    2) [[ "$has_sessions" -eq 1 ]] && cmd_resume || die "Invalid choice" ;;
+    1|n|new) _pick_cli_and_launch ;;
+    2|r|resume) [[ "$has_sessions" -eq 1 ]] && cmd_resume || die "Invalid choice" ;;
+    d|doctor) cmd_doctor ;;
     *) die "Invalid choice: $choice" ;;
   esac
 }
 
-# ─── Pick CLI and launch ──────────────────────────────────────────────────────
+# Detect last CLI used in active session
+detect_last_cli() {
+  local session_file; session_file="$(_super_session_file)"
+  [[ -f "$session_file" ]] || return
+  
+  local last_turn; last_turn="$(grep '^## ' "$session_file" | tail -1)"
+  [[ "$last_turn" == *"🟠"* ]] && echo "claude" && return
+  [[ "$last_turn" == *"🔵"* ]] && echo "gemini" && return
+  [[ "$last_turn" == *"🟢"* ]] && echo "codex" && return
+  [[ "$last_turn" == *"🟡"* ]] && echo "kimi" && return
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLI PICKER
+# ═══════════════════════════════════════════════════════════════════════════════
 
 _pick_cli_and_launch() {
-  echo ""
-  echo -e "${BOLD}Which CLI would you like to use?${RESET}"
-  echo ""
-  local options=() i=1
-  for cli in claude gemini codex kimi; do
-    if is_installed "$cli"; then
-      options+=("$cli")
-      echo -e "  ${BOLD}[$i]${RESET}  ${CLI_ICON[$cli]}  ${CLI_LABEL[$cli]}"
-      ((i++))
-    fi
-  done
-  echo ""
-  read -rp "  Choice (or q): " choice
-  [[ "$choice" == "q" || -z "$choice" ]] && { info "Bye!"; exit 0; }
-
-  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
-    local chosen="${options[$((choice-1))]}"
-    cmd_launch "$chosen"
-  else
-    die "Invalid choice: $choice"
-  fi
+  local chosen; chosen="$(fzf_pick_cli)"
+  [[ "$chosen" == "QUIT" ]] && { ui_info "Bye!"; exit 0; }
+  [[ -z "$chosen" ]] && { cmd_menu; return; }
+  
+  cmd_launch "$chosen"
 }
 
-# ─── Help ─────────────────────────────────────────────────────────────────────
-
-cmd_help() {
-  print_banner
-  cat << 'HELPEOF'
-USAGE
-  super [command] [args]
-
-COMMANDS
-  install [all|claude|gemini|codex|kimi]
-      Install hooks into CLI config files. Defaults to all four.
-
-  launch <cli> [--title <name>] [--resume [file]] [cli-args...]
-      Start a NEW session and launch a CLI.
-        --title <name>    Name the session (e.g. --title auth-refactor)
-        --resume          Show picker to resume or start new
-        --resume <file>   Resume a specific session file
-
-  claude|kimi|codex|gemini [--resume [file]] [cli-args...]
-      Quick shortcuts to launch a specific CLI directly.
-      Same as 'super launch <cli>' but shorter.
-        super claude          # new session with Claude
-        super kimi --resume   # pick session, resume with Kimi
-
-  resume [file]
-      Pick a past session and choose which CLI to launch it in.
-      File can be a full path or just the filename.
-
-  sessions
-      List all sessions for this project, with turn counts.
-
-  switch <cli>
-      Re-inject the active session into a different CLI and launch it.
-      Continues the current session — does NOT create a new one.
-
-  log [N | file.md]
-      View the active session. Pass N for last N turns.
-      Pass a filename to view a specific session.
-
-  clean
-      Remove injection blocks from CLAUDE.md / GEMINI.md / AGENTS.md.
-
-  uninstall
-      Remove super hooks from all CLI config files.
-
-  status
-      Show CLI availability and session info.
-
-  config [show|init|edit]
-      Manage super configuration (super.config.yaml).
-
-  validate
-      Run project validators (lint/typecheck).
-
-  cleanup [days]
-      Remove sessions older than N days (default: 7).
-
-  transcript [list|save]
-      Manage session transcripts.
-
-  save [note]
-      Save context of the current conversation to the session file.
-      Optional note to attach to the save.
-
-  catchup
-      Show a summary of the current session and recent activity.
-
-EXAMPLES
-  super install
-
-  # Direct CLI launch (new session)
-  super claude                                  # new session with Claude
-  super kimi                                    # new session with Kimi
-  super codex                                   # new session with Codex
-  super gemini                                  # new session with Gemini
-
-  # Direct CLI launch (resume existing session)
-  super claude --resume                         # pick session, resume in Claude
-  super kimi --resume                           # pick session, resume in Kimi
-  super codex --resume                          # pick session, resume in Codex
-  super gemini --resume                         # pick session, resume in Gemini
-
-  # Named sessions
-  super launch gemini --title "auth refactor"   # named session
-  super claude --resume 2026-04-11_auth.md      # resume specific session
-
-  # Interactive flows
-  super resume                                  # pick session, then pick CLI
-  super switch gemini                           # continue active session in Gemini
-
-  # Session management
-  super sessions                                # list all sessions
-  super log                                     # view active session
-  super save "checkpoint"                       # save with note
-  super catchup                                 # show session summary
-  super cleanup 7                               # remove old sessions
-
-SESSION FILES
-  .super/sessions/<YYYY-MM-DD_HHMMSS>_<title>.md
-  Active session tracked in .super/active
-
-HOOKS COVERAGE
-  🟠 Claude Code  — SessionStart, UserPromptSubmit, PreToolUse*, PostToolUse, Stop
-  🔵 Gemini CLI   — SessionStart, UserPromptSubmit, AfterTool, AfterAgent
-  🟢 Codex CLI    — SessionStart, UserPromptSubmit, PostToolUse (Bash), Stop
-  🟡 Kimi Code    — SessionStart, UserPromptSubmit, PostToolUse, Stop
-
-* PreToolUse includes security enforcement (yolo mode, path restrictions)
-HELPEOF
-}
-
-# ─── Config command ───────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONFIG COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_config() {
   local action="${1:-show}"
-  local config_file="$(_super_find_config)"
-  
   case "$action" in
     show)
-      if [[ -n "$config_file" ]]; then
-        echo "Configuration: $config_file"
-        echo ""
-        cat "$config_file"
+      local cfg; cfg="$(_super_config_file)"
+      if [[ -f "$cfg" ]]; then
+        ui_section "Configuration"
+        cat "$cfg"
       else
-        echo "No configuration file found."
-        echo "Creating default at $(pwd)/super.config.yaml..."
-        cp "$SUPER_HOME/super.config.yaml" ./super.config.yaml
-        ok "Created super.config.yaml"
+        ui_warn "No config file found"
+        ui_muted "Run: super config init"
       fi
       ;;
     init)
-      if [[ -f "./super.config.yaml" ]]; then
-        warn "super.config.yaml already exists"
-        read -rp "Overwrite? (y/N): " confirm
-        [[ "$confirm" == "y" ]] || { info "Cancelled"; return; }
-      fi
-      cp "$SUPER_HOME/super.config.yaml" ./super.config.yaml
-      ok "Created super.config.yaml"
+      _super_config_init
+      ui_success "Created $(_super_config_file)"
       ;;
     edit)
-      local editor="${EDITOR:-vi}"
-      if [[ -n "$config_file" ]]; then
-        $editor "$config_file"
-      else
-        die "No config file found. Run: super config init"
-      fi
+      ${EDITOR:-vim} "$(_super_config_file)"
       ;;
     *) die "Usage: super config [show|init|edit]" ;;
   esac
 }
 
-# ─── Validate command ─────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# VALIDATE COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_validate() {
   source "$SUPER_HOME/lib/validators.sh"
-  info "Running project validators..."
+  ui_brand "Running project validators..."
   if _super_run_validators; then
-    ok "All validators passed"
+    ui_success "All validators passed"
   else
-    warn "Some validators failed"
+    ui_warn "Some validators failed"
     return 1
   fi
 }
 
-# ─── Cleanup command ──────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLEANUP COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_cleanup() {
   local max_age="${1:-$(_super_session_max_age)}"
   [[ -z "$max_age" ]] && max_age=7
   
-  info "Cleaning up sessions older than $max_age days..."
-  session_cleanup_old "$max_age"
-  ok "Cleanup complete"
+  ui_brand "Cleaning up sessions older than $max_age days..."
+  
+  # Show spinner for cleanup
+  session_cleanup_old "$max_age" &
+  ui_spinner $! "Scanning sessions..."
+  
+  ui_success "Cleanup complete"
 }
 
-# ─── Transcript command ───────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# TRANSCRIPT COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_transcript() {
   local action="${1:-list}"
@@ -714,111 +819,214 @@ cmd_transcript() {
   case "$action" in
     list|ls)
       if [[ -d "$transcript_dir" ]]; then
-        echo "Transcripts in $transcript_dir:"
-        ls -la "$transcript_dir"/*.jsonl "$transcript_dir"/*-final.md 2>/dev/null || echo "No transcripts yet"
+        ui_section "Transcripts"
+        ls -la "$transcript_dir"/*.jsonl "$transcript_dir"/*-final.md 2>/dev/null || ui_muted "No transcripts yet"
       else
-        echo "No transcripts directory"
+        ui_warn "No transcripts directory"
       fi
       ;;
     save)
       session_save_transcript
-      ok "Transcript saved"
+      ui_success "Transcript saved"
       ;;
     *) die "Usage: super transcript [list|save]" ;;
   esac
 }
 
-# ─── Save command ─────────────────────────────────────────────────────────────
-# Saves context of the current conversation to the session file
+# ═══════════════════════════════════════════════════════════════════════════════
+# SAVE COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_save() {
   local note="${1:-}"
-  local session_file
-  session_file="$(_super_session_file)"
+  local session_file; session_file="$(_super_session_file)"
   
-  if [[ -z "$session_file" || ! -f "$session_file" ]]; then
-    die "No active session. Start a session first with: super launch <cli>"
-  fi
+  [[ -z "$session_file" || ! -f "$session_file" ]] && die "No active session. Start one with: super launch <cli>"
   
-  local ts
-  ts="$(date '+%Y-%m-%d %H:%M:%S')"
-  
-  # Append save marker to session
+  local ts; ts="$(date '+%Y-%m-%d %H:%M:%S')"
   printf '\n---\n\n## 💾 Manual Save `[%s]`\n\n' "$ts" >> "$session_file"
   
-  if [[ -n "$note" ]]; then
-    printf '> **Note:** %s\n\n' "$note" >> "$session_file"
-  fi
+  [[ -n "$note" ]] && printf '> **Note:** %s\n\n' "$note" >> "$session_file"
   
-  # Count turns in session
-  local turns
-  turns="$(grep -c '^## ' "$session_file" 2>/dev/null || echo 0)"
+  local turns; turns="$(grep -c '^## ' "$session_file" 2>/dev/null || echo 0)"
   
-  ok "Session saved: $(basename "$session_file")"
-  info "Total turns: $turns"
+  ui_msg_checkpoint
+  ui_muted "  $(basename "$session_file") — $turns turns"
   
-  # Also save transcript if enabled
   if _super_config_enabled "session.transcriptLog"; then
     session_save_transcript
   fi
 }
 
-# ─── Catchup command ──────────────────────────────────────────────────────────
-# Reads the session file and gives a summary of where things stand
+# ═══════════════════════════════════════════════════════════════════════════════
+# CATCHUP COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
 
 cmd_catchup() {
-  local session_file
-  # Use explicitly passed session file, or fall back to active pointer
-  session_file="${SUPER_SESSION_FILE:-$(_super_session_file)}"
+  local session_file="${SUPER_SESSION_FILE:-$(_super_session_file)}"
   
-  if [[ -z "$session_file" || ! -f "$session_file" ]]; then
-    warn "No active session."
-    info "Start one with: super launch <cli>"
+  [[ -z "$session_file" || ! -f "$session_file" ]] && {
+    ui_warn "No active session."
+    ui_muted "Start one with: super launch <cli>"
     return 1
-  fi
+  }
   
-  echo ""
-  echo -e "${BOLD}📋 Session Catchup${RESET}"
-  echo ""
+  ui_spacer
+  ui_print "  $(ui_bold "📋 Session Catchup")"
+  ui_spacer
   
-  # Session metadata
   local basename turns last_save
   basename="$(basename "$session_file")"
   turns="$(grep -c '^## ' "$session_file" 2>/dev/null || echo 0)"
   last_save="$(grep -E '^## 💾 Manual Save' "$session_file" | tail -1 | sed 's/.*\[\(.*\)\].*/\1/')"
   
-  echo -e "  Session: ${BOLD}$basename${RESET}"
-  echo -e "  Turns: $turns"
-  [[ -n "$last_save" ]] && echo -e "  Last save: $last_save"
-  echo ""
+  ui_print "  Session: $(ui_bold "$basename")"
+  ui_print "  Turns: $turns"
+  [[ -n "$last_save" ]] && ui_print "  Last save: $last_save"
+  ui_spacer
   
-  # Recent activity (last 5 turns)
-  echo -e "${BOLD}Recent activity:${RESET}"
-  echo ""
+  ui_print "  $(_c $UI_MUTED)Recent activity:${UI_RESET}"
+  ui_spacer
   
-  # Extract recent user prompts and assistant responses
+  # Recent turns with context
   grep -E '^## .*User|^### .*Assistant' "$session_file" | tail -10 | while read -r line; do
     if [[ "$line" == *"User"* ]]; then
-      # Extract first line of user message
-      local content
-      content="$(echo "$line" | sed 's/.*User//' | head -c 80)"
-      [[ ${#content} -eq 80 ]] && content="${content}..."
-      echo "  👤 $content"
-    elif [[ "$line" == *"Assistant"* ]]; then
-      echo "  🤖 (response)"
+      local content; content="$(echo "$line" | sed 's/.*User//' | head -c 60)"
+      [[ ${#content} -eq 60 ]] && content="${content}..."
+      ui_print "    $(_c $UI_MUTED)•${UI_RESET} 👤 $content"
     fi
   done
   
-  echo ""
-  echo -e "${DIM}Use 'super log' to view full session${RESET}"
-  echo ""
+  ui_spacer
+  ui_muted "Use 'super log' for full session"
+  ui_spacer
 }
 
-# ─── Dispatch ─────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# QUICK SHORTCUTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_quick_active() {
+  # @ shortcut — jump to active session
+  local active; active="$(_super_session_file)"
+  [[ -z "$active" || ! -f "$active" ]] && die "No active session"
+  
+  local last_cli; last_cli="$(detect_last_cli)"
+  [[ -z "$last_cli" ]] && die "Cannot detect last CLI used"
+  
+  cmd_launch "$last_cli" --resume
+}
+
+cmd_quick_new() {
+  # ! shortcut — new session, skip picker
+  _pick_cli_and_launch
+}
+
+cmd_quick_search() {
+  # ? shortcut — fuzzy search all sessions
+  local picked; picked="$(fzf_pick_session)"
+  [[ "$picked" == "QUIT" || -z "$picked" || "$picked" == "NEW" ]] && return
+  cmd_resume "$picked"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELP COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cmd_help() {
+  print_banner
+  cat << 'HELPEOF'
+USAGE
+  super [command] [args]
+
+QUICK SHORTCUTS
+  super                      Main menu (with fzf if available)
+  super @                    Jump to active session
+  super !                    New session, pick CLI
+  super ?                    Fuzzy search all sessions
+  super <cli>                Direct launch (claude|gemini|codex|kimi)
+
+COMMANDS
+  install [all|claude|gemini|codex|kimi]
+      Install hooks and context files
+
+  launch <cli> [--title <name>] [--resume [file]]
+      Start a new session
+
+  resume [file]
+      Resume a session (with fzf picker)
+
+  sessions
+      List all sessions
+
+  switch <cli>
+      Switch active session to different CLI
+
+  log [N | file.md]
+      View session (last N turns or specific file)
+
+  doctor
+      Run health check on super installation
+
+  clean
+      Remove context injections
+
+  uninstall
+      Remove super hooks
+
+  status
+      Show status with recent activity
+
+  config [show|init|edit]
+      Manage configuration
+
+  validate
+      Run project validators
+
+  cleanup [days]
+      Remove old sessions
+
+  transcript [list|save]
+      Manage transcripts
+
+  save [note]
+      Save checkpoint to session
+
+  catchup
+      Show session summary
+
+  help
+      Show this help
+
+EXAMPLES
+  super claude                    # New Claude session
+  super claude --resume           # Resume with fzf picker
+  super gemini --title "fix auth" # Named session
+  super switch gemini             # Continue in Gemini
+  super @                         # Jump to active session
+  super doctor                    # Health check
+
+SESSION FILES
+  .super/sessions/<timestamp>_<title>.md
+  Active session tracked in .super/active
+HELPEOF
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN DISPATCH
+# ═══════════════════════════════════════════════════════════════════════════════
 
 main() {
+  # Handle quick shortcuts first
+  case "${1:-menu}" in
+    @) cmd_quick_active; exit $? ;;
+    !) cmd_quick_new; exit $? ;;
+    \?) cmd_quick_search; exit $? ;;
+  esac
+  
   local cmd="${1:-menu}"
   shift || true
+  
   case "$cmd" in
     install|i)         cmd_install "$@" ;;
     launch|l|run)      cmd_launch "$@" ;;
@@ -826,6 +1034,7 @@ main() {
     sessions|ls|list)  cmd_sessions ;;
     switch|sw)         cmd_switch "$@" ;;
     log|show)          cmd_log "$@" ;;
+    doctor|dr)         cmd_doctor ;;
     clean)             cmd_clean ;;
     uninstall)         cmd_uninstall ;;
     status|s)          print_banner; print_status ;;
@@ -834,10 +1043,10 @@ main() {
     cleanup)           cmd_cleanup "$@" ;;
     transcript|trans)  cmd_transcript "$@" ;;
     save)              cmd_save "$@" ;;
-    catchup|status)    cmd_catchup ;;
+    catchup|c)         cmd_catchup ;;
     --version|-v)      echo "super v$SUPER_VERSION"; exit 0 ;;
     help|--help|-h)    cmd_help ;;
-    menu)              print_banner; cmd_menu ;;
+    menu)              cmd_menu ;;
     claude|gemini|codex|kimi) cmd_launch "$cmd" "$@" ;;
     *) die "Unknown command: $cmd. Run: super help" ;;
   esac
