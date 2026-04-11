@@ -281,6 +281,37 @@ _read_key() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# CONFIRM DIALOG
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage: if ui_confirm "Are you sure?" "no"; then ...
+# Second arg is default: "yes" or "no"
+
+ui_confirm() {
+  local prompt="$1" default="${2:-no}"
+  local hint="[y/N]"
+  [[ "$default" == "yes" ]] && hint="[Y/n]"
+
+  if command -v gum >/dev/null 2>&1; then
+    if [[ "$default" == "yes" ]]; then
+      gum confirm "$prompt" --default=yes < /dev/tty > /dev/tty
+    else
+      gum confirm "$prompt" < /dev/tty > /dev/tty
+    fi
+    return $?
+  fi
+
+  printf '%s %s ' "$prompt" "$hint" > /dev/tty
+  local answer
+  read -r answer < /dev/tty
+  case "${answer,,}" in
+    y|yes) return 0 ;;
+    n|no)  return 1 ;;
+    '')    [[ "$default" == "yes" ]] && return 0 || return 1 ;;
+    *)     return 1 ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # INSTALL INTERACTIVE
 # ─────────────────────────────────────────────────────────────────────────────
 

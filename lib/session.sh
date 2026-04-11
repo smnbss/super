@@ -143,7 +143,6 @@ session_list() {
 
 session_pick() {
   # Prompts the user to pick a session. Echoes the chosen filepath, or "" for new.
-  # All UI output goes to stderr so it displays even when stdout is captured.
   local sessions_dir
   sessions_dir="$(_super_sessions_dir)"
 
@@ -159,41 +158,31 @@ session_pick() {
   local active
   active="$(_super_session_file)"
 
-  echo "" >&2
-  echo -e "\033[1mSaved sessions  (newest first)\033[0m" >&2
-  echo "" >&2
-
-  local i=1
+  # Build options for ui_select_single
+  local options=()
   for f in "${files[@]}"; do
-    local title started turns col marker
+    local title started turns marker
     title="$(grep '^# Super Session:' "$f" | sed 's/# Super Session: //' | head -1)"
     [[ -z "$title" ]] && title="$(basename "$f" .md)"
     started="$(grep '^\*\*Started:\*\*' "$f" | sed 's/\*\*Started:\*\* //' | head -1)"
     turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
-    col="\033[0m"; marker=""
-    if [[ "$f" == "$active" ]]; then
-      col="\033[1;32m"; marker=" ◀"
-    fi
-    printf "  \033[1m[%2d]\033[0m  ${col}%-38s\033[0m  %-20s  %s turns%s\n" \
-      "$i" "$title" "$started" "$turns" "$marker" >&2
-    ((i++))
+    marker=""
+    [[ "$f" == "$active" ]] && marker=" ◀"
+    options+=("$(printf '%-38s  %-20s  %s turns%s' "$title" "$started" "$turns" "$marker")")
   done
-  echo "" >&2
-  printf "  \033[1m[n]\033[0m  Start a \033[1mnew\033[0m session\n" >&2
-  echo "" >&2
+  options+=("🆕 Start a new session")
 
-  read -rp "  Choice: " choice
+  local choice
+  choice=$(ui_select_single "Saved sessions (newest first)" 0 "${options[@]}")
 
-  case "$choice" in
-    n|N|new) echo ""; return ;;
-    q|Q)     echo "QUIT"; return ;;
-  esac
+  [[ -z "$choice" ]] && { echo "QUIT"; return; }
 
-  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#files[@]} )); then
-    echo "${files[$((choice-1))]}"
-  else
-    echo ""
+  # Last option = new session
+  if [[ "$choice" -eq ${#files[@]} ]]; then
+    echo ""; return
   fi
+
+  echo "${files[$choice]}"
 }
 
 # ─── Turn appending ───────────────────────────────────────────────────────────

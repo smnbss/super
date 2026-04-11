@@ -154,30 +154,22 @@ _fzf_pick_cli() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _fallback_pick_cli() {
-  echo ""
-  echo -e "${BOLD}Which CLI would you like to use?${RESET}"
-  echo ""
-  
-  local options=() i=1
+  local cli_keys=() display_opts=()
   for cli in claude gemini codex kimi; do
     if is_installed "$cli"; then
-      options+=("$cli")
-      echo -e "  ${BOLD}[$i]${RESET}  ${CLI_ICON[$cli]}  ${CLI_LABEL[$cli]}"
-      ((i++))
+      cli_keys+=("$cli")
+      display_opts+=("${CLI_ICON[$cli]}  ${CLI_LABEL[$cli]}")
     fi
   done
-  
-  echo ""
-  ui_prompt "Choice (or q):"
-  read -r choice
-  
-  [[ "$choice" == "q" || -z "$choice" ]] && { echo "QUIT"; return; }
-  
-  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
-    echo "${options[$((choice-1))]}"
-  else
-    echo ""
-  fi
+
+  [[ ${#cli_keys[@]} -eq 0 ]] && { echo ""; return; }
+  [[ ${#cli_keys[@]} -eq 1 ]] && { echo "${cli_keys[0]}"; return; }
+
+  local choice
+  choice=$(ui_select_single "Which CLI would you like to use?" 0 "${display_opts[@]}")
+
+  [[ -z "$choice" ]] && { echo "QUIT"; return; }
+  echo "${cli_keys[$choice]}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

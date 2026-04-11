@@ -1036,19 +1036,14 @@ _config_interactive_ui() {
   ui_spacer
   ui_print "  $(ui_bold "UI Settings")"
   ui_spacer
-  
-  ui_print "  These settings control the super UI behavior"
-  ui_spacer
-  
-  ui_menu_item "1" "" "Initialize config file"
-  ui_menu_item "b" "" "Back"
-  ui_spacer
-  ui_prompt "Choice:"
-  read -r subchoice
-  
-  case "$subchoice" in
-    1) cmd_config init ;;
-    b|B) return ;;
+
+  local options=("Initialize config file" "Back")
+  local choice
+  choice=$(ui_select_single "UI Settings" 0 "${options[@]}")
+
+  case "$choice" in
+    0) cmd_config init ;;
+    1|"") return ;;
   esac
 }
 
