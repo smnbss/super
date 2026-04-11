@@ -33,7 +33,7 @@ ui_select_single() {
 _ui_single_gum() {
   local title="$1" default_idx="$2"; shift 2; local options=("$@")
   local result
-  result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title")
+  result=$(gum choose --height=10 --header "$title" -- "${options[@]}")
   [[ -z "$result" ]] && return 1
   local i=0
   for opt in "${options[@]}"; do
@@ -142,7 +142,7 @@ ui_select_multi() {
 _ui_multi_gum() {
   local title="$1"; shift; local options=("$@")
   local result
-  result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title")
+  result=$(gum choose --no-limit --height=10 --header "$title" -- "${options[@]}")
   [[ -z "$result" ]] && return 1
   local indices=()
   while IFS= read -r sel; do

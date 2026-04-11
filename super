@@ -892,8 +892,8 @@ _pick_cli_and_launch() {
   local choice
   choice=$(ui_select_single "Which CLI would you like to use?" 0 "${options[@]}")
   
-  [[ -z "$choice" ]] && { ui_info "Cancelled."; exit 0; }
-  
+  [[ -z "$choice" ]] && { ui_info "Cancelled."; return 1; }
+
   cmd_launch "${cli_keys[$choice]}"
 }
 
