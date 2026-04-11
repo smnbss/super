@@ -468,6 +468,12 @@ COMMANDS
         --resume          Show picker to resume or start new
         --resume <file>   Resume a specific session file
 
+  claude|kimi|codex|gemini [--resume [file]] [cli-args...]
+      Quick shortcuts to launch a specific CLI directly.
+      Same as 'super launch <cli>' but shorter.
+        super claude          # new session with Claude
+        super kimi --resume   # pick session, resume with Kimi
+
   resume [file]
       Pick a past session and choose which CLI to launch it in.
       File can be a full path or just the filename.
@@ -513,15 +519,33 @@ COMMANDS
 
 EXAMPLES
   super install
-  super claude                                  # new untitled session
+
+  # Direct CLI launch (new session)
+  super claude                                  # new session with Claude
+  super kimi                                    # new session with Kimi
+  super codex                                   # new session with Codex
+  super gemini                                  # new session with Gemini
+
+  # Direct CLI launch (resume existing session)
+  super claude --resume                         # pick session, resume in Claude
+  super kimi --resume                           # pick session, resume in Kimi
+  super codex --resume                          # pick session, resume in Codex
+  super gemini --resume                         # pick session, resume in Gemini
+
+  # Named sessions
   super launch gemini --title "auth refactor"   # named session
-  super launch claude --resume                  # pick session or new
-  super resume                                  # pick session, pick CLI
-  super resume 2026-04-11_143201_auth-refactor.md
-  super switch gemini                           # continue in Gemini
-  super sessions
-  super log
-  super log 10
+  super claude --resume 2026-04-11_auth.md      # resume specific session
+
+  # Interactive flows
+  super resume                                  # pick session, then pick CLI
+  super switch gemini                           # continue active session in Gemini
+
+  # Session management
+  super sessions                                # list all sessions
+  super log                                     # view active session
+  super save "checkpoint"                       # save with note
+  super catchup                                 # show session summary
+  super cleanup 7                               # remove old sessions
 
 SESSION FILES
   .super/sessions/<YYYY-MM-DD_HHMMSS>_<title>.md
