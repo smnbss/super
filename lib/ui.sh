@@ -270,6 +270,19 @@ ui_human_size() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# BANNER / HEADER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ui_banner() {
+  echo -e ""
+  echo -e "  $(_c $UI_PRIMARY)╭──────────────────────────────────────────╮${UI_RESET}"
+  echo -e "  $(_c $UI_PRIMARY)│${UI_RESET}  🔀  $(ui_bold "super") $(_c $UI_MUTED)v${SUPER_VERSION}${UI_RESET}                   $(_c $UI_PRIMARY)│${UI_RESET}"
+  echo -e "  $(_c $UI_PRIMARY)│${UI_RESET}  Cross-CLI session bridge                $(_c $UI_PRIMARY)│${UI_RESET}"
+  echo -e "  $(_c $UI_PRIMARY)╰──────────────────────────────────────────╯${UI_RESET}"
+  echo -e ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # BRAND VOICE MESSAGES
 # ═══════════════════════════════════════════════════════════════════════════════
 

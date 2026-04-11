@@ -44,9 +44,9 @@ _ui_menu_help() {
 
 ui_select_single() {
   local title="$1"
-  shift
-  local options=("$@")
   local default_idx="${2:-0}"
+  shift 2
+  local options=("$@")
   
   if [[ "$GUM_AVAILABLE" == "true" ]]; then
     _ui_select_single_gum "$title" "$default_idx" "${options[@]}"
