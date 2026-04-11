@@ -82,23 +82,23 @@ _ui_select_single_bash() {
   local total=${#options[@]}
   
   # Hide cursor
-  printf '\033[?25l'
+  printf '\033[?25l' >&2
   
   while true; do
-    # Clear and redraw
-    printf '\033[J'
+    # Clear and redraw (to stderr)
+    printf '\033[J' >&2
     
-    ui_bold "$title"
-    echo ""
-    _ui_menu_help "single"
-    echo ""
+    ui_bold "$title" >&2
+    echo "" >&2
+    _ui_menu_help "single" >&2
+    echo "" >&2
     
-    # Draw options
+    # Draw options (to stderr)
     for ((i=0; i<total; i++)); do
       if [[ $i -eq $cursor ]]; then
-        printf " $(_c $UI_PRIMARY)>${UI_RESET} %s\n" "${options[$i]}"
+        printf " $(_c $UI_PRIMARY)>${UI_RESET} %s\n" "${options[$i]}" >&2
       else
-        printf "   %s\n" "${options[$i]}"
+        printf "   %s\n" "${options[$i]}" >&2
       fi
     done
     
@@ -114,19 +114,19 @@ _ui_select_single_bash() {
         esac
         ;;
       ' '|'')  # Space or Enter - select
-        printf '\033[?25h'  # Show cursor
-        echo "$cursor"
+        printf '\033[?25h' >&2  # Show cursor
+        echo "$cursor"  # Only stdout output - the result
         return 0
         ;;
       'q'|'Q')  # Quit
-        printf '\033[?25h'
-        echo ""
+        printf '\033[?25h' >&2
+        echo ""  # Empty result
         return 1
         ;;
     esac
     
     # Move cursor back up for redraw
-    printf '\033[%dA' $((total + 3))
+    printf '\033[%dA' $((total + 3)) >&2
   done
 }
 
