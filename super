@@ -877,21 +877,20 @@ _pick_cli_and_launch() {
   # Build list of installed CLIs
   local options=()
   local cli_keys=()
-  
+
   for cli in claude gemini codex kimi; do
     if is_installed "$cli"; then
       options+=("${CLI_ICON[$cli]} ${CLI_LABEL[$cli]}")
       cli_keys+=("$cli")
     fi
   done
-  
+
   [[ ${#options[@]} -eq 0 ]] && die "No CLIs installed. Install one first."
   [[ ${#options[@]} -eq 1 ]] && { cmd_launch "${cli_keys[0]}"; return; }
-  
-  ui_banner
+
   local choice
   choice=$(ui_select_single "Which CLI would you like to use?" 0 "${options[@]}")
-  
+
   [[ -z "$choice" ]] && { ui_info "Cancelled."; return 1; }
 
   cmd_launch "${cli_keys[$choice]}"
