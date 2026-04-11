@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$SUPERCLI_HOME/hooks/claude/session_start.sh\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$SUPERCLI_HOME/hooks/claude/user_prompt.sh\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$SUPERCLI_HOME/hooks/claude/post_tool_use.sh\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$SUPERCLI_HOME/hooks/claude/stop.sh\"",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}

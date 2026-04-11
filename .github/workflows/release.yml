@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package release
+        run: |
+          mkdir -p dist
+          VERSION=${GITHUB_REF_NAME#v}
+          # Single tarball — bash is portable
+          tar czf "dist/supercli-${VERSION}.tar.gz" \
+            supercli \
+            lib/ \
+            hooks/ \
+            README.md \
+            install.sh \
+            VERSION
+          
+          # Checksum for verification
+          cd dist && sha256sum *.tar.gz > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
