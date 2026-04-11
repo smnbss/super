@@ -33,7 +33,7 @@ ui_select_single() {
 _ui_single_gum() {
   local title="$1" default_idx="$2"; shift 2; local options=("$@")
   local result
-  result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title" < /dev/tty)
+  result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title")
   [[ -z "$result" ]] && return 1
   local i=0
   for opt in "${options[@]}"; do
@@ -142,7 +142,7 @@ ui_select_multi() {
 _ui_multi_gum() {
   local title="$1"; shift; local options=("$@")
   local result
-  result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title" < /dev/tty)
+  result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title")
   [[ -z "$result" ]] && return 1
   local indices=()
   while IFS= read -r sel; do
@@ -293,9 +293,9 @@ ui_confirm() {
 
   if command -v gum >/dev/null 2>&1; then
     if [[ "$default" == "yes" ]]; then
-      gum confirm "$prompt" --default=yes < /dev/tty > /dev/tty
+      gum confirm "$prompt" --default=yes
     else
-      gum confirm "$prompt" < /dev/tty > /dev/tty
+      gum confirm "$prompt"
     fi
     return $?
   fi
