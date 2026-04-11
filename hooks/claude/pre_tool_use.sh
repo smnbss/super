@@ -4,8 +4,9 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../../lib/config.sh"
-source "$SCRIPT_DIR/../../lib/security.sh"
+export SUPER_HOME="${SUPER_HOME:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+source "$SUPER_HOME/lib/config.sh"
+source "$SUPER_HOME/lib/security.sh"
 
 INPUT="$(cat)"
 
