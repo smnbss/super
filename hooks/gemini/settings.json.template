@@ -1,4 +1,7 @@
 {
+  "env": {
+    "SUPER_HOME": "$SUPER_HOME"
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +10,7 @@
           {
             "name": "super-session-start",
             "type": "command",
-            "command": "$SUPER_HOME/hooks/gemini/session_start.sh",
+            "command": "{{SUPER_HOME}}/hooks/gemini/session_start.sh",
             "timeout": 5000
           }
         ]
@@ -19,7 +22,7 @@
           {
             "name": "super-user-prompt",
             "type": "command",
-            "command": "$SUPER_HOME/hooks/gemini/user_prompt.sh",
+            "command": "{{SUPER_HOME}}/hooks/gemini/user_prompt.sh",
             "timeout": 5000
           }
         ]
@@ -32,7 +35,7 @@
           {
             "name": "super-after-tool",
             "type": "command",
-            "command": "$SUPER_HOME/hooks/gemini/after_tool.sh",
+            "command": "{{SUPER_HOME}}/hooks/gemini/after_tool.sh",
             "timeout": 5000
           }
         ]
@@ -44,7 +47,7 @@
           {
             "name": "super-after-agent",
             "type": "command",
-            "command": "$SUPER_HOME/hooks/gemini/after_agent.sh",
+            "command": "{{SUPER_HOME}}/hooks/gemini/after_agent.sh",
             "timeout": 10000
           }
         ]

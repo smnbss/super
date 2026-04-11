@@ -251,8 +251,11 @@ install_hooks_claude() {
   local root; root="$(_super_find_root)"
   local dir="$root/.claude"; mkdir -p "$dir"
   local sf="$dir/settings.json"
-  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
-    < "$SUPER_HOME/hooks/claude/settings.json.template")"
+  local template="$SUPER_HOME/hooks/claude/settings.json.template"
+  
+  # Expand $SUPER_HOME in env section, keep {{SUPER_HOME}} as variable in commands
+  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
+  
   if [[ -f "$sf" ]]; then _merge_json_hooks "$sf" "$expanded" "command"; ui_success "Updated $sf"
   else echo "$expanded" > "$sf"; ui_success "Created $sf"; fi
   chmod +x "$SUPER_HOME"/hooks/claude/*.sh
@@ -262,8 +265,11 @@ install_hooks_gemini() {
   local root; root="$(_super_find_root)"
   local dir="$root/.gemini"; mkdir -p "$dir"
   local gf="$dir/settings.json"
-  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
-    < "$SUPER_HOME/hooks/gemini/settings.json.template")"
+  local template="$SUPER_HOME/hooks/gemini/settings.json.template"
+  
+  # Expand $SUPER_HOME in env section, keep {{SUPER_HOME}} as variable in commands
+  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
+  
   if [[ -f "$gf" ]]; then _merge_json_hooks "$gf" "$expanded" "name"; ui_success "Updated $gf"
   else echo "$expanded" > "$gf"; ui_success "Created $gf"; fi
   chmod +x "$SUPER_HOME"/hooks/gemini/*.sh
@@ -273,8 +279,11 @@ install_hooks_codex() {
   local root; root="$(_super_find_root)"
   local dir="$root/.codex"; mkdir -p "$dir"
   local hf="$dir/hooks.json"
-  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
-    < "$SUPER_HOME/hooks/codex/hooks.json.template")"
+  local template="$SUPER_HOME/hooks/codex/hooks.json.template"
+  
+  # Expand $SUPER_HOME in env section, keep {{SUPER_HOME}} as variable in commands
+  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
+  
   if [[ -f "$hf" ]]; then _merge_json_hooks "$hf" "$expanded" "command"; ui_success "Updated $hf"
   else echo "$expanded" > "$hf"; ui_success "Created $hf"; fi
   chmod +x "$SUPER_HOME"/hooks/codex/*.sh
@@ -283,15 +292,16 @@ install_hooks_codex() {
 install_hooks_kimi() {
   local root; root="$(_super_find_root)"
   local cfg="$root/.kimi/config.toml"; mkdir -p "$(dirname "$cfg")"
-  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
-    < "$SUPER_HOME/hooks/kimi/config.toml.template")"
+  local template="$SUPER_HOME/hooks/kimi/config.toml.template"
+  
+  # Expand $SUPER_HOME in comments, keep {{SUPER_HOME}} as variable in commands
+  local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
+  
   if [[ -f "$cfg" ]]; then
     local already_present=0
-    while IFS= read -r cmd; do
-      if grep -qF "$cmd" "$cfg" 2>/dev/null; then
-        already_present=1; break
-      fi
-    done < <(echo "$expanded" | grep -E '^\s*command\s*=' | sed 's/.*=\s*["'\''"]//;s/["'\''"]$//')
+    if grep -q "super hooks for Kimi" "$cfg" 2>/dev/null; then
+      already_present=1
+    fi
     
     if [[ "$already_present" -eq 1 ]]; then
       ui_warn "super hooks already in $cfg — skipping"

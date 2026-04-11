@@ -1,4 +1,7 @@
 {
+  "env": {
+    "SUPER_HOME": "$SUPER_HOME"
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -6,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPER_HOME/hooks/codex/session_start.sh",
+            "command": "{{SUPER_HOME}}/hooks/codex/session_start.sh",
             "statusMessage": "super: recording session start",
             "timeout": 5000
           }
@@ -18,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPER_HOME/hooks/codex/user_prompt.sh",
+            "command": "{{SUPER_HOME}}/hooks/codex/user_prompt.sh",
             "statusMessage": "super: logging prompt",
             "timeout": 5000
           }
@@ -32,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPER_HOME/hooks/codex/post_tool_use.sh",
+            "command": "{{SUPER_HOME}}/hooks/codex/post_tool_use.sh",
             "statusMessage": "super: logging tool use",
             "timeout": 5000
           }
@@ -44,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$SUPER_HOME/hooks/codex/stop.sh",
+            "command": "{{SUPER_HOME}}/hooks/codex/stop.sh",
             "statusMessage": "super: logging response",
             "timeout": 10000
           }
