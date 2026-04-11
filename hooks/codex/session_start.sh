@@ -8,7 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/session.sh"
 
 INPUT="$(cat)"
-session_init > /dev/null
 
 trigger="$(echo "$INPUT" | python3 -c "
 import sys, json
