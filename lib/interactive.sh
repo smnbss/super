@@ -17,22 +17,13 @@ ui_select_single() {
   local title="$1" default_idx="${2:-0}"
   shift 2; local options=("$@")
 
-  # Tier 1: gum
   if command -v gum >/dev/null 2>&1; then
-    if _ui_single_gum "$title" "$default_idx" "${options[@]}"; then
-      return 0
-    fi
-    # gum failed — fall through
-  fi
-
-  # Tier 2: arrow-key TUI (needs /dev/tty)
-  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    _ui_single_gum "$title" "$default_idx" "${options[@]}"
+  elif [[ -r /dev/tty && -w /dev/tty ]]; then
     _ui_single_arrows "$title" "$default_idx" "${options[@]}"
-    return $?
+  else
+    _ui_single_numbered "$title" "$default_idx" "${options[@]}"
   fi
-
-  # Tier 3: plain numbered
-  _ui_single_numbered "$title" "$default_idx" "${options[@]}"
 }
 
 # ── gum ───────────────────────────────────────────────────────────────────────
@@ -41,7 +32,7 @@ _ui_single_gum() {
   local title="$1" default_idx="$2"; shift 2; local options=("$@")
   local result
   # gum reads user input from /dev/tty internally; stdout captures the pick
-  result=$(gum choose --height=10 --header "$title" -- "${options[@]}" 2>/dev/null) || return 1
+  result=$(gum choose --height=10 --header "$title" -- "${options[@]}") || return 1
   [[ -z "$result" ]] && return 1
   local i=0
   for opt in "${options[@]}"; do
@@ -135,21 +126,13 @@ _ui_single_numbered() {
 ui_select_multi() {
   local title="$1"; shift; local options=("$@")
 
-  # Tier 1: gum
   if command -v gum >/dev/null 2>&1; then
-    if _ui_multi_gum "$title" "${options[@]}"; then
-      return 0
-    fi
-  fi
-
-  # Tier 2: arrow-key TUI
-  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    _ui_multi_gum "$title" "${options[@]}"
+  elif [[ -r /dev/tty && -w /dev/tty ]]; then
     _ui_multi_arrows "$title" "${options[@]}"
-    return $?
+  else
+    _ui_multi_numbered "$title" "${options[@]}"
   fi
-
-  # Tier 3: plain numbered
-  _ui_multi_numbered "$title" "${options[@]}"
 }
 
 # ── gum ───────────────────────────────────────────────────────────────────────
@@ -157,7 +140,7 @@ ui_select_multi() {
 _ui_multi_gum() {
   local title="$1"; shift; local options=("$@")
   local result
-  result=$(gum choose --no-limit --height=10 --header "$title" -- "${options[@]}" 2>/dev/null) || return 1
+  result=$(gum choose --no-limit --height=10 --header "$title" -- "${options[@]}") || return 1
   [[ -z "$result" ]] && return 1
   local indices=()
   while IFS= read -r sel; do
@@ -299,9 +282,9 @@ ui_confirm() {
 
   if command -v gum >/dev/null 2>&1; then
     if [[ "$default" == "yes" ]]; then
-      gum confirm "$prompt" --default=yes 2>/dev/null
+      gum confirm "$prompt" --default=yes
     else
-      gum confirm "$prompt" 2>/dev/null
+      gum confirm "$prompt"
     fi
     return $?
   fi
