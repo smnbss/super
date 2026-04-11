@@ -521,10 +521,12 @@ SESSION FILES
   Active session tracked in .super/active
 
 HOOKS COVERAGE
-  🟠 Claude Code  — SessionStart, UserPromptSubmit, PostToolUse, Stop
+  🟠 Claude Code  — SessionStart, UserPromptSubmit, PreToolUse*, PostToolUse, Stop
   🔵 Gemini CLI   — SessionStart, UserPromptSubmit, AfterTool, AfterAgent
   🟢 Codex CLI    — SessionStart, UserPromptSubmit, PostToolUse (Bash), Stop
   🟡 Kimi Code    — SessionStart, UserPromptSubmit, PostToolUse, Stop
+
+* PreToolUse includes security enforcement (yolo mode, path restrictions)
 HELPEOF
 }
 
