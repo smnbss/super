@@ -265,68 +265,38 @@ _ui_select_multi_bash() {
 cmd_install_interactive() {
   ui_banner
   
-  if [[ "$GUM_AVAILABLE" == "true" ]]; then
-    _install_with_gum
-  else
-    _install_with_bash_checkbox
-  fi
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# GUM IMPLEMENTATION (Premium Experience)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_install_with_gum() {
-  ui_print "  $(ui_bold "Select CLIs to install")"
-  ui_muted "  Using gum for beautiful checkboxes"
-  ui_muted "  SPACE to toggle, ENTER to confirm"
-  ui_spacer
+  # Detect installed CLIs
+  local available_clis=()
+  local cli_labels=()
+  local cli_keys=()
   
-  local options=("🟠 Claude Code" "🔵 Gemini CLI" "🟢 Codex CLI" "🟡 Kimi Code CLI")
+  for cli in claude gemini codex kimi; do
+    if is_installed "$cli"; then
+      cli_keys+=("$cli")
+      cli_labels+=("${CLI_LABEL[$cli]}")
+      available_clis+=("${CLI_ICON[$cli]} ${CLI_LABEL[$cli]}")
+    fi
+  done
   
-  # Pre-select all installed CLIs by default
-  local selected
-  selected=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=6 --header="Select CLIs to install")
-  
-  # Handle cancel (ESC or no selection)
-  if [[ -z "$selected" ]]; then
-    ui_warn "No CLIs selected. Installation cancelled."
+  # Check if any CLIs are installed
+  if [[ ${#available_clis[@]} -eq 0 ]]; then
+    ui_warn "No supported CLIs detected on this system."
+    ui_spacer
+    ui_print "$(ui_bold "Supported CLIs:")"
+    ui_print "  🟠 Claude Code  — https://claude.ai/code"
+    ui_print "  🔵 Gemini CLI   — https://gemini.google.com/cli"
+    ui_print "  🟢 Codex CLI    — https://openai.com/codex"
+    ui_print "  🟡 Kimi Code    — https://kimi.moonshot.cn"
+    ui_spacer
+    ui_muted "Install one of the above and run 'super install' again."
     return 1
   fi
   
-  # Count selections
-  local count
-  count=$(echo "$selected" | wc -l | tr -d ' ')
-  ui_spacer
-  ui_info "Installing $count CLI(s)..."
-  ui_spacer
-  
-  # Install selected
-  local installed=0
-  echo "$selected" | while read -r cli; do
-    case "$cli" in
-      *"Claude"*) 
-        if _install_cli "claude"; then ((installed++)); fi
-        ;;
-      *"Gemini"*) 
-        if _install_cli "gemini"; then ((installed++)); fi
-        ;;
-      *"Codex"*)  
-        if _install_cli "codex"; then ((installed++)); fi
-        ;;
-      *"Kimi"*)   
-        if _install_cli "kimi"; then ((installed++)); fi
-        ;;
-    esac
-  done
-  
-  # Setup context files
-  _setup_context_files
-  mkdir -p "$(_super_sessions_dir)"
-  
-  ui_spacer
-  ui_success "Installation complete!"
-  ui_muted "Run $(ui_bold "super <cli>") to start (e.g., super claude)"
+  if [[ "$GUM_AVAILABLE" == "true" ]]; then
+    _install_with_gum "${available_clis[@]}" "${cli_keys[@]}"
+  else
+    _install_with_bash_checkbox "${available_clis[@]}" "${cli_keys[@]}"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
