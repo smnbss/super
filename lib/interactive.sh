@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # super/lib/interactive.sh — Interactive selection menus
 #
-# Three tiers: gum (if installed) → arrow-key TUI → plain numbered prompt
+# Three tiers with automatic fallthrough:
+#   gum (if installed & working) → arrow-key TUI → plain numbered prompt
 #
-# KEY DESIGN CHOICE: All interactive I/O goes through /dev/tty, not
-# stdin/stderr. This is critical because these functions are called inside
-# command substitutions — choice=$(ui_select_single ...) — where stdin/stdout
-# are redirected. Reading/writing /dev/tty bypasses that, just like gum and
-# fzf do.
+# All interactive I/O goes through /dev/tty so it works inside
+# command substitutions like choice=$(ui_select_single ...).
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SINGLE SELECT
@@ -19,13 +17,22 @@ ui_select_single() {
   local title="$1" default_idx="${2:-0}"
   shift 2; local options=("$@")
 
+  # Tier 1: gum
   if command -v gum >/dev/null 2>&1; then
-    _ui_single_gum "$title" "$default_idx" "${options[@]}"
-  elif [[ -r /dev/tty && -w /dev/tty ]]; then
-    _ui_single_arrows "$title" "$default_idx" "${options[@]}"
-  else
-    _ui_single_numbered "$title" "$default_idx" "${options[@]}"
+    if _ui_single_gum "$title" "$default_idx" "${options[@]}"; then
+      return 0
+    fi
+    # gum failed — fall through
   fi
+
+  # Tier 2: arrow-key TUI (needs /dev/tty)
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    _ui_single_arrows "$title" "$default_idx" "${options[@]}"
+    return $?
+  fi
+
+  # Tier 3: plain numbered
+  _ui_single_numbered "$title" "$default_idx" "${options[@]}"
 }
 
 # ── gum ───────────────────────────────────────────────────────────────────────
@@ -33,7 +40,8 @@ ui_select_single() {
 _ui_single_gum() {
   local title="$1" default_idx="$2"; shift 2; local options=("$@")
   local result
-  result=$(gum choose --height=10 --header "$title" -- "${options[@]}")
+  # gum reads user input from /dev/tty internally; stdout captures the pick
+  result=$(gum choose --height=10 --header "$title" -- "${options[@]}" 2>/dev/null) || return 1
   [[ -z "$result" ]] && return 1
   local i=0
   for opt in "${options[@]}"; do
@@ -51,11 +59,10 @@ _ui_single_arrows() {
   ((cur < 0)) && cur=0
   ((cur >= total)) && cur=$((total - 1))
 
-  # lines to move up when redrawing (title + blank + N options + help)
   local up=$((total + 2))
 
-  printf '\033[?25l' > /dev/tty              # hide cursor
-  trap 'printf "\033[?25h" > /dev/tty' RETURN  # show cursor on any return
+  printf '\033[?25l' > /dev/tty
+  trap 'printf "\033[?25h" > /dev/tty' RETURN
 
   _render_single "$title" "$cur" "${options[@]}"
 
@@ -128,13 +135,21 @@ _ui_single_numbered() {
 ui_select_multi() {
   local title="$1"; shift; local options=("$@")
 
+  # Tier 1: gum
   if command -v gum >/dev/null 2>&1; then
-    _ui_multi_gum "$title" "${options[@]}"
-  elif [[ -r /dev/tty && -w /dev/tty ]]; then
-    _ui_multi_arrows "$title" "${options[@]}"
-  else
-    _ui_multi_numbered "$title" "${options[@]}"
+    if _ui_multi_gum "$title" "${options[@]}"; then
+      return 0
+    fi
   fi
+
+  # Tier 2: arrow-key TUI
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    _ui_multi_arrows "$title" "${options[@]}"
+    return $?
+  fi
+
+  # Tier 3: plain numbered
+  _ui_multi_numbered "$title" "${options[@]}"
 }
 
 # ── gum ───────────────────────────────────────────────────────────────────────
@@ -142,7 +157,7 @@ ui_select_multi() {
 _ui_multi_gum() {
   local title="$1"; shift; local options=("$@")
   local result
-  result=$(gum choose --no-limit --height=10 --header "$title" -- "${options[@]}")
+  result=$(gum choose --no-limit --height=10 --header "$title" -- "${options[@]}" 2>/dev/null) || return 1
   [[ -z "$result" ]] && return 1
   local indices=()
   while IFS= read -r sel; do
@@ -160,7 +175,6 @@ _ui_multi_gum() {
 _ui_multi_arrows() {
   local title="$1"; shift; local options=("$@")
   local total=${#options[@]} cur=0
-  # _sel is used by _render_multi via bash dynamic scoping
   local _sel=()
   for ((i=0; i<total; i++)); do _sel[$i]=0; done
 
@@ -243,11 +257,6 @@ _ui_multi_numbered() {
 # ─────────────────────────────────────────────────────────────────────────────
 # KEY READER
 # ─────────────────────────────────────────────────────────────────────────────
-# Sets global $_KEY to one of:
-#   up  down  left  right  home  end  enter  space  quit  escape
-#   or the literal character (a, n, 1, 2, ...)
-#
-# Reads from /dev/tty so it works inside command substitutions.
 
 _read_key() {
   _KEY=""
@@ -257,7 +266,6 @@ _read_key() {
 
   case "$byte" in
     $'\e')
-      # Escape sequence: read up to 2 more bytes with tight timeout
       local s1="" s2=""
       IFS= read -rsn1 -t 0.05 s1 < /dev/tty 2>/dev/null
       IFS= read -rsn1 -t 0.05 s2 < /dev/tty 2>/dev/null
@@ -274,8 +282,8 @@ _read_key() {
     '')   _KEY=enter ;;
     ' ')  _KEY=space ;;
     q|Q)  _KEY=quit  ;;
-    k)    _KEY=up    ;;   # vim
-    j)    _KEY=down  ;;   # vim
+    k)    _KEY=up    ;;
+    j)    _KEY=down  ;;
     *)    _KEY="$byte" ;;
   esac
 }
@@ -283,8 +291,6 @@ _read_key() {
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIRM DIALOG
 # ─────────────────────────────────────────────────────────────────────────────
-# Usage: if ui_confirm "Are you sure?" "no"; then ...
-# Second arg is default: "yes" or "no"
 
 ui_confirm() {
   local prompt="$1" default="${2:-no}"
@@ -293,9 +299,9 @@ ui_confirm() {
 
   if command -v gum >/dev/null 2>&1; then
     if [[ "$default" == "yes" ]]; then
-      gum confirm "$prompt" --default=yes
+      gum confirm "$prompt" --default=yes 2>/dev/null
     else
-      gum confirm "$prompt"
+      gum confirm "$prompt" 2>/dev/null
     fi
     return $?
   fi
