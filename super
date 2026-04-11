@@ -215,6 +215,11 @@ cmd_launch() {
   export SUPER_SESSION_FILE="$session_file"
   session_inject_context "$cli"
 
+  # Run catchup if resuming an existing session
+  if [[ "$do_resume" -eq 1 && -n "$session_file" ]]; then
+    cmd_catchup
+  fi
+
   echo ""
   echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo -e "  ${CLI_ICON[$cli]}  ${BOLD}${CLI_LABEL[$cli]}${RESET}"
