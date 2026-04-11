@@ -25,12 +25,7 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": []
-      }
-    ],
+    "PreToolUse": [],
     "PostToolUse": [
       {
         "matcher": "Bash",

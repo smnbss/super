@@ -87,14 +87,28 @@ path, new_json, idf = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path) as f: existing = json.load(f)
 new_hooks = json.loads(new_json).get("hooks", {})
 if "hooks" not in existing: existing["hooks"] = {}
-for event, defs in new_hooks.items():
+
+for event, new_defs in new_hooks.items():
     if event not in existing["hooks"]:
-        existing["hooks"][event] = defs
+        # Event doesn't exist, add all
+        existing["hooks"][event] = new_defs
     else:
-        present = [h.get(idf,"") for grp in existing["hooks"][event]
-                   for h in grp.get("hooks",[])]
-        if not any("super" in p for p in present):
-            existing["hooks"][event].extend(defs)
+        # Event exists, check each new hook
+        existing_hooks = existing["hooks"][event]
+        for new_def in new_defs:
+            # Get command identifiers from new hook
+            new_commands = [h.get(idf, "") for h in new_def.get("hooks", [])]
+            # Check if any of these commands already exist
+            already_present = False
+            for existing_def in existing_hooks:
+                existing_commands = [h.get(idf, "") for h in existing_def.get("hooks", [])]
+                # Check overlap
+                if any(nc in existing_commands for nc in new_commands if nc):
+                    already_present = True
+                    break
+            if not already_present:
+                existing_hooks.append(new_def)
+
 with open(path,"w") as f: json.dump(existing,f,indent=2); f.write("\n")
 PYEOF
 }
@@ -138,10 +152,24 @@ install_hooks_kimi() {
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst \
     < "$SUPER_HOME/hooks/kimi/config.toml.template")"
   if [[ -f "$cfg" ]]; then
-    if grep -q "super" "$cfg" 2>/dev/null; then warn "super already in $cfg — skipping"
-    else printf '\n# super hooks\n%s\n' "$expanded" >> "$cfg"; ok "Updated $cfg"; fi
+    # Check for specific super hook commands to avoid duplicates
+    local already_present=0
+    while IFS= read -r cmd; do
+      if grep -qF "$cmd" "$cfg" 2>/dev/null; then
+        already_present=1
+        break
+      fi
+    done < <(echo "$expanded" | grep -E '^\s*command\s*=' | sed 's/.*=\s*["'\''"]//;s/["'\''"]$//')
+    
+    if [[ "$already_present" -eq 1 ]]; then
+      warn "super hooks already in $cfg — skipping"
+    else
+      printf '\n# super hooks\n%s\n' "$expanded" >> "$cfg"
+      ok "Updated $cfg"
+    fi
   else
-    printf '# Kimi config\n# super hooks\n%s\n' "$expanded" > "$cfg"; ok "Created $cfg"
+    printf '# Kimi config\n# super hooks\n%s\n' "$expanded" > "$cfg"
+    ok "Created $cfg"
   fi
   chmod +x "$SUPER_HOME"/hooks/kimi/*.sh
 }
