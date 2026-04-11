@@ -2,7 +2,12 @@
 # super/lib/interactive.sh — Interactive selection menus
 #
 # Three tiers: gum (if installed) → arrow-key TUI → plain numbered prompt
-# Arrow-key TUI works in any bash 4+ terminal that supports ANSI escapes.
+#
+# KEY DESIGN CHOICE: All interactive I/O goes through /dev/tty, not
+# stdin/stderr. This is critical because these functions are called inside
+# command substitutions — choice=$(ui_select_single ...) — where stdin/stdout
+# are redirected. Reading/writing /dev/tty bypasses that, just like gum and
+# fzf do.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SINGLE SELECT
@@ -16,7 +21,7 @@ ui_select_single() {
 
   if command -v gum >/dev/null 2>&1; then
     _ui_single_gum "$title" "$default_idx" "${options[@]}"
-  elif [[ -t 0 && -t 2 ]]; then
+  elif [[ -r /dev/tty && -w /dev/tty ]]; then
     _ui_single_arrows "$title" "$default_idx" "${options[@]}"
   else
     _ui_single_numbered "$title" "$default_idx" "${options[@]}"
@@ -28,7 +33,7 @@ ui_select_single() {
 _ui_single_gum() {
   local title="$1" default_idx="$2"; shift 2; local options=("$@")
   local result
-  result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title")
+  result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title" < /dev/tty)
   [[ -z "$result" ]] && return 1
   local i=0
   for opt in "${options[@]}"; do
@@ -49,8 +54,8 @@ _ui_single_arrows() {
   # lines to move up when redrawing (title + blank + N options + help)
   local up=$((total + 2))
 
-  printf '\033[?25l' >&2                   # hide cursor
-  trap 'printf "\033[?25h" >&2' RETURN     # show cursor on any return
+  printf '\033[?25l' > /dev/tty              # hide cursor
+  trap 'printf "\033[?25h" > /dev/tty' RETURN  # show cursor on any return
 
   _render_single "$title" "$cur" "${options[@]}"
 
@@ -65,7 +70,7 @@ _ui_single_arrows() {
       quit)  return 1 ;;
       [1-9]) ((${_KEY} >= 1 && ${_KEY} <= total)) && cur=$((_KEY-1)) ;;
     esac
-    printf '\033[%dA\r' "$up" >&2
+    printf '\033[%dA\r' "$up" > /dev/tty
     _render_single "$title" "$cur" "${options[@]}"
   done
 }
@@ -74,16 +79,18 @@ _render_single() {
   local title="$1" cur="$2"; shift 2; local options=("$@")
   local total=${#options[@]}
 
-  printf '\033[2K%s\n'  "$title"  >&2
-  printf '\033[2K\n'              >&2
-  for ((i=0; i<total; i++)); do
-    if ((i == cur)); then
-      printf '\033[2K  \033[36m❯ %s\033[0m\n' "${options[$i]}" >&2
-    else
-      printf '\033[2K    %s\n' "${options[$i]}" >&2
-    fi
-  done
-  printf '\033[2K\033[90m  ↑/↓ navigate · enter confirm · q quit\033[0m' >&2
+  {
+    printf '\033[2K%s\n'  "$title"
+    printf '\033[2K\n'
+    for ((i=0; i<total; i++)); do
+      if ((i == cur)); then
+        printf '\033[2K  \033[36m❯ %s\033[0m\n' "${options[$i]}"
+      else
+        printf '\033[2K    %s\n' "${options[$i]}"
+      fi
+    done
+    printf '\033[2K\033[90m  ↑/↓ navigate · enter confirm · q quit\033[0m'
+  } > /dev/tty
 }
 
 # ── plain numbered (no TTY) ──────────────────────────────────────────────────
@@ -92,21 +99,23 @@ _ui_single_numbered() {
   local title="$1" default="$2"; shift 2; local options=("$@")
   local total=${#options[@]}
 
-  echo "$title" >&2; echo "" >&2
-  for ((i=0; i<total; i++)); do
-    local m="  "; ((i == default)) && m="> "
-    echo "$m$((i+1)). ${options[$i]}" >&2
-  done
-  echo "" >&2
-  printf "Select (1-%d): " "$total" >&2
+  {
+    echo "$title"; echo ""
+    for ((i=0; i<total; i++)); do
+      local m="  "; ((i == default)) && m="> "
+      echo "$m$((i+1)). ${options[$i]}"
+    done
+    echo ""
+    printf "Select (1-%d): " "$total"
+  } > /dev/tty
 
   while true; do
-    read -r input
+    read -r input < /dev/tty
     [[ "$input" == [qQ] ]] && return 1
     [[ "$input" =~ ^[0-9]+$ && $input -ge 1 && $input -le $total ]] && {
       echo "$((input-1))"; return 0
     }
-    printf "Invalid. (1-%d): " "$total" >&2
+    printf "Invalid. (1-%d): " "$total" > /dev/tty
   done
 }
 
@@ -121,7 +130,7 @@ ui_select_multi() {
 
   if command -v gum >/dev/null 2>&1; then
     _ui_multi_gum "$title" "${options[@]}"
-  elif [[ -t 0 && -t 2 ]]; then
+  elif [[ -r /dev/tty && -w /dev/tty ]]; then
     _ui_multi_arrows "$title" "${options[@]}"
   else
     _ui_multi_numbered "$title" "${options[@]}"
@@ -133,7 +142,7 @@ ui_select_multi() {
 _ui_multi_gum() {
   local title="$1"; shift; local options=("$@")
   local result
-  result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title")
+  result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title" < /dev/tty)
   [[ -z "$result" ]] && return 1
   local indices=()
   while IFS= read -r sel; do
@@ -157,8 +166,8 @@ _ui_multi_arrows() {
 
   local up=$((total + 2))
 
-  printf '\033[?25l' >&2
-  trap 'printf "\033[?25h" >&2' RETURN
+  printf '\033[?25l' > /dev/tty
+  trap 'printf "\033[?25h" > /dev/tty' RETURN
 
   _render_multi "$title" "$cur" "${options[@]}"
 
@@ -182,7 +191,7 @@ _ui_multi_arrows() {
         ;;
       quit) return 1 ;;
     esac
-    printf '\033[%dA\r' "$up" >&2
+    printf '\033[%dA\r' "$up" > /dev/tty
     _render_multi "$title" "$cur" "${options[@]}"
   done
 }
@@ -191,17 +200,19 @@ _render_multi() {
   local title="$1" cur="$2"; shift 2; local options=("$@")
   local total=${#options[@]}
 
-  printf '\033[2K%s\n'  "$title"  >&2
-  printf '\033[2K\n'              >&2
-  for ((i=0; i<total; i++)); do
-    local ck="○"; ((_sel[i])) && ck="◉"
-    if ((i == cur)); then
-      printf '\033[2K  \033[36m❯ %s %s\033[0m\n' "$ck" "${options[$i]}" >&2
-    else
-      printf '\033[2K    %s %s\n' "$ck" "${options[$i]}" >&2
-    fi
-  done
-  printf '\033[2K\033[90m  ↑/↓ navigate · space toggle · a all · n none · enter confirm · q quit\033[0m' >&2
+  {
+    printf '\033[2K%s\n'  "$title"
+    printf '\033[2K\n'
+    for ((i=0; i<total; i++)); do
+      local ck="○"; ((_sel[i])) && ck="◉"
+      if ((i == cur)); then
+        printf '\033[2K  \033[36m❯ %s %s\033[0m\n' "$ck" "${options[$i]}"
+      else
+        printf '\033[2K    %s %s\n' "$ck" "${options[$i]}"
+      fi
+    done
+    printf '\033[2K\033[90m  ↑/↓ navigate · space toggle · a all · n none · enter confirm · q quit\033[0m'
+  } > /dev/tty
 }
 
 # ── plain numbered (no TTY) ──────────────────────────────────────────────────
@@ -210,14 +221,16 @@ _ui_multi_numbered() {
   local title="$1"; shift; local options=("$@")
   local total=${#options[@]}
 
-  echo "$title" >&2; echo "" >&2
-  for ((i=0; i<total; i++)); do
-    echo "  $((i+1)). ${options[$i]}" >&2
-  done
-  echo "" >&2
-  printf "Enter selections (space-separated, e.g. '1 3'), q to quit: " >&2
+  {
+    echo "$title"; echo ""
+    for ((i=0; i<total; i++)); do
+      echo "  $((i+1)). ${options[$i]}"
+    done
+    echo ""
+    printf "Enter selections (space-separated, e.g. '1 3'), q to quit: "
+  } > /dev/tty
 
-  read -r nums
+  read -r nums < /dev/tty
   [[ "$nums" == [qQ] || -z "$nums" ]] && return 1
   local result=""
   for n in $nums; do
@@ -233,19 +246,21 @@ _ui_multi_numbered() {
 # Sets global $_KEY to one of:
 #   up  down  left  right  home  end  enter  space  quit  escape
 #   or the literal character (a, n, 1, 2, ...)
+#
+# Reads from /dev/tty so it works inside command substitutions.
 
 _read_key() {
   _KEY=""
   local byte
 
-  IFS= read -rsn1 byte 2>/dev/null
+  IFS= read -rsn1 byte < /dev/tty 2>/dev/null
 
   case "$byte" in
     $'\e')
       # Escape sequence: read up to 2 more bytes with tight timeout
       local s1="" s2=""
-      IFS= read -rsn1 -t 0.05 s1 2>/dev/null
-      IFS= read -rsn1 -t 0.05 s2 2>/dev/null
+      IFS= read -rsn1 -t 0.05 s1 < /dev/tty 2>/dev/null
+      IFS= read -rsn1 -t 0.05 s2 < /dev/tty 2>/dev/null
       case "${s1}${s2}" in
         '[A') _KEY=up    ;;
         '[B') _KEY=down  ;;
