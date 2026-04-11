@@ -111,7 +111,7 @@ super status
 `.super/session.md` is plain Markdown, readable by any AI:
 
 ```markdown
-# SuperCLI Session
+# Super Session
 
 **Project:** my-project
 **Started:** 2026-04-11 14:32:00

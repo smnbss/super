@@ -85,7 +85,7 @@ session_new() {
   local filepath="$sessions_dir/${ts}_${safe_title}.md"
 
   cat > "$filepath" << EOF
-# SuperCLI Session: $title
+# Super Session: $title
 
 **Project:** $(basename "$(_super_find_root)")
 **Started:** $(date '+%Y-%m-%d %H:%M:%S')
@@ -128,7 +128,7 @@ session_list() {
   while IFS= read -r f; do
     [[ -f "$f" ]] || continue
     local title started turns marker
-    title="$(grep '^# SuperCLI Session:' "$f" | sed 's/# SuperCLI Session: //' | head -1)"
+    title="$(grep '^# Super Session:' "$f" | sed 's/# Super Session: //' | head -1)"
     [[ -z "$title" ]] && title="$(basename "$f" .md)"
     started="$(grep '^\*\*Started:\*\*' "$f" | sed 's/\*\*Started:\*\* //' | head -1)"
     turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
@@ -143,6 +143,7 @@ session_list() {
 
 session_pick() {
   # Prompts the user to pick a session. Echoes the chosen filepath, or "" for new.
+  # All UI output goes to stderr so it displays even when stdout is captured.
   local sessions_dir
   sessions_dir="$(_super_sessions_dir)"
 
@@ -158,14 +159,14 @@ session_pick() {
   local active
   active="$(_super_session_file)"
 
-  echo ""
-  echo -e "\033[1mSaved sessions  (newest first)\033[0m"
-  echo ""
+  echo "" >&2
+  echo -e "\033[1mSaved sessions  (newest first)\033[0m" >&2
+  echo "" >&2
 
   local i=1
   for f in "${files[@]}"; do
     local title started turns col marker
-    title="$(grep '^# SuperCLI Session:' "$f" | sed 's/# SuperCLI Session: //' | head -1)"
+    title="$(grep '^# Super Session:' "$f" | sed 's/# Super Session: //' | head -1)"
     [[ -z "$title" ]] && title="$(basename "$f" .md)"
     started="$(grep '^\*\*Started:\*\*' "$f" | sed 's/\*\*Started:\*\* //' | head -1)"
     turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
@@ -174,12 +175,12 @@ session_pick() {
       col="\033[1;32m"; marker=" ◀"
     fi
     printf "  \033[1m[%2d]\033[0m  ${col}%-38s\033[0m  %-20s  %s turns%s\n" \
-      "$i" "$title" "$started" "$turns" "$marker"
+      "$i" "$title" "$started" "$turns" "$marker" >&2
     ((i++))
   done
-  echo ""
-  printf "  \033[1m[n]\033[0m  Start a \033[1mnew\033[0m session\n"
-  echo ""
+  echo "" >&2
+  printf "  \033[1m[n]\033[0m  Start a \033[1mnew\033[0m session\n" >&2
+  echo "" >&2
 
   read -rp "  Choice: " choice
 
