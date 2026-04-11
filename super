@@ -151,7 +151,7 @@ cmd_doctor() {
       else
         ui_warn "${CLI_ICON[$cli]} ${CLI_LABEL[$cli]} hooks not found"
         ui_muted "      Run: super install $cli"
-        ((issues++))
+        issues=$((issues + 1))
       fi
     else
       ui_muted "  ${CLI_ICON[$cli]} ${CLI_LABEL[$cli]} — no config file"
@@ -167,11 +167,11 @@ cmd_doctor() {
   elif [[ -f "$root/CLAUDE.md" && ! -L "$root/CLAUDE.md" ]]; then
     ui_warn "CLAUDE.md is a regular file (not symlinked)"
     ui_muted "      Run: super install to fix"
-    ((issues++))
+    issues=$((issues + 1))
   else
     ui_warn "Context files not set up"
     ui_muted "      Run: super install"
-    ((issues++))
+    issues=$((issues + 1))
   fi
   
   # Check session health
@@ -632,7 +632,7 @@ cmd_sessions() {
     [[ "$first_turn" == *"🟡"* ]] && cli="kimi"
     
     ui_session_line "$i" "$title" "$started" "$turns" "$cli" "$is_active"
-    ((i++))
+    i=$((i + 1))
   done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
   
   ui_spacer
@@ -821,40 +821,25 @@ cmd_menu() {
   
   [[ -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
   
-  # Map selection to action
+  # Map selection to action — idx tracks position in dynamic options list
   local idx=0
-  local selection=""
-  
-  # First option is always "new"
-  if [[ "$choice" -eq "$idx" ]]; then
-    selection="new"
-  fi
-  ((idx++))
-  
-  # Maybe resume
+
+  # "new" is always first
+  [[ "$choice" -eq $idx ]] && { _pick_cli_and_launch; return; }
+  idx=$((idx + 1))
+
+  # "resume" only if sessions exist
   if [[ "$has_sessions" -eq 1 ]]; then
-    if [[ "$choice" -eq "$idx" ]]; then
-      selection="resume"
-    fi
-    ((idx++))
+    [[ "$choice" -eq $idx ]] && { cmd_resume; return; }
+    idx=$((idx + 1))
   fi
-  
-  # Doctor
-  if [[ "$choice" -eq "$idx" ]]; then
-    selection="doctor"
-  fi
-  ((idx++))
-  
-  # Quit
-  if [[ "$choice" -eq "$idx" ]]; then
-    ui_info "Bye!"; exit 0
-  fi
-  
-  case "$selection" in
-    new) _pick_cli_and_launch ;;
-    resume) cmd_resume ;;
-    doctor) cmd_doctor ;;
-  esac
+
+  # "doctor"
+  [[ "$choice" -eq $idx ]] && { cmd_doctor; return; }
+  idx=$((idx + 1))
+
+  # "quit"
+  ui_info "Bye!"; exit 0
 }
 
 # Detect last CLI used in active session
@@ -877,7 +862,6 @@ _pick_cli_and_launch() {
   # Build list of installed CLIs
   local options=()
   local cli_keys=()
-
   for cli in claude gemini codex kimi; do
     if is_installed "$cli"; then
       options+=("${CLI_ICON[$cli]} ${CLI_LABEL[$cli]}")

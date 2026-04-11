@@ -30,34 +30,13 @@ ui_select_single() {
 
 _ui_single_gum() {
   local title="$1" default_idx="$2"; shift 2; local options=("$@")
-
-  # Debug: log to super.log
-  local _logf="${SUPER_HOME:-$HOME/.super}/super-debug.log"
-  {
-    echo "--- _ui_single_gum $(date +%H:%M:%S) ---"
-    echo "  title: $title"
-    echo "  options count: ${#options[@]}"
-    echo "  options: ${options[*]}"
-    echo "  gum path: $(command -v gum)"
-    echo "  tty: $(tty 2>&1)"
-    echo "  TERM: $TERM"
-  } >> "$_logf"
-
-  local result gum_exit
-  result=$(gum choose --height=10 --header "$title" -- "${options[@]}")
-  gum_exit=$?
-
-  {
-    echo "  gum exit: $gum_exit"
-    echo "  gum result: [$result]"
-  } >> "$_logf"
-
-  [[ $gum_exit -ne 0 ]] && return 1
+  local result
+  result=$(gum choose --height=10 --header "$title" -- "${options[@]}") || return 1
   [[ -z "$result" ]] && return 1
   local i=0
   for opt in "${options[@]}"; do
     [[ "$opt" == "$result" ]] && { echo "$i"; return 0; }
-    ((i++))
+    i=$((i + 1))
   done
   return 1
 }
@@ -167,7 +146,7 @@ _ui_multi_gum() {
     local i=0
     for opt in "${options[@]}"; do
       [[ "$opt" == "$sel" ]] && { indices+=("$i"); break; }
-      ((i++))
+      i=$((i + 1))
     done
   done <<< "$result"
   echo "${indices[*]}"

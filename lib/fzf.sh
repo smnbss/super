@@ -63,7 +63,7 @@ _fzf_pick_session() {
     printf -v line "%s|%s|%s turns|%s%s" "$name" "$age_str" "$turns" "$age_str" "$marker"
     list="${list}${line}\n"
     
-    ((i++))
+    i=$((i + 1))
   done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
   
   [[ -z "$list" ]] && { echo ""; return; }

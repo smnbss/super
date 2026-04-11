@@ -135,7 +135,7 @@ session_list() {
     marker=""
     [[ "$f" == "$active" ]] && marker=" ◀ active"
     printf '%d\t%s\t%s\t%s turns%s\n' "$i" "$(basename "$f")" "$started" "$turns" "$marker"
-    ((i++))
+    i=$((i + 1))
   done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
 }
 
@@ -383,7 +383,7 @@ session_cleanup_old() {
     local age=$(( ($(date +%s) - $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)) / 86400 ))
     if [[ $age -gt $max_age ]]; then
       rm "$f"
-      ((count++))
+      count=$((count + 1))
     fi
   done < <(find "$sessions_dir" -name "*.md" -type f 2>/dev/null)
   
