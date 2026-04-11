@@ -217,7 +217,8 @@ cmd_launch() {
 
   # Run catchup if resuming an existing session
   if [[ "$do_resume" -eq 1 && -n "$session_file" ]]; then
-    cmd_catchup
+    # Pass session file explicitly to avoid race condition with active pointer
+    SUPER_SESSION_FILE="$session_file" cmd_catchup
   fi
 
   echo ""
@@ -693,7 +694,8 @@ cmd_save() {
 
 cmd_catchup() {
   local session_file
-  session_file="$(_super_session_file)"
+  # Use explicitly passed session file, or fall back to active pointer
+  session_file="${SUPER_SESSION_FILE:-$(_super_session_file)}"
   
   if [[ -z "$session_file" || ! -f "$session_file" ]]; then
     warn "No active session."

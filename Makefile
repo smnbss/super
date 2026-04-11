@@ -31,6 +31,8 @@ test:
 	@bash tests/test_cli_selection.sh
 	@bash tests/test_installed_detection.sh
 	@bash tests/test_integration.sh
+	@bash tests/test_resume_catchup.sh
+	@bash tests/test_all_agents_resume.sh
 
 clean:
 	@rm -rf dist/
