@@ -138,10 +138,10 @@ cmd_doctor() {
     local config_file=""
     local hook_type=""
     case "$cli" in
-      claude) config_file="$root/.claude/settings.json"; hook_type="command" ;;
-      gemini) config_file="$root/.gemini/settings.json"; hook_type="name" ;;
-      codex)  config_file="$root/.codex/hooks.json";     hook_type="command" ;;
-      kimi)   config_file="$root/.kimi/config.toml";     ;;
+      claude) config_file="$HOME/.claude/settings.json"; hook_type="command" ;;
+      gemini) config_file="$HOME/.gemini/settings.json"; hook_type="name" ;;
+      codex)  config_file="$HOME/.codex/hooks.json";     hook_type="command" ;;
+      kimi)   config_file="$HOME/.kimi/config.toml";     ;;
     esac
     
     if [[ -f "$config_file" ]]; then
@@ -224,7 +224,17 @@ _merge_json_hooks() {
 import sys, json
 path, new_json, idf = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path) as f: existing = json.load(f)
-new_hooks = json.loads(new_json).get("hooks", {})
+new_data = json.loads(new_json)
+new_hooks = new_data.get("hooks", {})
+new_env = new_data.get("env", {})
+
+# Merge env section
+if new_env:
+    if "env" not in existing: existing["env"] = {}
+    for key, value in new_env.items():
+        existing["env"][key] = value
+
+# Merge hooks section
 if "hooks" not in existing: existing["hooks"] = {}
 
 for event, new_defs in new_hooks.items():
@@ -248,8 +258,7 @@ PYEOF
 }
 
 install_hooks_claude() {
-  local root; root="$(_super_find_root)"
-  local dir="$root/.claude"; mkdir -p "$dir"
+  local dir="$HOME/.claude"; mkdir -p "$dir"
   local sf="$dir/settings.json"
   local template="$SUPER_HOME/hooks/claude/settings.json.template"
   
@@ -262,8 +271,7 @@ install_hooks_claude() {
 }
 
 install_hooks_gemini() {
-  local root; root="$(_super_find_root)"
-  local dir="$root/.gemini"; mkdir -p "$dir"
+  local dir="$HOME/.gemini"; mkdir -p "$dir"
   local gf="$dir/settings.json"
   local template="$SUPER_HOME/hooks/gemini/settings.json.template"
   
@@ -276,8 +284,7 @@ install_hooks_gemini() {
 }
 
 install_hooks_codex() {
-  local root; root="$(_super_find_root)"
-  local dir="$root/.codex"; mkdir -p "$dir"
+  local dir="$HOME/.codex"; mkdir -p "$dir"
   local hf="$dir/hooks.json"
   local template="$SUPER_HOME/hooks/codex/hooks.json.template"
   
@@ -290,8 +297,7 @@ install_hooks_codex() {
 }
 
 install_hooks_kimi() {
-  local root; root="$(_super_find_root)"
-  local cfg="$root/.kimi/config.toml"; mkdir -p "$(dirname "$cfg")"
+  local cfg="$HOME/.kimi/config.toml"; mkdir -p "$(dirname "$cfg")"
   local template="$SUPER_HOME/hooks/kimi/config.toml.template"
   
   # Expand $SUPER_HOME in comments, keep {{SUPER_HOME}} as variable in commands
