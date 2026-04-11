@@ -15,6 +15,250 @@ if command -v gum &>/dev/null; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# UNIFIED MENU SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+# All menus use consistent keybindings:
+#   ↑/↓     Navigate
+#   SPACE   Toggle (multi-select) or Select (single)
+#   ENTER   Confirm
+#   A       Select all (multi-select only)
+#   N       Select none (multi-select only)
+#   Q       Quit/Cancel
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Display standard menu help
+_ui_menu_help() {
+  local mode="${1:-single}"  # single or multi
+  
+  if [[ "$mode" == "multi" ]]; then
+    ui_muted "  ↑↓ navigate  SPACE toggle  ENTER confirm  A=all  N=none  Q=quit"
+  else
+    ui_muted "  ↑↓ navigate  SPACE/ENTER select  Q=quit"
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SINGLE SELECT MENU (for main menu, CLI picker, etc.)
+# Returns: index (0-based) or empty if cancelled
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ui_select_single() {
+  local title="$1"
+  shift
+  local options=("$@")
+  local default_idx="${2:-0}"
+  
+  if [[ "$GUM_AVAILABLE" == "true" ]]; then
+    _ui_select_single_gum "$title" "$default_idx" "${options[@]}"
+  else
+    _ui_select_single_bash "$title" "$default_idx" "${options[@]}"
+  fi
+}
+
+_ui_select_single_gum() {
+  local title="$1"
+  local default_idx="$2"
+  shift 2
+  local options=("$@")
+  
+  local result
+  result=$(printf '%s\n' "${options[@]}" | gum choose --height=10 --header "$title")
+  
+  # Find index of selection
+  local i=0
+  for opt in "${options[@]}"; do
+    [[ "$opt" == "$result" ]] && echo "$i" && return 0
+    ((i++))
+  done
+  
+  echo ""  # Cancelled
+}
+
+_ui_select_single_bash() {
+  local title="$1"
+  local cursor="$2"
+  shift 2
+  local options=("$@")
+  local total=${#options[@]}
+  
+  # Hide cursor
+  printf '\033[?25l'
+  
+  while true; do
+    # Clear and redraw
+    printf '\033[J'
+    
+    ui_bold "$title"
+    echo ""
+    _ui_menu_help "single"
+    echo ""
+    
+    # Draw options
+    for ((i=0; i<total; i++)); do
+      if [[ $i -eq $cursor ]]; then
+        printf " $(_c $UI_PRIMARY)>${UI_RESET} %s\n" "${options[$i]}"
+      else
+        printf "   %s\n" "${options[$i]}"
+      fi
+    done
+    
+    # Read key
+    read -rs -n1 key
+    
+    case "$key" in
+      $'\x1b')  # Escape sequence
+        read -rs -n2 key
+        case "$key" in
+          '[A') ((cursor > 0)) && ((cursor--)) ;;  # Up
+          '[B') ((cursor < total - 1)) && ((cursor++)) ;;  # Down
+        esac
+        ;;
+      ' '|'')  # Space or Enter - select
+        printf '\033[?25h'  # Show cursor
+        echo "$cursor"
+        return 0
+        ;;
+      'q'|'Q')  # Quit
+        printf '\033[?25h'
+        echo ""
+        return 1
+        ;;
+    esac
+    
+    # Move cursor back up for redraw
+    printf '\033[%dA' $((total + 3))
+  done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MULTI-SELECT MENU (for install, etc.)
+# Returns: space-separated indices (0-based) or empty if cancelled
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ui_select_multi() {
+  local title="$1"
+  shift
+  local options=("$@")
+  local defaults="${2:-}"  # space-separated default selections
+  
+  if [[ "$GUM_AVAILABLE" == "true" ]]; then
+    _ui_select_multi_gum "$title" "${options[@]}"
+  else
+    _ui_select_multi_bash "$title" "$defaults" "${options[@]}"
+  fi
+}
+
+_ui_select_multi_gum() {
+  local title="$1"
+  shift
+  local options=("$@")
+  
+  local result
+  result=$(printf '%s\n' "${options[@]}" | gum choose --no-limit --height=10 --header "$title")
+  
+  [[ -z "$result" ]] && return 1
+  
+  # Convert selections to indices
+  local indices=()
+  while IFS= read -r selected; do
+    local i=0
+    for opt in "${options[@]}"; do
+      [[ "$opt" == "$selected" ]] && indices+=("$i") && break
+      ((i++))
+    done
+  done <<< "$result"
+  
+  printf '%s\n' "${indices[@]}"
+}
+
+_ui_select_multi_bash() {
+  local title="$1"
+  local defaults="$2"
+  shift 2
+  local options=("$@")
+  local total=${#options[@]}
+  
+  # Initialize selections from defaults
+  local selected=()
+  for ((i=0; i<total; i++)); do
+    selected[$i]=0
+  done
+  for idx in $defaults; do
+    [[ "$idx" =~ ^[0-9]+$ ]] && ((idx < total)) && selected[$idx]=1
+  done
+  
+  local cursor=0
+  
+  # Hide cursor
+  printf '\033[?25l'
+  
+  while true; do
+    # Clear and redraw
+    printf '\033[J'
+    
+    ui_bold "$title"
+    echo ""
+    _ui_menu_help "multi"
+    echo ""
+    
+    # Draw options
+    for ((i=0; i<total; i++)); do
+      local marker="○"
+      local color="$UI_MUTED"
+      
+      [[ ${selected[$i]} -eq 1 ]] && marker="◉" && color="$UI_SUCCESS"
+      
+      if [[ $i -eq $cursor ]]; then
+        printf " $(_c $UI_PRIMARY)>${UI_RESET} $(_c $color)${marker}${UI_RESET} %s\n" "${options[$i]}"
+      else
+        printf "   $(_c $color)${marker}${UI_RESET} %s\n" "${options[$i]}"
+      fi
+    done
+    
+    # Read key
+    read -rs -n1 key
+    
+    case "$key" in
+      $'\x1b')  # Escape sequence
+        read -rs -n2 key
+        case "$key" in
+          '[A') ((cursor > 0)) && ((cursor--)) ;;
+          '[B') ((cursor < total - 1)) && ((cursor++)) ;;
+        esac
+        ;;
+      ' ')  # Space - toggle
+        selected[$cursor]=$((1 - ${selected[$cursor]}))
+        ;;
+      'a'|'A')  # Select all
+        for ((i=0; i<total; i++)); do selected[$i]=1; done
+        ;;
+      'n'|'N')  # Select none
+        for ((i=0; i<total; i++)); do selected[$i]=0; done
+        ;;
+      '')  # Enter - confirm
+        # Check if anything selected
+        local any=0
+        for ((i=0; i<total; i++)); do
+          [[ ${selected[$i]} -eq 1 ]] && any=1 && printf '%d ' "$i"
+        done
+        printf '\033[?25h'  # Show cursor
+        echo ""  # Newline
+        [[ $any -eq 0 ]] && return 1
+        return 0
+        ;;
+      'q'|'Q')  # Quit
+        printf '\033[?25h'
+        echo ""
+        return 1
+        ;;
+    esac
+    
+    # Move cursor back up for redraw
+    printf '\033[%dA' $((total + 3))
+  done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # INSTALL INTERACTIVE MAIN ENTRY
 # ═══════════════════════════════════════════════════════════════════════════════
 

@@ -488,6 +488,7 @@ cmd_resume() {
   local input="${1:-}"
   
   if [[ -n "$input" ]]; then
+    # Session file provided - pick CLI to resume in
     local session_file
     [[ -f "$input" ]] || input="$(_super_sessions_dir)/$input"
     [[ -f "$input" ]] || die "Session not found: $1"
@@ -496,27 +497,87 @@ cmd_resume() {
     ui_msg_resuming "$(basename "$session_file")"
     echo "$session_file" > "$(_super_active_ptr)"
     
-    # Pick CLI to resume in
-    ui_spacer
-    ui_print "$(ui_bold "Which CLI would you like to resume in?")"
-    ui_spacer
+    # Build CLI options
+    local options=()
+    local cli_keys=()
     
-    local chosen; chosen="$(fzf_pick_cli)"
-    [[ "$chosen" == "QUIT" ]] && { ui_info "Cancelled."; return; }
-    [[ -z "$chosen" ]] && { ui_info "No CLI selected."; return; }
+    for cli in claude gemini codex kimi; do
+      if is_installed "$cli"; then
+        options+=("${CLI_ICON[$cli]} ${CLI_LABEL[$cli]}")
+        cli_keys+=("$cli")
+      fi
+    done
     
-    is_installed "$chosen" || die "${CLI_LABEL[$chosen]} is not installed"
+    [[ ${#options[@]} -eq 0 ]] && die "No CLIs installed."
+    [[ ${#options[@]} -eq 1 ]] && { cmd_launch "${cli_keys[0]}" --resume "$session_file"; return; }
     
-    cmd_launch "$chosen" --resume "$session_file"
+    ui_banner
+    local choice
+    choice=$(ui_select_single "Which CLI would you like to resume in?" 0 "${options[@]}")
+    
+    [[ -z "$choice" ]] && { ui_info "Cancelled."; return; }
+    
+    cmd_launch "${cli_keys[$choice]}" --resume "$session_file"
   else
-    # Show picker
-    local picked; picked="$(fzf_pick_session)"
-    [[ "$picked" == "QUIT" ]] && { ui_info "Cancelled."; return; }
-    [[ -z "$picked" ]] && { cmd_menu; return; }
-    [[ "$picked" == "NEW" ]] && { cmd_menu; return; }
-    
-    cmd_resume "$picked"
+    # No input - show session picker
+    _pick_session_and_resume
   fi
+}
+
+_pick_session_and_resume() {
+  local sessions_dir; sessions_dir="$(_super_sessions_dir)"
+  
+  if [[ ! -d "$sessions_dir" ]] || [[ -z "$(ls "$sessions_dir"/*.md 2>/dev/null)" ]]; then
+    ui_warn "No sessions found."
+    ui_muted "Run: super launch <cli> to create one"
+    return 1
+  fi
+  
+  # Build session list
+  local files=()
+  local options=()
+  local active; active="$(_super_session_file)"
+  
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    files+=("$f")
+    
+    local name turns marker cli
+    name="$(basename "$f" .md)"
+    turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
+    [[ "$f" == "$active" ]] && marker=" ◀ ACTIVE" || marker=""
+    
+    # Detect CLI from first turn
+    local first_turn; first_turn="$(grep -m1 '^## ' "$f" 2>/dev/null)"
+    cli=""
+    [[ "$first_turn" == *"🟠"* ]] && cli="🟠"
+    [[ "$first_turn" == *"🔵"* ]] && cli="🔵"
+    [[ "$first_turn" == *"🟢"* ]] && cli="🟢"
+    [[ "$first_turn" == *"🟡"* ]] && cli="🟡"
+    [[ -z "$cli" ]] && cli="⚪"
+    
+    options+=("$cli $name ($turns turns)$marker")
+  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
+  
+  [[ ${#options[@]} -eq 0 ]] && { ui_warn "No sessions found."; return 1; }
+  
+  # Add "New session" option at the end
+  options+=("🆕 Start a new session")
+  
+  ui_banner
+  local choice
+  choice=$(ui_select_single "Select a session to resume:" 0 "${options[@]}")
+  
+  [[ -z "$choice" ]] && { ui_info "Cancelled."; return; }
+  
+  # Check if "new session" selected (last option)
+  if [[ "$choice" -eq ${#files[@]} ]]; then
+    cmd_menu
+    return
+  fi
+  
+  # Resume selected session
+  cmd_resume "${files[$choice]}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -694,22 +755,26 @@ cmd_menu() {
     local turns; turns="$(grep -c '^## ' "$active" 2>/dev/null || echo 0)"
     local name; name="$(basename "$active" .md)"
     
-    ui_spacer
+    ui_banner
     ui_print "  $(_c $UI_SUCCESS)${UI_ICON_ACTIVE}${UI_RESET} $(_c $UI_BOLD)Active:${UI_RESET} $name ($turns turns)"
     ui_spacer
-    ui_menu_item "↵" "" "Continue active session" "press Enter"
-    ui_menu_item "n" "$UI_ICON_NEW" "Start new session"
-    ui_menu_item "r" "$UI_ICON_RESUME" "Resume different session"
-    ui_menu_item "s" "" "View status"
-    ui_menu_item "d" "" "Run doctor"
-    ui_menu_item "q" "" "Quit"
-    ui_spacer
-    ui_prompt "Choice:"
-    read -r choice
+    
+    local options=(
+      "↩  Continue active session"
+      "🆕 Start new session"
+      "↩️  Resume different session"
+      "📊 View status"
+      "🩺 Run doctor"
+      "🚪 Quit"
+    )
+    
+    local choice
+    choice=$(ui_select_single "What would you like to do?" 0 "${options[@]}")
+    
+    [[ -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
     
     case "$choice" in
-      ""|↵|1) 
-        # Continue with same CLI or ask
+      0)  # Continue active
         local last_cli; last_cli="$(detect_last_cli)"
         if [[ -n "$last_cli" ]]; then
           cmd_launch "$last_cli" --resume
@@ -717,38 +782,61 @@ cmd_menu() {
           cmd_resume
         fi
         ;;
-      n|N|new|2) _pick_cli_and_launch ;;
-      r|R|resume|3) cmd_resume ;;
-      s|S|status|4) print_banner; print_status ;;
-      d|D|doctor|5) cmd_doctor ;;
-      q|Q|quit) ui_info "Bye!"; exit 0 ;;
-      *) cmd_menu ;;
+      1) _pick_cli_and_launch ;;  # New session
+      2) cmd_resume ;;             # Resume different
+      3) print_banner; print_status ;;  # Status
+      4) cmd_doctor ;;             # Doctor
+      5) ui_info "Bye!"; exit 0 ;; # Quit
     esac
     return
   fi
   
   # No active session — show standard menu
-  ui_spacer
-  ui_print "  $(ui_bold "What would you like to do?")"
-  ui_spacer
+  ui_banner
   
-  ui_menu_item "1" "$UI_ICON_NEW" "Start a new session"
-  if [[ "$has_sessions" -eq 1 ]]; then
-    ui_menu_item "2" "$UI_ICON_RESUME" "Resume a previous session"
+  local options=("🆕 Start a new session")
+  [[ "$has_sessions" -eq 1 ]] && options+=("↩️  Resume a previous session")
+  options+=("🩺 Run health check (doctor)")
+  options+=("🚪 Quit")
+  
+  local choice
+  choice=$(ui_select_single "What would you like to do?" 0 "${options[@]}")
+  
+  [[ -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
+  
+  # Map selection to action
+  local idx=0
+  local selection=""
+  
+  # First option is always "new"
+  if [[ "$choice" -eq "$idx" ]]; then
+    selection="new"
   fi
-  ui_menu_item "d" "" "Run health check (doctor)"
-  ui_menu_item "q" "" "Quit"
-  ui_spacer
+  ((idx++))
   
-  ui_prompt "Choice:"
-  read -r choice
-  [[ "$choice" == "q" || -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
-
-  case "$choice" in
-    1|n|new) _pick_cli_and_launch ;;
-    2|r|resume) [[ "$has_sessions" -eq 1 ]] && cmd_resume || die "Invalid choice" ;;
-    d|doctor) cmd_doctor ;;
-    *) die "Invalid choice: $choice" ;;
+  # Maybe resume
+  if [[ "$has_sessions" -eq 1 ]]; then
+    if [[ "$choice" -eq "$idx" ]]; then
+      selection="resume"
+    fi
+    ((idx++))
+  fi
+  
+  # Doctor
+  if [[ "$choice" -eq "$idx" ]]; then
+    selection="doctor"
+  fi
+  ((idx++))
+  
+  # Quit
+  if [[ "$choice" -eq "$idx" ]]; then
+    ui_info "Bye!"; exit 0
+  fi
+  
+  case "$selection" in
+    new) _pick_cli_and_launch ;;
+    resume) cmd_resume ;;
+    doctor) cmd_doctor ;;
   esac
 }
 
@@ -769,11 +857,27 @@ detect_last_cli() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _pick_cli_and_launch() {
-  local chosen; chosen="$(fzf_pick_cli)"
-  [[ "$chosen" == "QUIT" ]] && { ui_info "Bye!"; exit 0; }
-  [[ -z "$chosen" ]] && { cmd_menu; return; }
+  # Build list of installed CLIs
+  local options=()
+  local cli_keys=()
   
-  cmd_launch "$chosen"
+  for cli in claude gemini codex kimi; do
+    if is_installed "$cli"; then
+      options+=("${CLI_ICON[$cli]} ${CLI_LABEL[$cli]}")
+      cli_keys+=("$cli")
+    fi
+  done
+  
+  [[ ${#options[@]} -eq 0 ]] && die "No CLIs installed. Install one first."
+  [[ ${#options[@]} -eq 1 ]] && { cmd_launch "${cli_keys[0]}"; return; }
+  
+  ui_banner
+  local choice
+  choice=$(ui_select_single "Which CLI would you like to use?" 0 "${options[@]}")
+  
+  [[ -z "$choice" ]] && { ui_info "Cancelled."; exit 0; }
+  
+  cmd_launch "${cli_keys[$choice]}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -816,112 +920,98 @@ cmd_config_interactive() {
   [[ -f "$cfg" ]] || _super_config_init
   
   while true; do
-    ui_spacer
-    ui_print "  $(ui_bold "Configuration Options")"
-    ui_spacer
-    ui_menu_item "1" "" "Session settings" "cleanup, transcripts"
-    ui_menu_item "2" "" "Security settings" "yolo mode, path restrictions"
-    ui_menu_item "3" "" "UI settings" "interactive mode"
-    ui_menu_item "4" "" "View current config"
-    ui_menu_item "5" "" "Edit config in editor"
-    ui_menu_item "q" "" "Quit"
-    ui_spacer
-    ui_prompt "Choice:"
-    read -r choice
+    local options=(
+      "📁 Session settings — cleanup, transcripts"
+      "🔒 Security settings — yolo mode, path restrictions"
+      "🎨 UI settings — interactive mode"
+      "👁  View current config"
+      "✏️  Edit config in editor"
+      "🚪 Quit"
+    )
+    
+    local choice
+    choice=$(ui_select_single "Configuration Options" 0 "${options[@]}")
+    
+    [[ -z "$choice" ]] && { ui_info "Done!"; return; }
     
     case "$choice" in
-      1) _config_interactive_sessions ;;
-      2) _config_interactive_security ;;
-      3) _config_interactive_ui ;;
-      4) cmd_config show ;;
-      5) cmd_config edit ;;
-      q|Q) ui_info "Done!"; return ;;
-      *) ui_warn "Invalid choice" ;;
+      0) _config_interactive_sessions ;;
+      1) _config_interactive_security ;;
+      2) _config_interactive_ui ;;
+      3) cmd_config show ;;
+      4) cmd_config edit ;;
+      5) ui_info "Done!"; return ;;
     esac
   done
 }
 
 _config_interactive_sessions() {
-  ui_spacer
-  ui_print "  $(ui_bold "Session Settings")"
-  ui_spacer
-  
   # Get current values
-  local cleanup_enabled; cleanup_enabled="$(_super_config_enabled "session.cleanup" && echo "yes" || echo "no")"
+  local cleanup_enabled; cleanup_enabled="$(_super_config_enabled "session.cleanupOnStart" && echo "yes" || echo "no")"
   local max_age; max_age="$(_super_session_max_age)"
   [[ -z "$max_age" ]] && max_age="7"
   
-  ui_print "  Auto-cleanup: $(_c $([[ "$cleanup_enabled" == "yes" ]] && echo $UI_SUCCESS || echo $UI_MUTED); echo "$cleanup_enabled"${UI_RESET})"
-  ui_print "  Max age: $max_age days"
-  ui_spacer
+  local options=("🧹 Toggle auto-cleanup (currently: $cleanup_enabled)")
+  options+=("📅 Change max age (currently: $max_age days)")
+  options+=("⬅️  Back")
   
-  ui_menu_item "1" "" "Toggle auto-cleanup"
-  ui_menu_item "2" "" "Change max age"
-  ui_menu_item "b" "" "Back"
-  ui_spacer
-  ui_prompt "Choice:"
-  read -r subchoice
+  local choice
+  choice=$(ui_select_single "Session Settings" 0 "${options[@]}")
   
-  case "$subchoice" in
-    1)
+  [[ -z "$choice" ]] && return
+  
+  case "$choice" in
+    0)
       if [[ "$cleanup_enabled" == "yes" ]]; then
-        _super_config_set "session.cleanup" "false"
+        _super_config_set "session.cleanupOnStart" "false"
         ui_success "Auto-cleanup disabled"
       else
-        _super_config_set "session.cleanup" "true"
+        _super_config_set "session.cleanupOnStart" "true"
         ui_success "Auto-cleanup enabled"
       fi
       ;;
-    2)
-      ui_prompt "Enter max age in days (current: $max_age):"
-      read -r new_age
+    1)
+      local new_age
+      new_age=$(ui_input "Enter max age in days" "30" "$max_age")
       if [[ "$new_age" =~ ^[0-9]+$ ]]; then
-        _super_config_set "session.maxAge" "$new_age"
+        _super_config_set "session.maxAgeDays" "$new_age"
         ui_success "Max age set to $new_age days"
       else
         ui_warn "Invalid number"
       fi
       ;;
-    b|B) return ;;
+    2) return ;;
   esac
 }
 
 _config_interactive_security() {
-  ui_spacer
-  ui_print "  $(ui_bold "Security Settings")"
-  ui_spacer
-  
   # Get current values
-  local yolo_enabled; yolo_enabled="$(_super_config_enabled "security.yolo" && echo "yes" || echo "no")"
+  local yolo_enabled; yolo_enabled="$(_super_config_enabled "security.yoloMode" && echo "ON" || echo "OFF")"
   
-  ui_print "  Yolo mode: $(_c $([[ "$yolo_enabled" == "yes" ]] && echo $UI_WARNING || echo $UI_SUCCESS); echo "$yolo_enabled"${UI_RESET})"
-  ui_print "  $(_c $UI_MUTED)(Yolo mode disables confirmation prompts for destructive actions)${UI_RESET}"
-  ui_spacer
+  local options=("⚡ Toggle yolo mode (currently: $yolo_enabled)")
+  options+=("⬅️  Back")
   
-  ui_menu_item "1" "" "Toggle yolo mode"
-  ui_menu_item "b" "" "Back"
-  ui_spacer
-  ui_prompt "Choice:"
-  read -r subchoice
+  local choice
+  choice=$(ui_select_single "Security Settings" 0 "${options[@]}")
   
-  case "$subchoice" in
-    1)
-      if [[ "$yolo_enabled" == "yes" ]]; then
-        _super_config_set "security.yolo" "false"
+  [[ -z "$choice" ]] && return
+  
+  case "$choice" in
+    0)
+      if [[ "$yolo_enabled" == "ON" ]]; then
+        _super_config_set "security.yoloMode" "false"
         ui_success "Yolo mode disabled — confirmations enabled"
       else
         ui_warn "Enabling yolo mode — this is dangerous!"
-        ui_prompt "Are you sure? (yes/no):"
-        read -r confirm
-        if [[ "$confirm" == "yes" ]]; then
-          _super_config_set "security.yolo" "true"
+        if ui_confirm "Are you sure?" "no"; then
+          _super_config_set "security.yoloMode" "true"
           ui_success "Yolo mode enabled — no confirmations"
         else
           ui_info "Cancelled"
         fi
       fi
       ;;
-    b|B) return ;;
+    1) return ;;
   esac
 }
 
