@@ -948,7 +948,8 @@ cmd_config_interactive() {
 
 _config_interactive_sessions() {
   # Get current values
-  local cleanup_enabled; cleanup_enabled="$(_super_config_enabled "session.cleanupOnStart" && echo "yes" || echo "no")"
+  local cleanup_enabled="no"
+  _super_config_enabled "session.cleanupOnStart" && cleanup_enabled="yes" || true
   local max_age; max_age="$(_super_session_max_age)"
   [[ -z "$max_age" ]] && max_age="7"
   
@@ -987,7 +988,8 @@ _config_interactive_sessions() {
 
 _config_interactive_security() {
   # Get current values
-  local yolo_enabled; yolo_enabled="$(_super_config_enabled "security.yoloMode" && echo "ON" || echo "OFF")"
+  local yolo_enabled="OFF"
+  _super_config_enabled "security.yoloMode" && yolo_enabled="ON" || true
   
   local options=("⚡ Toggle yolo mode (currently: $yolo_enabled)")
   options+=("⬅️  Back")

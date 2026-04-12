@@ -82,14 +82,14 @@ _super_config_get() {
   
   if [[ -z "$config_file" ]]; then
     # Use defaults
-    default_config | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d.get('$path', ''))" 2>/dev/null
+    default_config | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d.get('$path', ''))" 2>/dev/null || true
     return
   fi
   
   if command -v yq &>/dev/null; then
-    yq -r ".${path}" "$config_file" 2>/dev/null
+    yq -r ".${path}" "$config_file" 2>/dev/null || true
   else
-    python3 -c "import yaml; d=yaml.safe_load(open('$config_file')); print(d.get('$path', ''))" 2>/dev/null
+    python3 -c "import yaml; d=yaml.safe_load(open('$config_file')); print(d.get('$path', ''))" 2>/dev/null || true
   fi
 }
 
@@ -116,7 +116,7 @@ _super_yolo_allowed() {
   local tool="$1"
   local allowed="$(_super_config_get "security.yoloAllowedTools")"
   [[ -z "$allowed" ]] && return 0  # Empty means all allowed
-  echo "$allowed" | grep -q "\"$tool\""
+  echo "$allowed" | grep -q "\"$tool\"" 2>/dev/null || return 1
 }
 
 # Get project validators

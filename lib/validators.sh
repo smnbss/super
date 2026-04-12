@@ -40,11 +40,9 @@ _super_run_validators() {
   local lint_ok=0
   local typecheck_ok=0
   
-  _super_run_lint
-  lint_ok=$?
-  
-  _super_run_typecheck
-  typecheck_ok=$?
+  _super_run_lint || lint_ok=$?
+
+  _super_run_typecheck || typecheck_ok=$?
   
   if [[ $lint_ok -eq 0 && $typecheck_ok -eq 0 ]]; then
     return 0

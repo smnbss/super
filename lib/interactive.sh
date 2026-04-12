@@ -300,6 +300,26 @@ ui_confirm() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TEXT INPUT
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage: value=$(ui_input "Prompt" "placeholder" "default")
+
+ui_input() {
+  local prompt="$1" placeholder="${2:-}" default="${3:-}"
+
+  if command -v gum >/dev/null 2>&1; then
+    local result
+    result=$(gum input --header "$prompt" --placeholder "$placeholder" --value "$default") || true
+    echo "${result:-$default}"
+  else
+    printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
+    local answer
+    read -r answer < /dev/tty
+    echo "${answer:-$default}"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # INSTALL INTERACTIVE
 # ─────────────────────────────────────────────────────────────────────────────
 
