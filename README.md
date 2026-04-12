@@ -66,9 +66,13 @@ cd ~
 sudo rm -r .super
 rm -r ubuntu_brain
 git clone https://github.com/smnbss/super ~/.super
+cat <<'EOF' >> ~/.bashrc
+# super CLI
 export PATH="$HOME/.local/bin:$PATH"
 export SUPER_HOME="$HOME/.super"
 export PATH="$SUPER_HOME:$PATH"
+EOF
+source ~/.bashrc
 mkdir ubuntu_brain
 cd ubuntu_brain
 super install
