@@ -1,101 +1,205 @@
-version: "1.0"
+version: "2.0"
 
 # Super - Cross-CLI Session Bridge Configuration
 # Works with: Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI
+#
+# Skills/plugins/MCPs are installed via: super config interactive
+# Or batch: super install (first-time setup)
 
 security:
-  yoloMode: true                # Skip all permission prompts (security hook still enforces rules)
-  writesOutsideProject: ask     # block | allow | ask — writes outside project root
-  readsOutsideProject: allow    # block | allow | ask — reads outside project root
-  bashExternalCalls: ask        # block | allow | ask — curl POST, npm publish, docker push
-  changeOwner: block            # block | allow | ask — chmod, chown commands
-  githubCommands: allow         # block | allow | ask — git push, gh pr create, etc.
-  dangerousRm: block            # block | allow | ask — rm -rf with risky paths
-  envAccess: block              # block | allow | ask — reading .env files
-  sensitivePaths: block         # block | allow | ask — ~/.ssh, ~/.aws, credentials
+  yoloMode: true
+  writesOutsideProject: ask
+  readsOutsideProject: allow
+  bashExternalCalls: ask
+  changeOwner: block
+  githubCommands: allow
+  dangerousRm: block
+  envAccess: block
+  sensitivePaths: block
 
 session:
-  autoName: true                # Generate creative session names
-  sessionLog: true              # Log user prompts to session directory
-  transcriptLog: true           # Save rolling transcript after each turn
-  cleanupOnStart: true          # Remove old sessions on startup
-  maxAgeDays: 7                 # Delete sessions older than this
-  injectContext: true           # Inject session history into CLI context files
+  autoName: true
+  sessionLog: true
+  transcriptLog: true
+  cleanupOnStart: true
+  maxAgeDays: 7
+  injectContext: true
+
+# ─── Skills ──────────────────────────────────────────────────────────────────
+# Installed to ~/.claude/skills/<name> via git clone
+# source: owner/repo or owner/repo/subpath
 
 skills:
   gstack:
     source: garrytan/gstack
     setup: ./setup
+    description: Dev workflow toolkit (review, security, ship, debug, QA)
     enabled: true
   requesting-code-review:
     source: obra/superpowers/requesting-code-review
+    description: Structured code review methodology
     enabled: true
   code-simplifier:
     source: simonwong/agent-skills/code-simplifier
+    description: Detect over-engineering, suggest simplifications
     enabled: true
   playwright-cli:
     source: microsoft/playwright-cli/playwright-cli
-    enabled: true
-  frontend-design:
-    source: anthropics/claude-plugins-official/frontend-design
+    description: Browser testing with Playwright
     enabled: true
   security-review:
     source: affaan-m/everything-claude-code/security-review
+    description: OWASP patterns, security checklists
     enabled: true
   verification-before-completion:
     source: obra/superpowers/verification-before-completion
+    description: Thoroughness before claiming done
     enabled: true
   systematic-debugging:
     source: obra/superpowers/systematic-debugging
+    description: Root cause investigation methodology
     enabled: true
   test-driven-development:
     source: obra/superpowers/test-driven-development
+    description: Write tests first, then implement
     enabled: true
   writing-plans:
     source: obra/superpowers/writing-plans
+    description: Structured plan creation
     enabled: true
   executing-plans:
     source: obra/superpowers/executing-plans
+    description: Staying scoped when executing plan tasks
     enabled: true
   when-stuck:
     source: obra/superpowers/when-stuck
+    description: Strategies for dead ends
     enabled: false
   receiving-code-review:
     source: obra/superpowers/receiving-code-review
+    description: How to respond to review feedback
     enabled: false
   using-git-worktrees:
     source: obra/superpowers/using-git-worktrees
+    description: Isolated feature work in worktrees
     enabled: false
   subagent-driven-development:
     source: obra/superpowers/subagent-driven-development
+    description: Multi-agent coordination patterns
     enabled: false
+
+# ─── Plugins ─────────────────────────────────────────────────────────────────
+# Installed via Claude's plugin system (claude plugins install)
+# source: marketplace/plugin-name (for claude plugins install)
 
 plugins:
   weroad-ai:
     source: weroad/ai
-    description: WeRoad AI plugins — skills + commands
+    description: WeRoad AI — dbt-modeling, presentations, devops, data-analyst, codex
     enabled: true
+  marketing-skills:
+    source: marketingskills/marketing-skills
+    description: Marketing skills — copy, SEO, ads, CRO, email, social
+    enabled: true
+  frontend-design:
+    source: claude-plugins-official/frontend-design
+    description: Production-grade UI design
+    enabled: true
+  skill-creator:
+    source: claude-plugins-official/skill-creator
+    description: Create and manage custom skills
+    enabled: true
+  discord:
+    source: claude-plugins-official/discord
+    description: Discord bot integration
+    enabled: true
+  telegram:
+    source: claude-plugins-official/telegram
+    description: Telegram bot integration
+    enabled: true
+  codex:
+    source: openai-codex/codex
+    description: OpenAI Codex CLI integration
+    enabled: true
+
+# ─── MCPs — Local (stdio/npx) ───────────────────────────────────────────────
+# Configured in ~/.claude/settings.json (Claude), ~/.gemini/settings.json, etc.
 
 mcps:
-  context7:
+  bigquery:
+    type: http
+    url: https://bigquery.googleapis.com/mcp
+    description: Google BigQuery via HTTP MCP (uses ADC token)
+    enabled: true
+  linear:
+    type: http
+    url: https://mcp.linear.app/mcp
+    description: Linear project management
+    enabled: true
+  metabase:
     command: npx
-    args: ["-y", "@upstash/context7-mcp"]
-    description: Up-to-date docs for libraries and frameworks
+    args: ["-y", "@cognitionai/metabase-mcp-server", "--all"]
+    env: [METABASE_URL, METABASE_API_KEY]
+    description: Metabase analytics (requires .env.local)
+    enabled: true
+  design-system-extractor:
+    command: npx
+    args: ["-y", "website-design-systems-mcp"]
+    description: Extract design systems from any URL to DESIGN.md
+    enabled: true
+  chrome-devtools:
+    command: npx
+    args: ["@anthropic/mcp-chrome-devtools"]
+    description: Chrome DevTools — screenshots, DOM, network, console
+    enabled: true
+
+# ─── MCPs — Remote (via claude.ai Settings > Integrations) ──────────────────
+# These are configured through the web UI, not CLI. Listed here for reference.
+
+remote_mcps:
+  amplitude-eu:
+    description: Amplitude EU analytics
+    enabled: true
+  atlassian:
+    description: Jira + Confluence
+    enabled: true
+  clickup:
+    description: ClickUp project management
     enabled: true
   deepwiki:
-    command: npx
-    args: ["-y", "mcp-deepwiki@latest"]
     description: AI-powered GitHub repo documentation
     enabled: true
-  # agentdb:
-  #   command: npx
-  #   args: ["-y", "agentdb@latest", "mcp", "start"]
-  #   description: SQLite graph DB for persistent memory
-  #   enabled: false
+  gmail:
+    description: Gmail integration
+    enabled: true
+  google-calendar:
+    description: Google Calendar
+    enabled: true
+  jam:
+    description: Jam bug reporting
+    enabled: true
+  sentry:
+    description: Sentry error tracking
+    enabled: true
+  slack:
+    description: Slack messaging
+    enabled: true
+  n8n:
+    description: n8n workflow automation
+    enabled: true
+  canva:
+    description: Canva design
+    enabled: false
+  gamma:
+    description: Gamma presentations
+    enabled: false
+  ahrefs:
+    description: Ahrefs SEO
+    enabled: false
 
 project:
-  lintCommand: ""               # Run after code changes (empty = skip)
-  typeCheckCommand: ""          # Run after code changes (empty = skip)
+  lintCommand: ""
+  typeCheckCommand: ""
 
 hooks:
   preToolUse:
