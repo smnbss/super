@@ -4,8 +4,7 @@ version: "1.0"
 # Works with: Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI
 
 security:
-  yoloMode: false               # Skip all permission prompts (security hook still enforces rules)
-  yoloAllowedTools: []          # Restrict yolo to specific tools (empty = all tools allowed)
+  yoloMode: true                # Skip all permission prompts (security hook still enforces rules)
   writesOutsideProject: ask     # block | allow | ask — writes outside project root
   readsOutsideProject: allow    # block | allow | ask — reads outside project root
   bashExternalCalls: ask        # block | allow | ask — curl POST, npm publish, docker push
@@ -24,77 +23,107 @@ session:
   injectContext: true           # Inject session history into CLI context files
 
 skills:
-  # Install skills from GitHub repos (owner/repo/path)
-  # Example:
-  # gstack: garrytan/gstack
-  # security-review: affaan-m/everything-claude-code/security-review
+  gstack:
+    source: garrytan/gstack
+    setup: ./setup
+    enabled: true
+  requesting-code-review:
+    source: obra/superpowers/requesting-code-review
+    enabled: true
+  code-simplifier:
+    source: simonwong/agent-skills/code-simplifier
+    enabled: true
+  playwright-cli:
+    source: microsoft/playwright-cli/playwright-cli
+    enabled: true
+  frontend-design:
+    source: anthropics/claude-plugins-official/frontend-design
+    enabled: true
+  security-review:
+    source: affaan-m/everything-claude-code/security-review
+    enabled: true
+  verification-before-completion:
+    source: obra/superpowers/verification-before-completion
+    enabled: true
+  systematic-debugging:
+    source: obra/superpowers/systematic-debugging
+    enabled: true
+  test-driven-development:
+    source: obra/superpowers/test-driven-development
+    enabled: true
+  writing-plans:
+    source: obra/superpowers/writing-plans
+    enabled: true
+  executing-plans:
+    source: obra/superpowers/executing-plans
+    enabled: true
+  when-stuck:
+    source: obra/superpowers/when-stuck
+    enabled: false
+  receiving-code-review:
+    source: obra/superpowers/receiving-code-review
+    enabled: false
+  using-git-worktrees:
+    source: obra/superpowers/using-git-worktrees
+    enabled: false
+  subagent-driven-development:
+    source: obra/superpowers/subagent-driven-development
+    enabled: false
 
 plugins:
-  # Plugin repos to clone and symlink (owner/repo or local path)
-  # Example:
-  # weroad-ai: weroad/ai
+  weroad-ai:
+    source: weroad/ai
+    description: WeRoad AI plugins — skills + commands
+    enabled: true
 
 mcps:
-  # MCP server configurations per CLI
-  # Note: Not all CLIs support MCP servers equally
-  claude:
-    # context7:
-    #   type: npm
-    #   command: npx
-    #   args: ["-y", "@upstash/context7-mcp"]
-  gemini:
-    # Gemini has its own extension system
-  codex:
-    # Codex supports MCP via config
-  kimi:
-    # Kimi supports MCP via config
+  context7:
+    command: npx
+    args: ["-y", "@upstash/context7-mcp"]
+    description: Up-to-date docs for libraries and frameworks
+    enabled: true
+  deepwiki:
+    command: npx
+    args: ["-y", "mcp-deepwiki@latest"]
+    description: AI-powered GitHub repo documentation
+    enabled: true
+  # agentdb:
+  #   command: npx
+  #   args: ["-y", "agentdb@latest", "mcp", "start"]
+  #   description: SQLite graph DB for persistent memory
+  #   enabled: false
 
 project:
   lintCommand: ""               # Run after code changes (empty = skip)
   typeCheckCommand: ""          # Run after code changes (empty = skip)
-  autoLintOnSave: false         # Auto-run lint after Write/Edit
 
 hooks:
-  # Cross-CLI hook configuration
   preToolUse:
     enabled: true
-    enforceSecurity: true       # Block unsafe operations
-  
+    enforceSecurity: true
   permissionRequest:
     enabled: true
-    autoAllowReads: true        # Auto-allow Read, Glob, Grep
-    autoAllowSafeBash: true     # Auto-allow safe bash (ls, git status, etc.)
-  
+    autoAllowReads: true
+    autoAllowSafeBash: true
   userPromptSubmit:
     enabled: true
     logPrompts: true
-    validatePrompts: false
-    blockedPatterns: []
-  
   postToolUse:
     enabled: true
-    runValidators: true         # Run lint/typecheck after Write/Edit
-  
+    runValidators: true
   sessionStart:
     enabled: true
-    loadGitContext: false       # Inject git info into session
-    loadProjectFiles: false     # Inject README into session
-  
   sessionEnd:
     enabled: true
     saveTranscript: true
-    cleanup: true
-  
   stop:
     enabled: true
-    saveTranscript: true        # Save rolling transcript each turn
+    saveTranscript: true
 
 statusLine:
-  enabled: true                 # Show status bar (Claude only - uses native)
-  # For other CLIs, this is handled via their native status displays
+  enabled: true
 
 crossAgent:
-  # Cross-agent specific settings
-  syncMcpServers: false         # Sync MCP configs across CLIs
-  shareContext: true            # Share session context across CLIs
-  unifiedSkills: true           # Use same skills folder for all CLIs
+  syncMcpServers: false
+  shareContext: true
+  unifiedSkills: true

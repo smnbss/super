@@ -30,6 +30,7 @@ source "$SUPER_HOME/lib/config.sh"
 source "$SUPER_HOME/lib/ui.sh"
 source "$SUPER_HOME/lib/fzf.sh"
 source "$SUPER_HOME/lib/interactive.sh"
+source "$SUPER_HOME/lib/catalog.sh"
 
 # Legacy color compatibility (deprecated, use ui_* functions)
 RED="\033[0;31m"; GREEN="\033[0;32m"; YELLOW="\033[1;33m"
@@ -365,34 +366,55 @@ _setup_context_files() {
 cmd_install() {
   local target=""
   local use_interactive=false
-  
+
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --interactive|-i)
-        use_interactive=true
-        shift
-        ;;
-      -*)
-        die "Unknown option: $1"
-        ;;
-      *)
-        target="$1"
-        shift
-        ;;
+      --interactive|-i) use_interactive=true; shift ;;
+      -*) die "Unknown option: $1" ;;
+      *)  target="$1"; shift ;;
     esac
   done
-  
-  # Use interactive mode if: --interactive flag, or no target specified
+
+  # Check if this is a first-time install (no config in project)
+  local is_first_time=false
+  local cfg; cfg="$(_super_find_config)"
+  [[ -z "$cfg" || ! -f "$cfg" ]] && is_first_time=true
+
+  # Use interactive mode if: --interactive, no target, or first time
   if [[ "$use_interactive" == "true" ]] || [[ -z "$target" ]]; then
+    # Step 1: Pick CLIs to install hooks for
     cmd_install_interactive
-    return $?
+
+    # Step 2: Copy config template if first time
+    if [[ "$is_first_time" == "true" ]]; then
+      ui_spacer
+      _install_config_template
+    fi
+
+    # Step 3: Offer to configure skills/plugins/MCPs
+    local has_config; has_config="$(_super_find_config)"
+    if [[ -f "$has_config" ]]; then
+      ui_spacer
+      if ui_confirm "Configure skills, plugins & MCPs?" "yes"; then
+        _config_interactive_skills
+        _config_interactive_plugins
+        _config_interactive_mcps
+        ui_spacer
+        if ui_confirm "Install enabled skills/plugins/MCPs now?" "yes"; then
+          catalog_install_enabled
+        fi
+      fi
+    fi
+
+    _install_finish
+    return
   fi
-  
+
   # Non-interactive mode with explicit target
   ui_brand "Installing hooks (target: $target)"
   ui_spacer
-  
+
   case "$target" in
     all)    install_hooks_claude; install_hooks_gemini
             install_hooks_codex;  install_hooks_kimi ;;
@@ -402,14 +424,36 @@ cmd_install() {
     kimi)   install_hooks_kimi   ;;
     *) die "Unknown CLI: $target. Use: all|claude|gemini|codex|kimi" ;;
   esac
-  
+
+  _install_finish
+}
+
+_install_config_template() {
+  local dest; dest="$(pwd)/super.config.yaml"
+  local template="$SUPER_HOME/super.config.yaml"
+
+  if [[ -f "$dest" ]]; then
+    ui_muted "Config already exists: $dest"
+    return
+  fi
+
+  if [[ -f "$template" ]]; then
+    cp "$template" "$dest"
+    ui_success "Created super.config.yaml from template"
+  else
+    _super_config_init
+    ui_success "Created super.config.yaml with defaults"
+  fi
+}
+
+_install_finish() {
   mkdir -p "$(_super_sessions_dir)"
   _setup_context_files
-  
+
   ui_spacer
   ui_success "Sessions folder ready: $(_super_sessions_dir)"
   ui_muted "Run $(ui_bold "super launch <cli>") to start your first session"
-  
+
   # First-time help
   if [[ ! -d "$(_super_sessions_dir)" ]] || [[ -z "$(ls -A "$(_super_sessions_dir)"/*.md 2>/dev/null)" ]]; then
     ui_spacer
@@ -915,53 +959,236 @@ cmd_config() {
 cmd_config_interactive() {
   print_banner
   ui_section "Interactive Configuration"
-  
+
   # Ensure config exists
   local cfg; cfg="$(_super_find_config)"
-  [[ -f "$cfg" ]] || _super_config_init
-  
+  [[ -f "$cfg" ]] || { _super_config_init; cfg="$(_super_find_config)"; }
+
   while true; do
     local options=(
-      "📁 Session settings — cleanup, transcripts"
-      "🔒 Security settings — yolo mode, path restrictions"
-      "🎨 UI settings — interactive mode"
+      "🧩 Skills — manage installed skills"
+      "🔌 Plugins — manage plugin repos"
+      "🔗 MCPs — manage MCP servers"
+      "📁 Sessions — cleanup, transcripts"
+      "🔒 Security — yolo mode, path restrictions"
       "👁  View current config"
       "✏️  Edit config in editor"
-      "🚪 Quit"
+      "🚪 Done"
     )
-    
+
     local choice
-    choice=$(ui_select_single "Configuration Options" 0 "${options[@]}")
-    
+    choice=$(ui_select_single "Configuration" 0 "${options[@]}")
+
     [[ -z "$choice" ]] && { ui_info "Done!"; return; }
-    
+
     case "$choice" in
-      0) _config_interactive_sessions ;;
-      1) _config_interactive_security ;;
-      2) _config_interactive_ui ;;
-      3) cmd_config show ;;
-      4) cmd_config edit ;;
-      5) ui_info "Done!"; return ;;
+      0) _config_interactive_skills ;;
+      1) _config_interactive_plugins ;;
+      2) _config_interactive_mcps ;;
+      3) _config_interactive_sessions ;;
+      4) _config_interactive_security ;;
+      5) cmd_config show ;;
+      6) cmd_config edit ;;
+      7) ui_info "Done!"; return ;;
     esac
   done
 }
 
+# ── Skills picker ─────────────────────────────────────────────────────────────
+
+_config_interactive_skills() {
+  local entries=() names=() sources=() states=() display=()
+
+  while IFS='|' read -r name source desc enabled; do
+    [[ -z "$name" ]] && continue
+    names+=("$name")
+    sources+=("$source")
+    states+=("$enabled")
+    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉"
+    display+=("$mark $name — $desc")
+  done <<< "$(catalog_skills)"
+
+  [[ ${#names[@]} -eq 0 ]] && { ui_warn "No skills in config."; return; }
+
+  display+=("📦 Install enabled skills now")
+  display+=("⬅️  Back")
+
+  local choice
+  choice=$(ui_select_single "Skills (toggle on/off)" 0 "${display[@]}")
+  [[ -z "$choice" ]] && return
+
+  local total=${#names[@]}
+
+  # "Install" option
+  if [[ "$choice" -eq $total ]]; then
+    ui_brand "Installing enabled skills..."
+    ui_spacer
+    local i=0
+    for name in "${names[@]}"; do
+      if [[ "${states[$i]}" == "true" ]]; then
+        _catalog_install_skill "$name" "${sources[$i]}" || true
+      fi
+      i=$((i + 1))
+    done
+    ui_spacer
+    return
+  fi
+
+  # "Back" option
+  if [[ "$choice" -eq $((total + 1)) ]]; then
+    return
+  fi
+
+  # Toggle the selected skill
+  local idx="$choice"
+  local name="${names[$idx]}"
+  if [[ "${states[$idx]}" == "true" ]]; then
+    _catalog_toggle "skills" "$name" "false"
+    ui_info "$name disabled"
+  else
+    _catalog_toggle "skills" "$name" "true"
+    ui_success "$name enabled"
+  fi
+
+  # Re-enter to show updated state
+  _config_interactive_skills
+}
+
+# ── Plugins picker ────────────────────────────────────────────────────────────
+
+_config_interactive_plugins() {
+  local names=() sources=() states=() display=()
+
+  while IFS='|' read -r name source desc enabled; do
+    [[ -z "$name" ]] && continue
+    names+=("$name")
+    sources+=("$source")
+    states+=("$enabled")
+    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉"
+    display+=("$mark $name — $desc")
+  done <<< "$(catalog_plugins)"
+
+  [[ ${#names[@]} -eq 0 ]] && { ui_warn "No plugins in config."; return; }
+
+  display+=("📦 Install enabled plugins now")
+  display+=("⬅️  Back")
+
+  local choice
+  choice=$(ui_select_single "Plugins (toggle on/off)" 0 "${display[@]}")
+  [[ -z "$choice" ]] && return
+
+  local total=${#names[@]}
+
+  if [[ "$choice" -eq $total ]]; then
+    ui_brand "Installing enabled plugins..."
+    ui_spacer
+    local i=0
+    for name in "${names[@]}"; do
+      if [[ "${states[$i]}" == "true" ]]; then
+        _catalog_install_plugin "$name" "${sources[$i]}" || true
+      fi
+      i=$((i + 1))
+    done
+    ui_spacer
+    return
+  fi
+
+  if [[ "$choice" -eq $((total + 1)) ]]; then
+    return
+  fi
+
+  local idx="$choice" name="${names[$idx]}"
+  if [[ "${states[$idx]}" == "true" ]]; then
+    _catalog_toggle "plugins" "$name" "false"
+    ui_info "$name disabled"
+  else
+    _catalog_toggle "plugins" "$name" "true"
+    ui_success "$name enabled"
+  fi
+  _config_interactive_plugins
+}
+
+# ── MCPs picker ───────────────────────────────────────────────────────────────
+
+_config_interactive_mcps() {
+  local names=() commands=() states=() display=()
+
+  while IFS='|' read -r name command desc enabled; do
+    [[ -z "$name" ]] && continue
+    names+=("$name")
+    commands+=("$command")
+    states+=("$enabled")
+    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉"
+    display+=("$mark $name — $desc")
+  done <<< "$(catalog_mcps)"
+
+  [[ ${#names[@]} -eq 0 ]] && { ui_warn "No MCPs in config."; return; }
+
+  display+=("📦 Install enabled MCPs now")
+  display+=("⬅️  Back")
+
+  local choice
+  choice=$(ui_select_single "MCP Servers (toggle on/off)" 0 "${display[@]}")
+  [[ -z "$choice" ]] && return
+
+  local total=${#names[@]}
+  local config_file; config_file="$(_super_find_config)"
+
+  if [[ "$choice" -eq $total ]]; then
+    ui_brand "Configuring enabled MCPs..."
+    ui_spacer
+    local i=0
+    for name in "${names[@]}"; do
+      if [[ "${states[$i]}" == "true" ]]; then
+        local args_str
+        args_str=$(python3 -c "
+import yaml, json
+with open('$config_file') as f:
+    d = yaml.safe_load(f)
+mcp = d.get('mcps', {}).get('$name', {})
+print(json.dumps(mcp.get('args', [])))
+" 2>/dev/null || echo '[]')
+        _catalog_install_mcp "$name" "${commands[$i]}" "$args_str" || true
+      fi
+      i=$((i + 1))
+    done
+    ui_spacer
+    return
+  fi
+
+  if [[ "$choice" -eq $((total + 1)) ]]; then
+    return
+  fi
+
+  local idx="$choice" name="${names[$idx]}"
+  if [[ "${states[$idx]}" == "true" ]]; then
+    _catalog_toggle "mcps" "$name" "false"
+    ui_info "$name disabled"
+  else
+    _catalog_toggle "mcps" "$name" "true"
+    ui_success "$name enabled"
+  fi
+  _config_interactive_mcps
+}
+
+# ── Sessions settings ─────────────────────────────────────────────────────────
+
 _config_interactive_sessions() {
-  # Get current values
   local cleanup_enabled="no"
   _super_config_enabled "session.cleanupOnStart" && cleanup_enabled="yes" || true
   local max_age; max_age="$(_super_session_max_age)"
   [[ -z "$max_age" ]] && max_age="7"
-  
-  local options=("🧹 Toggle auto-cleanup (currently: $cleanup_enabled)")
-  options+=("📅 Change max age (currently: $max_age days)")
-  options+=("⬅️  Back")
-  
+
+  local options=(
+    "🧹 Toggle auto-cleanup (currently: $cleanup_enabled)"
+    "📅 Change max age (currently: $max_age days)"
+    "⬅️  Back"
+  )
+
   local choice
   choice=$(ui_select_single "Session Settings" 0 "${options[@]}")
-  
   [[ -z "$choice" ]] && return
-  
+
   case "$choice" in
     0)
       if [[ "$cleanup_enabled" == "yes" ]]; then
@@ -974,7 +1201,7 @@ _config_interactive_sessions() {
       ;;
     1)
       local new_age
-      new_age=$(ui_input "Enter max age in days" "30" "$max_age")
+      new_age=$(ui_input "Max age in days" "30" "$max_age")
       if [[ "$new_age" =~ ^[0-9]+$ ]]; then
         _super_config_set "session.maxAgeDays" "$new_age"
         ui_success "Max age set to $new_age days"
@@ -986,50 +1213,34 @@ _config_interactive_sessions() {
   esac
 }
 
+# ── Security settings ─────────────────────────────────────────────────────────
+
 _config_interactive_security() {
-  # Get current values
   local yolo_enabled="OFF"
   _super_config_enabled "security.yoloMode" && yolo_enabled="ON" || true
-  
-  local options=("⚡ Toggle yolo mode (currently: $yolo_enabled)")
-  options+=("⬅️  Back")
-  
+
+  local options=(
+    "⚡ Toggle yolo mode (currently: $yolo_enabled)"
+    "⬅️  Back"
+  )
+
   local choice
   choice=$(ui_select_single "Security Settings" 0 "${options[@]}")
-  
   [[ -z "$choice" ]] && return
-  
+
   case "$choice" in
     0)
       if [[ "$yolo_enabled" == "ON" ]]; then
         _super_config_set "security.yoloMode" "false"
-        ui_success "Yolo mode disabled — confirmations enabled"
+        ui_success "Yolo mode disabled"
       else
-        ui_warn "Enabling yolo mode — this is dangerous!"
-        if ui_confirm "Are you sure?" "no"; then
+        if ui_confirm "Enable yolo mode (skip all prompts)?" "no"; then
           _super_config_set "security.yoloMode" "true"
-          ui_success "Yolo mode enabled — no confirmations"
-        else
-          ui_info "Cancelled"
+          ui_success "Yolo mode enabled"
         fi
       fi
       ;;
     1) return ;;
-  esac
-}
-
-_config_interactive_ui() {
-  ui_spacer
-  ui_print "  $(ui_bold "UI Settings")"
-  ui_spacer
-
-  local options=("Initialize config file" "Back")
-  local choice
-  choice=$(ui_select_single "UI Settings" 0 "${options[@]}")
-
-  case "$choice" in
-    0) cmd_config init ;;
-    1|"") return ;;
   esac
 }
 

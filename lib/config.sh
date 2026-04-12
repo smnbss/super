@@ -27,7 +27,11 @@ _super_find_config() {
 
 # Get config value using yq or python
 default_config() {
-  cat << 'EOF'
+  # If the template exists in SUPER_HOME, use it
+  if [[ -f "$SUPER_HOME/super.config.yaml" ]]; then
+    cat "$SUPER_HOME/super.config.yaml"
+  else
+    cat << 'EOF'
 version: "1.0"
 security:
   yoloMode: false
@@ -46,24 +50,19 @@ session:
   cleanupOnStart: true
   maxAgeDays: 7
   injectContext: true
+skills: {}
+plugins: {}
+mcps: {}
 project:
   lintCommand: ""
   typeCheckCommand: ""
-  autoLintOnSave: false
 hooks:
   preToolUse:
     enabled: true
-    enforceSecurity: true
   permissionRequest:
     enabled: true
     autoAllowReads: true
     autoAllowSafeBash: true
-  userPromptSubmit:
-    enabled: true
-    logPrompts: true
-  postToolUse:
-    enabled: true
-    runValidators: true
   sessionStart:
     enabled: true
   sessionEnd:
@@ -73,24 +72,20 @@ hooks:
     enabled: true
     saveTranscript: true
 EOF
+  fi
 }
 
 # Get config value (path like "security.yoloMode")
 _super_config_get() {
   local path="$1"
   local config_file="$(_super_find_config)"
-  
-  if [[ -z "$config_file" ]]; then
-    # Use defaults
-    default_config | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d.get('$path', ''))" 2>/dev/null || true
+
+  if [[ -z "$config_file" || ! -f "$config_file" ]]; then
+    # No config file — return empty
     return
   fi
-  
-  if command -v yq &>/dev/null; then
-    yq -r ".${path}" "$config_file" 2>/dev/null || true
-  else
-    python3 -c "import yaml; d=yaml.safe_load(open('$config_file')); print(d.get('$path', ''))" 2>/dev/null || true
-  fi
+
+  python3 "$SUPER_HOME/lib/yaml_parse.py" get "$config_file" "$path" 2>/dev/null || true
 }
 
 # Check if a feature is enabled
@@ -160,39 +155,5 @@ _super_config_set() {
     default_config > "$config_file"
   fi
   
-  if command -v yq &>/dev/null; then
-    yq -i ".${path} = ${value}" "$config_file" 2>/dev/null || \
-    yq -i ".${path} = \"${value}\"" "$config_file" 2>/dev/null
-  else
-    # Fallback to Python
-    python3 -c "
-import yaml
-import sys
-
-with open('$config_file') as f:
-    d = yaml.safe_load(f)
-
-# Set nested value
-keys = '$path'.split('.')
-current = d
-for key in keys[:-1]:
-    if key not in current:
-        current[key] = {}
-    current = current[key]
-
-# Try to parse as boolean/number, else string
-val = '$value'
-if val.lower() == 'true':
-    val = True
-elif val.lower() == 'false':
-    val = False
-elif val.isdigit():
-    val = int(val)
-
-current[keys[-1]] = val
-
-with open('$config_file', 'w') as f:
-    yaml.dump(d, f, default_flow_style=False, sort_keys=False)
-" 2>/dev/null
-  fi
+  python3 "$SUPER_HOME/lib/yaml_parse.py" set "$config_file" "$path" "$value" 2>/dev/null || true
 }
