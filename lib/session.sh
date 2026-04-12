@@ -128,9 +128,9 @@ session_list() {
   while IFS= read -r f; do
     [[ -f "$f" ]] || continue
     local title started turns marker
-    title="$(grep '^# Super Session:' "$f" | sed 's/# Super Session: //' | head -1)"
+    title="$(grep '^# Super Session:' "$f" 2>/dev/null | sed 's/# Super Session: //' | head -1 || true)"
     [[ -z "$title" ]] && title="$(basename "$f" .md)"
-    started="$(grep '^\*\*Started:\*\*' "$f" | sed 's/\*\*Started:\*\* //' | head -1)"
+    started="$(grep '^\*\*Started:\*\*' "$f" 2>/dev/null | sed 's/\*\*Started:\*\* //' | head -1 || true)"
     turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
     marker=""
     [[ "$f" == "$active" ]] && marker=" ◀ active"
@@ -162,9 +162,9 @@ session_pick() {
   local options=()
   for f in "${files[@]}"; do
     local title started turns marker
-    title="$(grep '^# Super Session:' "$f" | sed 's/# Super Session: //' | head -1)"
+    title="$(grep '^# Super Session:' "$f" 2>/dev/null | sed 's/# Super Session: //' | head -1 || true)"
     [[ -z "$title" ]] && title="$(basename "$f" .md)"
-    started="$(grep '^\*\*Started:\*\*' "$f" | sed 's/\*\*Started:\*\* //' | head -1)"
+    started="$(grep '^\*\*Started:\*\*' "$f" 2>/dev/null | sed 's/\*\*Started:\*\* //' | head -1 || true)"
     turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
     marker=""
     [[ "$f" == "$active" ]] && marker=" ◀"

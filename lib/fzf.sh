@@ -38,7 +38,7 @@ _fzf_pick_session() {
     
     # Extract CLI from first turn
     local first_cli
-    first_cli="$(grep -m1 '^## ' "$f" 2>/dev/null | grep -oE '\[([🔵🟠🟢🟡])' | head -1)"
+    first_cli="$(grep -m1 '^## ' "$f" 2>/dev/null | grep -oE '\[([🔵🟠🟢🟡])' | head -1 || true)"
     
     # Calculate age
     local mtime age_str

@@ -565,7 +565,7 @@ _pick_session_and_resume() {
     [[ "$f" == "$active" ]] && marker=" ◀ ACTIVE" || marker=""
     
     # Detect CLI from first turn
-    local first_turn; first_turn="$(grep -m1 '^## ' "$f" 2>/dev/null)"
+    local first_turn; first_turn="$(grep -m1 '^## ' "$f" 2>/dev/null || true)"
     cli=""
     [[ "$first_turn" == *"🟠"* ]] && cli="🟠"
     [[ "$first_turn" == *"🔵"* ]] && cli="🔵"
@@ -617,15 +617,15 @@ cmd_sessions() {
   while IFS= read -r f; do
     [[ -f "$f" ]] || continue
     local title started turns marker is_active="false"
-    title="$(grep '^# Super Session:' "$f" | sed 's/# Super Session: //' | head -1)"
+    title="$(grep '^# Super Session:' "$f" 2>/dev/null | sed 's/# Super Session: //' | head -1 || true)"
     [[ -z "$title" ]] && title="$(basename "$f" .md)"
-    started="$(grep '^\*\*Started:\*\*' "$f" | sed 's/\*\*Started:\*\* //' | head -1)"
+    started="$(grep '^\*\*Started:\*\*' "$f" 2>/dev/null | sed 's/\*\*Started:\*\* //' | head -1 || true)"
     turns="$(grep -c '^## ' "$f" 2>/dev/null || echo 0)"
     [[ "$f" == "$active" ]] && is_active="true"
     
     # Extract CLI from session
     local cli="unknown"
-    local first_turn; first_turn="$(grep -m1 '^## ' "$f" 2>/dev/null)"
+    local first_turn; first_turn="$(grep -m1 '^## ' "$f" 2>/dev/null || true)"
     [[ "$first_turn" == *"🟠"* ]] && cli="claude"
     [[ "$first_turn" == *"🔵"* ]] && cli="gemini"
     [[ "$first_turn" == *"🟢"* ]] && cli="codex"
@@ -847,7 +847,7 @@ detect_last_cli() {
   local session_file; session_file="$(_super_session_file)"
   [[ -f "$session_file" ]] || return
   
-  local last_turn; last_turn="$(grep '^## ' "$session_file" | tail -1)"
+  local last_turn; last_turn="$(grep '^## ' "$session_file" 2>/dev/null | tail -1 || true)"
   [[ "$last_turn" == *"🟠"* ]] && echo "claude" && return
   [[ "$last_turn" == *"🔵"* ]] && echo "gemini" && return
   [[ "$last_turn" == *"🟢"* ]] && echo "codex" && return
@@ -1132,7 +1132,7 @@ cmd_catchup() {
   local basename turns last_save
   basename="$(basename "$session_file")"
   turns="$(grep -c '^## ' "$session_file" 2>/dev/null || echo 0)"
-  last_save="$(grep -E '^## 💾 Manual Save' "$session_file" | tail -1 | sed 's/.*\[\(.*\)\].*/\1/')"
+  last_save="$(grep -E '^## 💾 Manual Save' "$session_file" 2>/dev/null | tail -1 | sed 's/.*\[\(.*\)\].*/\1/' || true)"
   
   ui_print "  Session: $(ui_bold "$basename")"
   ui_print "  Turns: $turns"
