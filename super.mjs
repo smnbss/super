@@ -360,6 +360,20 @@ async function cmdInstall(args) {
     if (config.findConfig()) { ui.spacer(); catalog.installEnabled(selectedClis); }
   }
 
+  // Ensure SUPER_HOME is on PATH in shell profile (Linux only, idempotent)
+  if (process.platform === 'linux') {
+    const bashrc = join(process.env.HOME, '.bashrc');
+    const marker = 'export SUPER_HOME=';
+    try {
+      const content = existsSync(bashrc) ? readFileSync(bashrc, 'utf8') : '';
+      if (!content.includes(marker)) {
+        const snippet = `\n# super CLI\nexport SUPER_HOME="${SUPER_HOME}"\nexport PATH="$HOME/.local/bin:$SUPER_HOME:$PATH"\n`;
+        writeFileSync(bashrc, content + snippet);
+        ui.success('Added SUPER_HOME to ~/.bashrc');
+      }
+    } catch {}
+  }
+
   // Finish
   mkdirSync(config.sessionsDir(), { recursive: true });
   setupContextFiles();
