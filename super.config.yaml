@@ -1,10 +1,15 @@
-version: "2.0"
+version: "3.0"
 
 # Super - Cross-CLI Session Bridge Configuration
 # Works with: Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI
 #
-# Skills/plugins/MCPs are installed via: super config interactive
-# Or batch: super install (first-time setup)
+# This file is a REFERENCE CATALOG — it declares what's available and
+# whether it's enabled. `super install` reads this and uses each CLI's
+# native mechanism to install (correct paths, formats, and tools).
+#
+# Skills:  cloned to .agents/skills/ (Claude) or ~/.<cli>/skills/ (others)
+# Plugins: installed via `claude plugins install` (Claude only)
+# MCPs:    configured in each CLI's native settings file
 
 security:
   yoloMode: true
@@ -26,8 +31,9 @@ session:
   injectContext: true
 
 # ─── Skills ──────────────────────────────────────────────────────────────────
-# Installed to ~/.claude/skills/<name> via git clone
-# source: owner/repo or owner/repo/subpath
+# source: owner/repo or owner/repo/subpath (GitHub)
+# Claude: cloned to .agents/skills/<name>/ (project-level)
+# Gemini/Codex/Kimi: cloned to ~/.<cli>/skills/<name>/
 
 skills:
   gstack:
@@ -36,61 +42,58 @@ skills:
     description: Dev workflow toolkit (review, security, ship, debug, QA)
     enabled: true
   requesting-code-review:
-    source: obra/superpowers/requesting-code-review
+    source: obra/superpowers/skills/requesting-code-review
     description: Structured code review methodology
     enabled: true
-  code-simplifier:
-    source: simonwong/agent-skills/code-simplifier
-    description: Detect over-engineering, suggest simplifications
-    enabled: true
   playwright-cli:
-    source: microsoft/playwright-cli/playwright-cli
+    source: microsoft/playwright-cli/skills/playwright-cli
     description: Browser testing with Playwright
     enabled: true
-  security-review:
-    source: affaan-m/everything-claude-code/security-review
-    description: OWASP patterns, security checklists
-    enabled: true
   verification-before-completion:
-    source: obra/superpowers/verification-before-completion
+    source: obra/superpowers/skills/verification-before-completion
     description: Thoroughness before claiming done
     enabled: true
   systematic-debugging:
-    source: obra/superpowers/systematic-debugging
+    source: obra/superpowers/skills/systematic-debugging
     description: Root cause investigation methodology
     enabled: true
   test-driven-development:
-    source: obra/superpowers/test-driven-development
+    source: obra/superpowers/skills/test-driven-development
     description: Write tests first, then implement
     enabled: true
   writing-plans:
-    source: obra/superpowers/writing-plans
+    source: obra/superpowers/skills/writing-plans
     description: Structured plan creation
     enabled: true
   executing-plans:
-    source: obra/superpowers/executing-plans
+    source: obra/superpowers/skills/executing-plans
     description: Staying scoped when executing plan tasks
     enabled: true
-  when-stuck:
-    source: obra/superpowers/when-stuck
-    description: Strategies for dead ends
-    enabled: false
   receiving-code-review:
-    source: obra/superpowers/receiving-code-review
+    source: obra/superpowers/skills/receiving-code-review
     description: How to respond to review feedback
     enabled: false
   using-git-worktrees:
-    source: obra/superpowers/using-git-worktrees
+    source: obra/superpowers/skills/using-git-worktrees
     description: Isolated feature work in worktrees
     enabled: false
   subagent-driven-development:
-    source: obra/superpowers/subagent-driven-development
+    source: obra/superpowers/skills/subagent-driven-development
     description: Multi-agent coordination patterns
+    enabled: false
+  brainstorming:
+    source: obra/superpowers/skills/brainstorming
+    description: Structured brainstorming methodology
+    enabled: false
+  writing-skills:
+    source: obra/superpowers/skills/writing-skills
+    description: How to write effective skills
     enabled: false
 
 # ─── Plugins ─────────────────────────────────────────────────────────────────
-# Installed via Claude's plugin system (claude plugins install)
-# source: marketplace/plugin-name (for claude plugins install)
+# Claude only — installed via: claude plugins install <source>
+# source: marketplace/plugin-name
+# Other CLIs have no equivalent plugin system
 
 plugins:
   weroad-ai:
@@ -122,8 +125,14 @@ plugins:
     description: OpenAI Codex CLI integration
     enabled: true
 
-# ─── MCPs — Local (stdio/npx) ───────────────────────────────────────────────
-# Configured in ~/.claude/settings.json (Claude), ~/.gemini/settings.json, etc.
+# ─── MCPs — Installable (stdio + http) ──────────────────────────────────────
+# Installed to each CLI's native config:
+#   Claude: .claude/settings.local.json (project-level, dict)
+#   Gemini: ~/.gemini/settings.json (dict)
+#   Codex:  ~/.codex/config.json (array format)
+#   Kimi:   ~/.kimi/mcp.json (dict with transport field)
+#
+# type: http → url-based transport | type: stdio → command + args
 
 mcps:
   bigquery:
@@ -137,24 +146,26 @@ mcps:
     description: Linear project management
     enabled: true
   metabase:
+    type: stdio
     command: npx
     args: ["-y", "@cognitionai/metabase-mcp-server", "--all"]
-    env: [METABASE_URL, METABASE_API_KEY]
-    description: Metabase analytics (requires .env.local)
+    description: Metabase analytics (requires METABASE_URL, METABASE_API_KEY in env)
     enabled: true
   design-system-extractor:
+    type: stdio
     command: npx
     args: ["-y", "website-design-systems-mcp"]
     description: Extract design systems from any URL to DESIGN.md
     enabled: true
   chrome-devtools:
+    type: stdio
     command: npx
     args: ["@anthropic/mcp-chrome-devtools"]
     description: Chrome DevTools — screenshots, DOM, network, console
     enabled: true
 
-# ─── MCPs — Remote (via claude.ai Settings > Integrations) ──────────────────
-# These are configured through the web UI, not CLI. Listed here for reference.
+# ─── MCPs — Remote (claude.ai Settings > Integrations) ──────────────────────
+# Configured through the web UI, not CLI. Listed here as reference only.
 
 remote_mcps:
   amplitude-eu:

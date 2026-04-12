@@ -19,9 +19,8 @@ fi
 TOOL_NAME="$(echo "$INPUT" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("tool_name",""))' 2>/dev/null || echo "")"
 TOOL_INPUT="$(echo "$INPUT" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get("tool_input",{})))' 2>/dev/null || echo "{}")"
 
-# Run security check
-_super_security_check "$TOOL_NAME" "$TOOL_INPUT"
-RESULT=$?
+# Run security check (may return 0=allow, 1=block, 2=ask — capture without set -e killing us)
+_super_security_check "$TOOL_NAME" "$TOOL_INPUT" && RESULT=0 || RESULT=$?
 
 if [[ $RESULT -eq 1 ]]; then
   # Block

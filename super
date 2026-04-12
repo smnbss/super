@@ -141,10 +141,10 @@ cmd_doctor() {
     local config_file=""
     local hook_type=""
     case "$cli" in
-      claude) config_file="$HOME/.claude/settings.json"; hook_type="command" ;;
-      gemini) config_file="$HOME/.gemini/settings.json"; hook_type="name" ;;
-      codex)  config_file="$HOME/.codex/hooks.json";     hook_type="command" ;;
-      kimi)   config_file="$HOME/.kimi/config.toml";     ;;
+      claude) config_file="$root/.claude/settings.json"; hook_type="command" ;;
+      gemini) config_file="$root/.gemini/settings.json"; hook_type="name" ;;
+      codex)  config_file="$root/.codex/hooks.json";     hook_type="command" ;;
+      kimi)   config_file="$root/.kimi/config.toml";     ;;
     esac
     
     if [[ -f "$config_file" ]]; then
@@ -261,57 +261,62 @@ PYEOF
 }
 
 install_hooks_claude() {
-  local dir="$HOME/.claude"; mkdir -p "$dir"
+  local root; root="$(_super_find_root)"
+  local dir="$root/.claude"; mkdir -p "$dir"
   local sf="$dir/settings.json"
   local template="$SUPER_HOME/hooks/claude/settings.json.template"
-  
+
   # Expand $SUPER_HOME in env section, keep {{SUPER_HOME}} as variable in commands
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
-  
+
   if [[ -f "$sf" ]]; then _merge_json_hooks "$sf" "$expanded" "command"; ui_success "Updated $sf"
   else echo "$expanded" > "$sf"; ui_success "Created $sf"; fi
   chmod +x "$SUPER_HOME"/hooks/claude/*.sh
 }
 
 install_hooks_gemini() {
-  local dir="$HOME/.gemini"; mkdir -p "$dir"
+  local root; root="$(_super_find_root)"
+  local dir="$root/.gemini"; mkdir -p "$dir"
   local gf="$dir/settings.json"
   local template="$SUPER_HOME/hooks/gemini/settings.json.template"
-  
+
   # Expand $SUPER_HOME in env section, keep {{SUPER_HOME}} as variable in commands
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
-  
+
   if [[ -f "$gf" ]]; then _merge_json_hooks "$gf" "$expanded" "name"; ui_success "Updated $gf"
   else echo "$expanded" > "$gf"; ui_success "Created $gf"; fi
   chmod +x "$SUPER_HOME"/hooks/gemini/*.sh
 }
 
 install_hooks_codex() {
-  local dir="$HOME/.codex"; mkdir -p "$dir"
+  local root; root="$(_super_find_root)"
+  local dir="$root/.codex"; mkdir -p "$dir"
   local hf="$dir/hooks.json"
   local template="$SUPER_HOME/hooks/codex/hooks.json.template"
-  
+
   # Expand $SUPER_HOME in env section, keep {{SUPER_HOME}} as variable in commands
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
-  
+
   if [[ -f "$hf" ]]; then _merge_json_hooks "$hf" "$expanded" "command"; ui_success "Updated $hf"
   else echo "$expanded" > "$hf"; ui_success "Created $hf"; fi
   chmod +x "$SUPER_HOME"/hooks/codex/*.sh
 }
 
 install_hooks_kimi() {
-  local cfg="$HOME/.kimi/config.toml"; mkdir -p "$(dirname "$cfg")"
+  local root; root="$(_super_find_root)"
+  local dir="$root/.kimi"; mkdir -p "$dir"
+  local cfg="$dir/config.toml"
   local template="$SUPER_HOME/hooks/kimi/config.toml.template"
-  
+
   # Expand $SUPER_HOME in comments, keep {{SUPER_HOME}} as variable in commands
   local expanded; expanded="$(SUPER_HOME="$SUPER_HOME" envsubst < "$template" | sed 's/{{SUPER_HOME}}/$SUPER_HOME/g')"
-  
+
   if [[ -f "$cfg" ]]; then
     local already_present=0
     if grep -q "super hooks for Kimi" "$cfg" 2>/dev/null; then
       already_present=1
     fi
-    
+
     if [[ "$already_present" -eq 1 ]]; then
       ui_warn "super hooks already in $cfg — skipping"
     else
@@ -378,30 +383,41 @@ cmd_install() {
 
   # Check if this is a first-time install (no config in project)
   local is_first_time=false
-  local cfg; cfg="$(_super_find_config)"
-  [[ -z "$cfg" || ! -f "$cfg" ]] && is_first_time=true
+  local root; root="$(_super_find_root)"
+  if [[ ! -f "$root/.super/super.config.yaml" && ! -f "$root/super.config.yaml" ]]; then
+    is_first_time=true
+  fi
 
   # Use interactive mode if: --interactive, no target, or first time
   if [[ "$use_interactive" == "true" ]] || [[ -z "$target" ]]; then
-    # Step 1: Pick CLIs to install hooks for
-    cmd_install_interactive
-
-    # Step 2: Copy config template if first time
+    # Step 1: Copy config template if first time
     if [[ "$is_first_time" == "true" ]]; then
-      ui_spacer
       _install_config_template
+      ui_spacer
     fi
 
-    # Step 3: Offer to configure skills/plugins/MCPs
+    # Step 2: Pick CLIs to install hooks for
+    cmd_install_interactive
+
+    # Step 3: Select and enable skills from config
     local has_config; has_config="$(_super_find_config)"
     if [[ -f "$has_config" ]]; then
       ui_spacer
-      if ui_confirm "Configure skills, plugins & MCPs?" "yes"; then
-        _config_interactive_skills
+      if ui_confirm "Select skills to enable?" "yes"; then
+        _install_interactive_skills_select
+        ui_spacer
+        if ui_confirm "Install enabled skills now?" "yes"; then
+          catalog_install_enabled
+        fi
+      fi
+      
+      # Step 4: Offer to configure plugins & MCPs too
+      ui_spacer
+      if ui_confirm "Configure plugins & MCPs?" "no"; then
         _config_interactive_plugins
         _config_interactive_mcps
         ui_spacer
-        if ui_confirm "Install enabled skills/plugins/MCPs now?" "yes"; then
+        if ui_confirm "Install enabled plugins/MCPs now?" "yes"; then
           catalog_install_enabled
         fi
       fi
@@ -425,24 +441,45 @@ cmd_install() {
     *) die "Unknown CLI: $target. Use: all|claude|gemini|codex|kimi" ;;
   esac
 
+  # Copy config template if first time
+  if [[ "$is_first_time" == "true" ]]; then
+    ui_spacer
+    _install_config_template
+  fi
+
+  # Install enabled skills, plugins, and MCPs from catalog
+  local has_config; has_config="$(_super_find_config)"
+  if [[ -f "$has_config" ]]; then
+    ui_spacer
+    catalog_install_enabled
+  fi
+
   _install_finish
 }
 
 _install_config_template() {
-  local dest; dest="$(pwd)/super.config.yaml"
+  local root; root="$(_super_find_root)"
+  local super_dir="$root/.super"
+  local dest="$super_dir/super.config.yaml"
+  local project_config="$root/super.config.yaml"
   local template="$SUPER_HOME/super.config.yaml"
+
+  mkdir -p "$super_dir"
 
   if [[ -f "$dest" ]]; then
     ui_muted "Config already exists: $dest"
     return
   fi
 
-  if [[ -f "$template" ]]; then
+  if [[ -f "$project_config" ]]; then
+    cp "$project_config" "$dest"
+    ui_success "Created .super/super.config.yaml from project config"
+  elif [[ -f "$template" ]]; then
     cp "$template" "$dest"
-    ui_success "Created super.config.yaml from template"
+    ui_success "Created .super/super.config.yaml from template"
   else
     _super_config_init
-    ui_success "Created super.config.yaml with defaults"
+    ui_success "Created .super/super.config.yaml with defaults"
   fi
 }
 
@@ -539,7 +576,11 @@ cmd_launch() {
   ui_rule 60
   ui_spacer
 
-  exec "${CLI_CMD[$cli]}" "${passthrough[@]:-}"
+  if [[ ${#passthrough[@]} -gt 0 ]]; then
+    exec "${CLI_CMD[$cli]}" "${passthrough[@]}"
+  else
+    exec "${CLI_CMD[$cli]}"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -812,79 +853,104 @@ cmd_menu() {
   
   local active; active="$(_super_session_file)"
   
-  # If there's an active session, offer quick continuation
+  # If there's an active session, show the active session menu (looping)
   if [[ -n "$active" && -f "$active" && "$has_sessions" -eq 1 ]]; then
-    local turns; turns="$(grep -c '^## ' "$active" 2>/dev/null || echo 0)"
-    local name; name="$(basename "$active" .md)"
-    
+    while true; do
+      local turns; turns="$(grep -c '^## ' "$active" 2>/dev/null || echo 0)"
+      local name; name="$(basename "$active" .md)"
+      
+      ui_banner
+      ui_print "  $(_c $UI_SUCCESS)${UI_ICON_ACTIVE}${UI_RESET} $(_c $UI_BOLD)Active:${UI_RESET} $name ($turns turns)"
+      ui_spacer
+      
+      local options=(
+        "↩  Continue active session"
+        "🆕 Start new session"
+        "↩️  Resume different session"
+        "⚙️  Configure super"
+        "📊 View status"
+        "🩺 Run doctor"
+        "🚪 Quit"
+      )
+      
+      local choice
+      choice=$(ui_select_single "What would you like to do?" 0 "${options[@]}")
+      
+      [[ -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
+      
+      case "$choice" in
+        0)  # Continue active
+          local last_cli; last_cli="$(detect_last_cli)"
+          if [[ -n "$last_cli" ]]; then
+            cmd_launch "$last_cli" --resume
+          else
+            cmd_resume
+          fi
+          return
+          ;;
+        1) _pick_cli_and_launch; return ;;  # New session
+        2) cmd_resume; return ;;             # Resume different
+        3) cmd_config_interactive ;;         # Configure super (loop back)
+        4) print_banner; print_status ;;     # Status (loop back)
+        5) cmd_doctor ;;                     # Doctor (loop back)
+        6) ui_info "Bye!"; exit 0 ;;         # Quit
+      esac
+      # Loop continues for options 3, 4, 5
+    done
+    return
+  fi
+  
+  # No active session — show standard menu (looping)
+  while true; do
     ui_banner
-    ui_print "  $(_c $UI_SUCCESS)${UI_ICON_ACTIVE}${UI_RESET} $(_c $UI_BOLD)Active:${UI_RESET} $name ($turns turns)"
-    ui_spacer
     
-    local options=(
-      "↩  Continue active session"
-      "🆕 Start new session"
-      "↩️  Resume different session"
-      "📊 View status"
-      "🩺 Run doctor"
-      "🚪 Quit"
-    )
+    local options=("🆕 Start a new session")
+    [[ "$has_sessions" -eq 1 ]] && options+=("↩️  Resume a previous session")
+    options+=("⚙️  Configure super (skills, plugins, MCPs)")
+    options+=("🩺 Run health check (doctor)")
+    options+=("🚪 Quit")
     
     local choice
     choice=$(ui_select_single "What would you like to do?" 0 "${options[@]}")
     
     [[ -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
     
-    case "$choice" in
-      0)  # Continue active
-        local last_cli; last_cli="$(detect_last_cli)"
-        if [[ -n "$last_cli" ]]; then
-          cmd_launch "$last_cli" --resume
-        else
-          cmd_resume
-        fi
-        ;;
-      1) _pick_cli_and_launch ;;  # New session
-      2) cmd_resume ;;             # Resume different
-      3) print_banner; print_status ;;  # Status
-      4) cmd_doctor ;;             # Doctor
-      5) ui_info "Bye!"; exit 0 ;; # Quit
-    esac
-    return
-  fi
-  
-  # No active session — show standard menu
-  ui_banner
-  
-  local options=("🆕 Start a new session")
-  [[ "$has_sessions" -eq 1 ]] && options+=("↩️  Resume a previous session")
-  options+=("🩺 Run health check (doctor)")
-  options+=("🚪 Quit")
-  
-  local choice
-  choice=$(ui_select_single "What would you like to do?" 0 "${options[@]}")
-  
-  [[ -z "$choice" ]] && { ui_info "Bye!"; exit 0; }
-  
-  # Map selection to action — idx tracks position in dynamic options list
-  local idx=0
+    # Map selection to action — idx tracks position in dynamic options list
+    local idx=0
 
-  # "new" is always first
-  [[ "$choice" -eq $idx ]] && { _pick_cli_and_launch; return; }
-  idx=$((idx + 1))
-
-  # "resume" only if sessions exist
-  if [[ "$has_sessions" -eq 1 ]]; then
-    [[ "$choice" -eq $idx ]] && { cmd_resume; return; }
+    # "new" is always first
+    if [[ "$choice" -eq $idx ]]; then
+      _pick_cli_and_launch
+      return
+    fi
     idx=$((idx + 1))
-  fi
 
-  # "doctor"
-  [[ "$choice" -eq $idx ]] && { cmd_doctor; return; }
-  idx=$((idx + 1))
+    # "resume" only if sessions exist
+    if [[ "$has_sessions" -eq 1 ]]; then
+      if [[ "$choice" -eq $idx ]]; then
+        cmd_resume
+        return
+      fi
+      idx=$((idx + 1))
+    fi
 
-  # "quit"
-  ui_info "Bye!"; exit 0
+    # "configure" is always present
+    if [[ "$choice" -eq $idx ]]; then
+      cmd_config_interactive
+      continue  # Loop back to menu
+    fi
+    idx=$((idx + 1))
+
+    # "doctor"
+    if [[ "$choice" -eq $idx ]]; then
+      cmd_doctor
+      continue  # Loop back to menu
+    fi
+    idx=$((idx + 1))
+
+    # "quit"
+    ui_info "Bye!"; exit 0
+  done
 }
 
 # Detect last CLI used in active session
@@ -996,25 +1062,85 @@ cmd_config_interactive() {
 
 # ── Skills picker ─────────────────────────────────────────────────────────────
 
+# Multi-select skills during install (allows selecting multiple at once)
+_install_interactive_skills_select() {
+  local names=() sources=() display=()
+  
+  while IFS='|' read -r name source desc enabled; do
+    [[ -z "$name" ]] && continue
+    names+=("$name")
+    sources+=("$source")
+    display+=("$name — $desc")
+  done <<< "$(catalog_skills)"
+  
+  [[ ${#names[@]} -eq 0 ]] && { ui_warn "No skills in config."; return; }
+  
+  ui_banner
+  ui_print "  Select skills to enable (space to toggle, a=all, n=none):"
+  ui_spacer
+  
+  local indices
+  indices=$(ui_select_multi "Skills to enable:" "${display[@]}")
+  [[ -z "$indices" ]] && { ui_info "No skills selected."; return; }
+  
+  # Enable selected skills (uncomment them)
+  for idx in $indices; do
+    [[ "$idx" =~ ^[0-9]+$ ]] && ((idx < ${#names[@]})) || continue
+    local name="${names[$idx]}"
+    if ! _super_config_item_enabled "skills" "$name"; then
+      _super_config_uncomment "skills" "$name"
+      ui_success "$name enabled"
+    fi
+  done
+  
+  # Disable unselected skills (comment them out)
+  for ((i=0; i<${#names[@]}; i++)); do
+    local found=0
+    for idx in $indices; do
+      [[ "$idx" == "$i" ]] && { found=1; break; }
+    done
+    if [[ $found -eq 0 ]]; then
+      local name="${names[$i]}"
+      if _super_config_item_enabled "skills" "$name"; then
+        _super_config_comment "skills" "$name"
+        ui_info "$name disabled"
+      fi
+    fi
+  done
+}
+
 _config_interactive_skills() {
   local entries=() names=() sources=() states=() display=()
+  local _dbg="${SUPER_HOME}/super-debug.log"
+
+  echo "--- _config_interactive_skills $(date +%H:%M:%S) ---" >> "$_dbg"
+
+  local skills_output
+  skills_output="$(catalog_skills)" || true
+  echo "  catalog_skills output lines: $(echo "$skills_output" | wc -l | tr -d ' ')" >> "$_dbg"
 
   while IFS='|' read -r name source desc enabled; do
     [[ -z "$name" ]] && continue
     names+=("$name")
     sources+=("$source")
     states+=("$enabled")
-    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉"
+    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉" || true
     display+=("$mark $name — $desc")
-  done <<< "$(catalog_skills)"
+  done <<< "$skills_output"
+
+  echo "  names count: ${#names[@]}" >> "$_dbg"
+  echo "  display count: ${#display[@]}" >> "$_dbg"
 
   [[ ${#names[@]} -eq 0 ]] && { ui_warn "No skills in config."; return; }
 
   display+=("📦 Install enabled skills now")
   display+=("⬅️  Back")
 
+  echo "  showing gum with ${#display[@]} options" >> "$_dbg"
+
   local choice
-  choice=$(ui_select_single "Skills (toggle on/off)" 0 "${display[@]}")
+  choice=$(ui_select_single "Skills (toggle on/off)" 0 "${display[@]}") || true
+  echo "  choice: [$choice]" >> "$_dbg"
   [[ -z "$choice" ]] && return
 
   local total=${#names[@]}
@@ -1042,12 +1168,11 @@ _config_interactive_skills() {
   # Toggle the selected skill
   local idx="$choice"
   local name="${names[$idx]}"
-  if [[ "${states[$idx]}" == "true" ]]; then
-    _catalog_toggle "skills" "$name" "false"
-    ui_info "$name disabled"
-  else
-    _catalog_toggle "skills" "$name" "true"
+  local new_state; new_state=$(_catalog_toggle "skills" "$name")
+  if [[ "$new_state" == "enabled" ]]; then
     ui_success "$name enabled"
+  else
+    ui_info "$name disabled"
   fi
 
   # Re-enter to show updated state
@@ -1064,7 +1189,7 @@ _config_interactive_plugins() {
     names+=("$name")
     sources+=("$source")
     states+=("$enabled")
-    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉"
+    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉" || true
     display+=("$mark $name — $desc")
   done <<< "$(catalog_plugins)"
 
@@ -1098,12 +1223,11 @@ _config_interactive_plugins() {
   fi
 
   local idx="$choice" name="${names[$idx]}"
-  if [[ "${states[$idx]}" == "true" ]]; then
-    _catalog_toggle "plugins" "$name" "false"
-    ui_info "$name disabled"
-  else
-    _catalog_toggle "plugins" "$name" "true"
+  local new_state; new_state=$(_catalog_toggle "plugins" "$name")
+  if [[ "$new_state" == "enabled" ]]; then
     ui_success "$name enabled"
+  else
+    ui_info "$name disabled"
   fi
   _config_interactive_plugins
 }
@@ -1118,7 +1242,7 @@ _config_interactive_mcps() {
     names+=("$name")
     commands+=("$command")
     states+=("$enabled")
-    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉"
+    local mark="○"; [[ "$enabled" == "true" ]] && mark="◉" || true
     display+=("$mark $name — $desc")
   done <<< "$(catalog_mcps)"
 
@@ -1161,12 +1285,11 @@ print(json.dumps(mcp.get('args', [])))
   fi
 
   local idx="$choice" name="${names[$idx]}"
-  if [[ "${states[$idx]}" == "true" ]]; then
-    _catalog_toggle "mcps" "$name" "false"
-    ui_info "$name disabled"
-  else
-    _catalog_toggle "mcps" "$name" "true"
+  local new_state; new_state=$(_catalog_toggle "mcps" "$name")
+  if [[ "$new_state" == "enabled" ]]; then
     ui_success "$name enabled"
+  else
+    ui_info "$name disabled"
   fi
   _config_interactive_mcps
 }
@@ -1420,6 +1543,10 @@ COMMANDS
       --interactive   Use checkbox UI to select CLIs (default if no target)
       (Uses gum if available, otherwise pure bash checkboxes)
 
+  config [show|init|edit|interactive]
+      Manage configuration (skills, plugins, MCPs)
+      interactive   Launch interactive setup menu
+
   launch <cli> [--title <name>] [--resume [file]]
       Start a new session
 
@@ -1446,9 +1573,6 @@ COMMANDS
 
   status
       Show status with recent activity
-
-  config [show|init|edit]
-      Manage configuration
 
   validate
       Run project validators
