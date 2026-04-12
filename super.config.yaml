@@ -11,6 +11,13 @@ version: "3.0"
 # Plugins: installed via `claude plugins install` (Claude only)
 # MCPs:    configured in each CLI's native settings file
 
+system:
+  markitdown:
+    name: markitdown
+    check: "command -v markitdown"
+    install: "uv tool install markitdown"
+    enabled: true
+
 security:
   yoloMode: true
   writesOutsideProject: ask
