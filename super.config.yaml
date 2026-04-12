@@ -124,19 +124,21 @@ skills:
     source: obra/superpowers/skills/writing-skills
     description: How to write effective skills
     enabled: false
-  weroad-brain-sync:
-    source: smnbss/brain/.agents/skills/weroad-brain-sync
-    description: Sync the WeRoad Brain — re-export all external sources and refresh memory
+  brain-pull-sources:
+    source: smnbss/brain/brain-pull-sources
+    description: Export all external sources — ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase
     enabled: true
-
-# ─── Commands ────────────────────────────────────────────────────────────────
-# source: owner/repo/subpath (GitHub)
-# Copies all .md files from the subpath to each CLI's commands directory.
-
-commands:
-  brain-commands:
-    source: smnbss/brain/.agents/commands
-    description: WeRoad Brain agent commands (brain-sync, rebuild-memory, rebuild-services-docs)
+  brain-rebuild-memory:
+    source: smnbss/brain/brain-rebuild-memory
+    description: Rebuild L2 (domain knowledge) and L1 (navigation MOCs) from src/ + outputs/services/
+    enabled: true
+  brain-rebuild-services:
+    source: smnbss/brain/brain-rebuild-services
+    description: Generate deep service .AGENT.MD docs from cloned GitHub repos
+    enabled: true
+  brain-git-sync:
+    source: smnbss/brain/brain-git-sync
+    description: Commit and push all brain changes
     enabled: true
 
 # ─── Plugins ─────────────────────────────────────────────────────────────────
