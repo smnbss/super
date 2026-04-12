@@ -46,6 +46,21 @@ This sets up:
 - Context files: `AGENTS.md` (master), `CLAUDE.md` and `GEMINI.md` (symlinks)
 - Sessions folder: `.super/sessions/`
 
+### Ubuntu (Orb)
+
+```bash
+sudo apt-get install git
+cd ~
+sudo rm -r .super
+rm -r ubuntu_brain
+git clone https://github.com/smnbss/super ~/.super
+export SUPER_HOME="$HOME/.super"
+export PATH="$SUPER_HOME:$PATH"
+mkdir ubuntu_brain
+cd ubuntu_brain
+super install
+```
+
 ---
 
 ## Quick Start
