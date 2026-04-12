@@ -1,4 +1,26 @@
 #!/usr/bin/env bash
 # super — thin shim that delegates to super.mjs
 # Hooks remain bash and source lib/*.sh directly — this shim is only for the CLI.
-exec node "$(dirname "${BASH_SOURCE[0]}")/super.mjs" "$@"
+
+SUPER_HOME="$(dirname "${BASH_SOURCE[0]}")"
+
+if ! command -v node &>/dev/null; then
+  echo "🛑 Node.js is not installed." >&2
+  echo "   Install it first, e.g.:" >&2
+  echo "   sudo apt-get install -y nodejs npm   # Debian/Ubuntu" >&2
+  echo "   brew install node                    # macOS" >&2
+  exit 1
+fi
+
+if [[ ! -d "${SUPER_HOME}/node_modules" ]]; then
+  echo "⚙️  super dependencies missing. Running npm install in ${SUPER_HOME} ..." >&2
+  if (cd "${SUPER_HOME}" && npm install); then
+    echo "✅ Dependencies installed." >&2
+    echo >&2
+  else
+    echo "🛑 npm install failed. Run \`cd ${SUPER_HOME} && npm install\` manually." >&2
+    exit 1
+  fi
+fi
+
+exec node "${SUPER_HOME}/super.mjs" "$@"

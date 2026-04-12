@@ -71,6 +71,16 @@ function cmdDoctor() {
   let issues = 0;
   const root = config.findRoot();
 
+  ui.muted('Checking super installation...');
+  const superNodeModules = join(SUPER_HOME, 'node_modules');
+  if (existsSync(superNodeModules)) {
+    ui.success('super dependencies installed');
+  } else {
+    ui.warn('super dependencies missing — run: cd ~/.super && npm install');
+    issues++;
+  }
+
+  ui.spacer();
   ui.muted('Checking CLI hooks...');
   const hookFiles = {
     claude: join(root, '.claude', 'settings.json'),
@@ -274,17 +284,26 @@ async function cmdInstall(args) {
 
   let selectedClis = null;
 
-  if (!target) {
-    // Interactive mode
+  if (!target || target === '--all') {
+    // Interactive mode (or forced all)
     if (isFirstTime) { installConfigTemplate(); ui.spacer(); }
 
     // Pick CLIs
     const clis = catalog.installedClis();
     const options = clis.map(c => `${CLI[c].icon} ${CLI[c].label}`);
     const indices = await interactive.selectMulti('Select CLIs to install:', options);
-    if (indices) {
+    if (indices && indices.length > 0) {
       selectedClis = indices.map(idx => clis[idx]);
       for (const cli of selectedClis) installHooks(cli);
+    } else if (target === '--all') {
+      ui.brand('Installing hooks for all available CLIs');
+      ui.spacer();
+      installHooks('all');
+      selectedClis = Object.keys(CLI).filter(c => catalog.isInstalled(c));
+    } else {
+      ui.warn('No CLIs selected — installing all available hooks.');
+      installHooks('all');
+      selectedClis = Object.keys(CLI).filter(c => catalog.isInstalled(c));
     }
 
     // Install catalog

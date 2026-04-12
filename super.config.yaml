@@ -12,6 +12,12 @@ version: "3.0"
 # MCPs:    configured in each CLI's native settings file
 
 system:
+  uv:
+    name: uv
+    check: "command -v uv"
+    install: "curl -LsSf https://astral.sh/uv/install.sh | sh"
+    enabled: true
+
   markitdown:
     name: markitdown
     check: "command -v markitdown"
