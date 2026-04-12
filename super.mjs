@@ -272,6 +272,8 @@ async function cmdInstall(args) {
   const root = config.findRoot();
   const isFirstTime = !existsSync(join(root, '.super', 'super.config.yaml')) && !existsSync(join(root, 'super.config.yaml'));
 
+  let selectedClis = null;
+
   if (!target) {
     // Interactive mode
     if (isFirstTime) { installConfigTemplate(); ui.spacer(); }
@@ -281,7 +283,8 @@ async function cmdInstall(args) {
     const options = clis.map(c => `${CLI[c].icon} ${CLI[c].label}`);
     const indices = await interactive.selectMulti('Select CLIs to install:', options);
     if (indices) {
-      for (const idx of indices) installHooks(clis[idx]);
+      selectedClis = indices.map(idx => clis[idx]);
+      for (const cli of selectedClis) installHooks(cli);
     }
 
     // Install catalog
@@ -289,7 +292,7 @@ async function cmdInstall(args) {
     if (config.findConfig()) {
       ui.spacer();
       if (await interactive.confirm('Install enabled skills, plugins & MCPs?', true)) {
-        catalog.installEnabled();
+        catalog.installEnabled(selectedClis);
       }
     }
   } else {
@@ -297,9 +300,10 @@ async function cmdInstall(args) {
     ui.brand(`Installing hooks (target: ${target})`);
     ui.spacer();
     installHooks(target);
+    if (target !== 'all') selectedClis = [target];
     if (isFirstTime) { ui.spacer(); installConfigTemplate(); }
     config.invalidateCache();
-    if (config.findConfig()) { ui.spacer(); catalog.installEnabled(); }
+    if (config.findConfig()) { ui.spacer(); catalog.installEnabled(selectedClis); }
   }
 
   // Finish
