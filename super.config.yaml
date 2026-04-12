@@ -21,7 +21,7 @@ system:
   markitdown:
     name: markitdown
     check: "command -v markitdown"
-    install: "uv tool install markitdown"
+    install: "export PATH=\"$HOME/.local/bin:$PATH\" && uv tool install markitdown"
     enabled: true
 
 # ─── CLIs ────────────────────────────────────────────────────────────────────
@@ -30,19 +30,19 @@ system:
 
 clis:
   claude:
-    install: "npm install -g @anthropic-ai/claude-code"
+    install: "sudo npm install -g @anthropic-ai/claude-code"
     check: "command -v claude"
     enabled: true
   gemini:
-    install: "npm install -g @google/gemini-cli"
+    install: "sudo npm install -g @google/gemini-cli"
     check: "command -v gemini"
     enabled: true
   codex:
-    install: "npm install -g @openai/codex"
+    install: "sudo npm install -g @openai/codex"
     check: "command -v codex"
     enabled: true
   kimi:
-    install: "curl -fsSL https://www.moonshot.cn/kimi-cli/install.sh | sh"
+    install: "export PATH=\"$HOME/.local/bin:$PATH\" && uv tool install kimi-cli"
     check: "command -v kimi"
     enabled: true
 
