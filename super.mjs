@@ -360,19 +360,19 @@ async function cmdInstall(args) {
     if (config.findConfig()) { ui.spacer(); catalog.installEnabled(selectedClis); }
   }
 
-  // Ensure SUPER_HOME is on PATH in shell profile (Linux only, idempotent)
-  if (process.platform === 'linux') {
-    const bashrc = join(process.env.HOME, '.bashrc');
-    const marker = 'export SUPER_HOME=';
-    try {
-      const content = existsSync(bashrc) ? readFileSync(bashrc, 'utf8') : '';
-      if (!content.includes(marker)) {
-        const snippet = `\n# super CLI\nexport SUPER_HOME="${SUPER_HOME}"\nexport PATH="$HOME/.local/bin:$SUPER_HOME:$PATH"\n`;
-        writeFileSync(bashrc, content + snippet);
-        ui.success('Added SUPER_HOME to ~/.bashrc');
-      }
-    } catch {}
-  }
+  // Ensure SUPER_HOME is on PATH in shell profile (idempotent)
+  const profile = process.platform === 'darwin'
+    ? join(process.env.HOME, '.zshrc')
+    : join(process.env.HOME, '.bashrc');
+  const marker = 'export SUPER_HOME=';
+  try {
+    const content = existsSync(profile) ? readFileSync(profile, 'utf8') : '';
+    if (!content.includes(marker)) {
+      const snippet = `\n# super CLI\nexport SUPER_HOME="${SUPER_HOME}"\nexport PATH="$HOME/.local/bin:$SUPER_HOME:$PATH"\n`;
+      writeFileSync(profile, content + snippet);
+      ui.success(`Added SUPER_HOME to ~/${basename(profile)}`);
+    }
+  } catch {}
 
   // Finish
   mkdirSync(config.sessionsDir(), { recursive: true });
