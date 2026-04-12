@@ -361,9 +361,10 @@ async function cmdInstall(args) {
   }
 
   // Ensure SUPER_HOME is on PATH in shell profile (idempotent)
+  // Linux: use .profile (loaded by login shells without the interactive guard that .bashrc has)
   const profile = process.platform === 'darwin'
     ? join(process.env.HOME, '.zshrc')
-    : join(process.env.HOME, '.bashrc');
+    : join(process.env.HOME, '.profile');
   const marker = 'export SUPER_HOME=';
   try {
     const content = existsSync(profile) ? readFileSync(profile, 'utf8') : '';
