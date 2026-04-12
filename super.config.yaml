@@ -30,7 +30,7 @@ system:
 
 clis:
   claude:
-    install: "sudo npm install -g @anthropic-ai/claude-code"
+    install: "curl -fsSL https://claude.ai/install.sh | bash"
     check: "command -v claude"
     enabled: true
   gemini:
