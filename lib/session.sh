@@ -41,7 +41,7 @@ _super_session_file() {
     cat "$ptr"
   else
     # Fallback: newest session, or empty
-    ls -t "$(_super_sessions_dir)"/*.md 2>/dev/null | head -1 || echo ""
+    ls -t "$(_super_sessions_dir)"/*.md 2>/dev/null | head -1 || true
   fi
 }
 
@@ -136,7 +136,7 @@ session_list() {
     [[ "$f" == "$active" ]] && marker=" ◀ active"
     printf '%d\t%s\t%s\t%s turns%s\n' "$i" "$(basename "$f")" "$started" "$turns" "$marker"
     i=$((i + 1))
-  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
+  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null || true)
 }
 
 # ─── Interactive session picker ───────────────────────────────────────────────
@@ -149,7 +149,7 @@ session_pick() {
   local files=()
   while IFS= read -r f; do
     [[ -f "$f" ]] && files+=("$f")
-  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
+  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null || true)
 
   if [[ ${#files[@]} -eq 0 ]]; then
     echo ""; return
@@ -232,7 +232,7 @@ session_get_summary() {
   local file
   file="$(_super_session_file)"
   [[ -f "$file" ]] || { echo "No active session."; return; }
-  grep -v '^---$' "$file" | tail -n "$n"
+  grep -v '^---$' "$file" 2>/dev/null | tail -n "$n" || true
 }
 
 session_inject_context() {
@@ -380,7 +380,8 @@ session_cleanup_old() {
   local count=0
   while IFS= read -r f; do
     [[ -f "$f" ]] || continue
-    local age=$(( ($(date +%s) - $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)) / 86400 ))
+    local mtime; mtime="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)"
+    local age=$(( ($(date +%s) - mtime) / 86400 ))
     if [[ $age -gt $max_age ]]; then
       rm "$f"
       count=$((count + 1))

@@ -42,7 +42,7 @@ _fzf_pick_session() {
     
     # Calculate age
     local mtime age_str
-    mtime="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
+    mtime="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)"
     local now; now=$(date +%s)
     local age_hours=$(((now - mtime) / 3600))
     
@@ -64,7 +64,7 @@ _fzf_pick_session() {
     list="${list}${line}\n"
     
     i=$((i + 1))
-  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
+  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null || true)
   
   [[ -z "$list" ]] && { echo ""; return; }
   

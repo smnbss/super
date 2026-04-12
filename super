@@ -78,9 +78,9 @@ print_status() {
   
   if [[ -d "$sessions_dir" ]]; then
     local total today week
-    total="$(ls "$sessions_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
-    today="$(find "$sessions_dir" -name '*.md' -mtime -1 2>/dev/null | wc -l | tr -d ' ')"
-    week="$(find "$sessions_dir" -name '*.md' -mtime -7 2>/dev/null | wc -l | tr -d ' ')"
+    total="$(ls "$sessions_dir"/*.md 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+    today="$(find "$sessions_dir" -name '*.md' -mtime -1 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+    week="$(find "$sessions_dir" -name '*.md' -mtime -7 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
     
     ui_print "  📁 $total total  |  $today today  |  $week this week"
     
@@ -91,12 +91,13 @@ print_status() {
       
       ui_spacer
       ui_print "  $(_c $UI_SUCCESS)${UI_ICON_ACTIVE}${UI_RESET} ${UI_BOLD}ACTIVE:${UI_RESET} $(basename "$active")"
-      ui_print "     $turns turns  |  $(ui_human_size $size)  |  Last: $(stat -f %Sm -t '%H:%M' "$active" 2>/dev/null || stat -c %y "$active" 2>/dev/null | cut -d' ' -f2 | cut -d':' -f1,2)"
+      local last_mod; last_mod="$(stat -f %Sm -t '%H:%M' "$active" 2>/dev/null || stat -c %y "$active" 2>/dev/null | cut -d' ' -f2 | cut -d':' -f1,2 || echo '??:??')"
+      ui_print "     $turns turns  |  $(ui_human_size $size)  |  Last: $last_mod"
       
       # Recent activity preview (last 3 turns)
       ui_spacer
       ui_print "  $(_c $UI_MUTED)Recent activity:${UI_RESET}"
-      grep -E '^## .*User|^### .*Assistant' "$active" | tail -6 | while read -r line; do
+      grep -E '^## .*User|^### .*Assistant' "$active" 2>/dev/null | tail -6 | while read -r line; do
         if [[ "$line" == *"User"* ]]; then
           local content
           content="$(echo "$line" | sed 's/.*User//' | head -c 50)"
@@ -181,12 +182,12 @@ cmd_doctor() {
   local sessions_dir; sessions_dir="$(_super_sessions_dir)"
   if [[ -d "$sessions_dir" ]]; then
     local count
-    count="$(ls "$sessions_dir"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+    count="$(ls "$sessions_dir"/*.md 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
     ui_success "$count session(s) found"
-    
+
     # Check for old sessions
     local old
-    old="$(find "$sessions_dir" -name '*.md' -mtime +30 2>/dev/null | wc -l | tr -d ' ')"
+    old="$(find "$sessions_dir" -name '*.md' -mtime +30 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
     if ((old > 0)); then
       ui_warn "$old session(s) older than 30 days"
       ui_muted "      Run: super cleanup 30"
@@ -194,7 +195,7 @@ cmd_doctor() {
     
     # Check for large sessions
     local large
-    large="$(find "$sessions_dir" -name '*.md' -size +1M 2>/dev/null)"
+    large="$(find "$sessions_dir" -name '*.md' -size +1M 2>/dev/null || true)"
     if [[ -n "$large" ]]; then
       ui_warn "Large sessions detected (slow context injection):"
       echo "$large" | while read -r f; do
@@ -574,7 +575,7 @@ _pick_session_and_resume() {
     [[ -z "$cli" ]] && cli="⚪"
     
     options+=("$cli $name ($turns turns)$marker")
-  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
+  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null || true)
   
   [[ ${#options[@]} -eq 0 ]] && { ui_warn "No sessions found."; return 1; }
   
@@ -633,7 +634,7 @@ cmd_sessions() {
     
     ui_session_line "$i" "$title" "$started" "$turns" "$cli" "$is_active"
     i=$((i + 1))
-  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null)
+  done < <(ls -t "$sessions_dir"/*.md 2>/dev/null || true)
   
   ui_spacer
   ui_muted "Run 'super resume <number>' to resume a session"
@@ -1143,7 +1144,7 @@ cmd_catchup() {
   ui_spacer
   
   # Recent turns with context
-  grep -E '^## .*User|^### .*Assistant' "$session_file" | tail -10 | while read -r line; do
+  grep -E '^## .*User|^### .*Assistant' "$session_file" 2>/dev/null | tail -10 | while read -r line; do
     if [[ "$line" == *"User"* ]]; then
       local content; content="$(echo "$line" | sed 's/.*User//' | head -c 60)"
       [[ ${#content} -eq 60 ]] && content="${content}..."
