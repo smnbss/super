@@ -49,11 +49,24 @@ This sets up:
 ### Ubuntu (Orb)
 
 ```bash
+cat << EOF > .env.local
+CLICKUP_TOKEN=
+CONFLUENCE_EMAIL=
+CONFLUENCE_BASE_URL=https://weroad.atlassian.net/wiki
+CONFLUENCE_API=/rest/api/content
+CONFLUENCE_TOKEN=
+LINEAR_TOKEN=
+METABASE_URL=https://metabase.weroad.io
+METABASE_API_KEY=
+GCP_PROJECT_ID=
+EOF
+
 sudo apt-get install git
 cd ~
 sudo rm -r .super
 rm -r ubuntu_brain
 git clone https://github.com/smnbss/super ~/.super
+export PATH="$HOME/.local/bin:$PATH"
 export SUPER_HOME="$HOME/.super"
 export PATH="$SUPER_HOME:$PATH"
 mkdir ubuntu_brain
