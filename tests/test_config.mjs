@@ -1,6 +1,6 @@
 // tests/test_config.mjs — Tests for config module
 import { strict as assert } from 'assert';
-import { findRoot, findConfig, configGet, configEnabled, catalogSkills, catalogPlugins, catalogMcps, mcpItem, superVersion, invalidateCache } from '../lib/config.mjs';
+import { findRoot, findConfig, configGet, configEnabled, catalogSkills, catalogPlugins, catalogMcps, catalogCommands, mcpItem, superVersion, invalidateCache } from '../lib/config.mjs';
 
 let passed = 0, failed = 0;
 
@@ -75,6 +75,19 @@ test('catalogSkills respects enabled: false', () => {
 test('catalogPlugins returns array', () => {
   const plugins = catalogPlugins();
   assert.ok(Array.isArray(plugins));
+});
+
+test('catalogCommands returns array', () => {
+  const commands = catalogCommands();
+  assert.ok(Array.isArray(commands));
+});
+
+test('catalogCommands items have required fields', () => {
+  const commands = catalogCommands();
+  const first = commands[0];
+  assert.ok(first.name, 'Should have name');
+  assert.ok(first.source, 'Should have source');
+  assert.ok(typeof first.enabled === 'boolean', 'enabled should be boolean');
 });
 
 test('catalogMcps returns array with type field', () => {
