@@ -30,6 +30,41 @@ const CLI = {
 
 function die(msg) { ui.error(msg); process.exit(1); }
 
+// ─── Auto-update ─────────────────────────────────────────────────────────────
+
+const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function shouldCheckUpdates() {
+  const marker = join(SUPER_HOME, '.last-update-check');
+  if (!existsSync(marker)) return true;
+  const last = parseInt(readFileSync(marker, 'utf8').trim(), 10) || 0;
+  return (Date.now() - last) > UPDATE_INTERVAL_MS;
+}
+
+function markUpdateChecked() {
+  try { writeFileSync(join(SUPER_HOME, '.last-update-check'), String(Date.now()) + '\n'); } catch {}
+}
+
+function autoUpdate(targetCli) {
+  if (!shouldCheckUpdates()) return;
+
+  // Update super itself (best-effort, silent)
+  try {
+    execSync('git pull', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 15000 });
+    execSync('npm install', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 30000 });
+  } catch {}
+
+  // Update the target CLI using its catalog install command
+  const cliCfg = config.catalogClis().find(c => c.name === targetCli);
+  if (cliCfg?.install) {
+    try {
+      execSync(cliCfg.install, { stdio: 'ignore', shell: true, timeout: 120000 });
+    } catch {}
+  }
+
+  markUpdateChecked();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // STATUS & DOCTOR
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -355,6 +390,7 @@ function cmdLaunch(cli, args = []) {
   cli = cli.toLowerCase();
   if (!CLI[cli]) die(`Unknown CLI: ${cli}`);
   if (!catalog.isInstalled(cli)) die(`${CLI[cli].label} is not installed`);
+  autoUpdate(cli);
 
   let doResume = false, resumeFile = '', title = '';
   const passthrough = [];
@@ -407,6 +443,7 @@ function cmdSwitch(toCli) {
   toCli = toCli.toLowerCase();
   if (!CLI[toCli]) die(`Unknown CLI: ${toCli}`);
   if (!catalog.isInstalled(toCli)) die(`${CLI[toCli].label} is not installed`);
+  autoUpdate(toCli);
 
   let sf = session.sessionFile();
   if (!sf) sf = session.sessionNew('untitled');
