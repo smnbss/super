@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lib/validators.sh - Project validators (lint/typecheck) for super
 
-source "$SUPER_HOME/lib/config.sh"
+source "$SUPER_HOME/hooks/config.sh"
 
 # Run lint command if configured
 _super_run_lint() {

@@ -130,9 +130,13 @@ plugins:
 #   Claude: .claude/settings.local.json (project-level, dict)
 #   Gemini: ~/.gemini/settings.json (dict)
 #   Codex:  ~/.codex/config.json (array format)
-#   Kimi:   ~/.kimi/mcp.json (dict with transport field)
+#   Kimi:   .kimi/mcp.json (project-level, dict with transport field)
 #
 # type: http → url-based transport | type: stdio → command + args
+#
+# Use $env:VAR_NAME to reference secrets from .env.local (or .env).
+# `super install` resolves these at install time and bakes the values
+# into each CLI's config. Re-run `super install` after rotating tokens.
 
 mcps:
   bigquery:
@@ -143,13 +147,18 @@ mcps:
   linear:
     type: http
     url: https://mcp.linear.app/mcp
-    description: Linear project management
+    headers:
+      Authorization: "Bearer $env:LINEAR_TOKEN"
+    description: Linear project management (requires LINEAR_TOKEN in .env.local)
     enabled: true
   metabase:
     type: stdio
     command: npx
     args: ["-y", "@cognitionai/metabase-mcp-server", "--all"]
-    description: Metabase analytics (requires METABASE_URL, METABASE_API_KEY in env)
+    env:
+      METABASE_URL: "$env:METABASE_URL"
+      METABASE_API_KEY: "$env:METABASE_API_KEY"
+    description: Metabase analytics (requires METABASE_URL, METABASE_API_KEY in .env.local)
     enabled: true
   design-system-extractor:
     type: stdio

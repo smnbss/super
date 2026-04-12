@@ -1,4 +1,5 @@
 .super/
 dist/
 lib/__pycache__/
+node_modules/
 super-debug.log

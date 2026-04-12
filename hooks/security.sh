@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lib/security.sh - Security enforcement for super hooks
 
-source "$SUPER_HOME/lib/config.sh"
+source "$SUPER_HOME/hooks/config.sh"
 
 # Check if a path is outside the project
 _super_is_outside_project() {

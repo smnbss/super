@@ -1,0 +1,15 @@
+{
+  "name": "super-cli",
+  "version": "4.0.0",
+  "description": "Cross-CLI session bridge for Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI",
+  "type": "module",
+  "bin": {
+    "super": "./super"
+  },
+  "scripts": {
+    "test": "for t in tests/test_*.mjs; do echo \"\n▸ $t\"; node \"$t\" || exit 1; done"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
