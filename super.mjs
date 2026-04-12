@@ -323,30 +323,45 @@ async function cmdInstall(args) {
     // Interactive mode (or forced all)
     if (isFirstTime) { installConfigTemplate(); ui.spacer(); }
 
-    // Pick CLIs
+    // Install system deps & CLIs first so they're available for hook setup
+    config.invalidateCache();
+    if (config.findConfig()) {
+      ui.brand('Installing system prerequisites...');
+      ui.spacer();
+      catalog.installSystem();
+      ui.spacer();
+      ui.brand('Installing enabled CLIs...');
+      ui.spacer();
+      catalog.installClis();
+      ui.spacer();
+    }
+
+    // Pick CLIs (now that they've been installed)
     const clis = catalog.installedClis();
-    const options = clis.map(c => `${CLI[c].icon} ${CLI[c].label}`);
-    const indices = await interactive.selectMulti('Select CLIs to install:', options);
-    if (indices && indices.length > 0) {
-      selectedClis = indices.map(idx => clis[idx]);
-      for (const cli of selectedClis) installHooks(cli);
-    } else if (target === '--all') {
+    if (target === '--all' || clis.length === 0) {
       ui.brand('Installing hooks for all available CLIs');
       ui.spacer();
       installHooks('all');
-      selectedClis = Object.keys(CLI).filter(c => catalog.isInstalled(c));
+      selectedClis = clis;
     } else {
-      ui.warn('No CLIs selected — installing all available hooks.');
-      installHooks('all');
-      selectedClis = Object.keys(CLI).filter(c => catalog.isInstalled(c));
+      const options = clis.map(c => `${CLI[c].icon} ${CLI[c].label}`);
+      const indices = await interactive.selectMulti('Select CLIs to configure:', options);
+      if (indices && indices.length > 0) {
+        selectedClis = indices.map(idx => clis[idx]);
+        for (const cli of selectedClis) installHooks(cli);
+      } else {
+        ui.warn('No CLIs selected — installing all available hooks.');
+        installHooks('all');
+        selectedClis = clis;
+      }
     }
 
-    // Install catalog
+    // Install skills, plugins, MCPs
     config.invalidateCache();
     if (config.findConfig()) {
       ui.spacer();
       if (await interactive.confirm('Install enabled skills, plugins & MCPs?', true)) {
-        catalog.installEnabled(selectedClis);
+        catalog.installEnabled(selectedClis, { skipPrereqs: true });
       }
     }
   } else {
