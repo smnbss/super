@@ -125,19 +125,19 @@ skills:
     description: How to write effective skills
     enabled: false
   brain-pull-sources:
-    source: smnbss/brain/brain-pull-sources
+    source: smnbss/brain/plugins/brain/skills/brain-pull-sources
     description: Export all external sources — ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase
     enabled: true
   brain-rebuild-memory:
-    source: smnbss/brain/brain-rebuild-memory
+    source: smnbss/brain/plugins/brain/skills/brain-rebuild-memory
     description: Rebuild L2 (domain knowledge) and L1 (navigation MOCs) from src/ + outputs/services/
     enabled: true
   brain-rebuild-services:
-    source: smnbss/brain/brain-rebuild-services
+    source: smnbss/brain/plugins/brain/skills/brain-rebuild-services
     description: Generate deep service .AGENT.MD docs from cloned GitHub repos
     enabled: true
   brain-git-sync:
-    source: smnbss/brain/brain-git-sync
+    source: smnbss/brain/plugins/brain/skills/brain-git-sync
     description: Commit and push all brain changes
     enabled: true
 
@@ -147,6 +147,10 @@ skills:
 # Other CLIs have no equivalent plugin system
 
 plugins:
+  smnbss-brain:
+    source: smnbss/brain
+    description: Knowledge brain — sync, memory rebuild, service docs, daily commands
+    enabled: true
   weroad-ai:
     source: weroad/ai
     description: WeRoad AI — dbt-modeling, presentations, devops, data-analyst, codex
