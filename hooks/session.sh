@@ -6,8 +6,7 @@
 #   .super/
 #     sessions/
 #       2026-04-11_143201_auth-refactor.md
-#       2026-04-11_160042_untitled.md
-#     active          <- plain text: absolute path to active session file
+#       2026-04-11_160042.md
 #     super.log
 
 # ─── Project root discovery ──────────────────────────────────────────────────
@@ -28,21 +27,18 @@ _super_find_root() {
 
 _super_base_dir()     { echo "$(_super_find_root)/.super"; }
 _super_sessions_dir() { echo "$(_super_base_dir)/sessions"; }
-_super_active_ptr()   { echo "$(_super_base_dir)/active"; }
 _super_log_file()     { echo "$(_super_base_dir)/super.log"; }
 
 # ─── Active session path ─────────────────────────────────────────────────────
 # All hooks call this to know which file to write to.
 
 _super_session_file() {
-  local ptr
-  ptr="$(_super_active_ptr)"
-  if [[ -f "$ptr" ]]; then
-    cat "$ptr"
-  else
-    # Fallback: newest session, or empty
-    ls -t "$(_super_sessions_dir)"/*.md 2>/dev/null | head -1 || true
+  if [[ -n "${SUPER_SESSION_FILE:-}" && -f "$SUPER_SESSION_FILE" ]]; then
+    echo "$SUPER_SESSION_FILE"
+    return
   fi
+  # Fallback: most recently modified session, or empty
+  ls -t "$(_super_sessions_dir)"/*.md 2>/dev/null | head -1 || true
 }
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
@@ -82,7 +78,8 @@ session_new() {
   sessions_dir="$(_super_sessions_dir)"
   mkdir -p "$sessions_dir"
 
-  local filepath="$sessions_dir/${ts}_${safe_title}.md"
+  local filepath="$sessions_dir/${ts}.md"
+  local filename="${ts}.md"
 
   cat > "$filepath" << EOF
 # Super Session: $title
@@ -90,13 +87,13 @@ session_new() {
 **Project:** $(basename "$(_super_find_root)")
 **Started:** $(date '+%Y-%m-%d %H:%M:%S')
 **Directory:** $(pwd)
-**File:** ${ts}_${safe_title}.md
+**File:** ${filename}
 
 ---
 
 EOF
 
-  echo "$filepath" > "$(_super_active_ptr)"
+  export SUPER_SESSION_FILE="$filepath"
   _log "New session: $filepath"
   echo "$filepath"
 }
@@ -107,7 +104,7 @@ session_resume() {
   # session_resume <filepath>
   local filepath="$1"
   [[ -f "$filepath" ]] || { echo "Session not found: $filepath" >&2; return 1; }
-  echo "$filepath" > "$(_super_active_ptr)"
+  export SUPER_SESSION_FILE="$filepath"
   printf '\n---\n\n> ↩️  **Resumed** %s\n\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$filepath"
   _log "Resumed: $filepath"
   echo "$filepath"
@@ -220,18 +217,31 @@ _session_update_header() {
   local file="$1" content="$2"
   [[ -f "$file" ]] || return
 
-  local title description
-  title="$(_session_generate_title "$content")"
-  description="$(_session_generate_description "$content")"
-
   python3 -c "
 import sys, re
 file_path = sys.argv[1]
-title = sys.argv[2]
-description = sys.argv[3]
+fallback = sys.argv[2]
 
 with open(file_path) as f:
     text = f.read()
+
+# Extract all user turns from the entire conversation
+user_contents = []
+for match in re.finditer(r'\n## [^\n]*👤 User\n\n(.*?)\n(?=\n### |\n---\n\n|\n## |$)', text, re.DOTALL):
+    user_contents.append(match.group(1).strip())
+
+combined = ' '.join(user_contents) if user_contents else fallback
+combined = re.sub(r'\`\`\`[\s\S]*?\`\`\`', '', combined)
+combined = re.sub(r'\`[^\`]+\`', '', combined)
+combined = combined.replace('\n', ' ').strip()
+
+if not combined:
+    title = 'code snippet'
+    description = 'Shared a code snippet'
+else:
+    words = re.findall(r'[\w\-]+', combined)
+    title = ' '.join(words[:6])[:50] or 'code snippet'
+    description = combined[:140]
 
 text = re.sub(r'^# Super Session: .+$', f'# Super Session: {title}', text, flags=re.M)
 
@@ -242,7 +252,7 @@ else:
 
 with open(file_path, 'w') as f:
     f.write(text)
-" "$file" "$title" "$description"
+" "$file" "$content"
 }
 
 # ─── Turn appending ───────────────────────────────────────────────────────────

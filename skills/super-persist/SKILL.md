@@ -15,8 +15,8 @@ Summarize the current conversation and save the full context to the current supe
 ## Steps
 
 1. **Find the active session file**
-   - Read `.super/active` to get the path to the current session markdown file
-   - If `.super/active` does not exist, find the newest `.md` file in `.super/sessions/`
+   - Check the `SUPER_SESSION_FILE` environment variable first (required when multiple CLIs run in parallel)
+   - If not set, use the most recently modified `.md` file in `.super/sessions/`
 
 2. **Summarize the conversation**
    - Extract key decisions made

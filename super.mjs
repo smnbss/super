@@ -520,7 +520,7 @@ function cmdSessions() {
   ui.section('Sessions');
   sessions.forEach((s, i) => {
     const marker = s.isActive ? ` ${ui.colors.success(ui.icons.active)}` : '';
-    ui.print(`  ${ui.colors.bold(String(i + 1).padStart(2))}  ${s.title.padEnd(28)}  ${s.started.padEnd(16)}  ${s.turns} turns${marker}`);
+    ui.print(`  ${ui.colors.bold(String(i + 1).padStart(2))}  ${s.started.padEnd(20)}  ${String(s.turns).padStart(2)} turns  ${s.title.padEnd(55)}${marker}`);
   });
   ui.spacer();
 }
