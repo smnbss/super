@@ -220,7 +220,7 @@ mcps:
   chrome-devtools:
     type: stdio
     command: npx
-    args: ["@anthropic/mcp-chrome-devtools"]
+    args: ["-y", "chrome-devtools-mcp@latest"]
     description: Chrome DevTools — screenshots, DOM, network, console
     enabled: true
 
