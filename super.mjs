@@ -48,8 +48,12 @@ function markUpdateChecked() {
 function autoUpdate() {
   if (!shouldCheckUpdates()) return;
 
-  // Update super itself (best-effort, silent)
+  const start = Date.now();
+  ui.muted('Auto-update check...');
+
+  // Update super itself (best-effort)
   try {
+    ui.muted('  Pulling super updates...');
     execSync('git pull', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 15000 });
     execSync('npm install', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 30000 });
   } catch {}
@@ -63,11 +67,13 @@ function autoUpdate() {
       cmd = cmd.replace(/uv tool install/g, 'uv tool upgrade');
     }
     try {
+      ui.muted(`  Updating ${cliCfg.name}...`);
       execSync(cmd, { stdio: 'ignore', shell: true, timeout: 120000 });
     } catch {}
   }
 
   markUpdateChecked();
+  ui.muted(`Auto-update done (${ui.elapsed(start)})`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -315,6 +321,7 @@ function installConfigTemplate() {
 }
 
 async function cmdInstall(args) {
+  const installStart = Date.now();
   const target = args[0];
   const root = config.findRoot();
   const isFirstTime = !existsSync(join(root, '.super', 'super.config.yaml')) && !existsSync(join(root, 'super.config.yaml'));
@@ -398,6 +405,8 @@ async function cmdInstall(args) {
   ui.spacer();
   ui.success(`Sessions folder ready: ${config.sessionsDir()}`);
   ui.muted(`Run ${ui.colors.bold('super launch <cli>')} to start your first session`);
+  ui.spacer();
+  ui.success(`Total install time: ${ui.elapsed(installStart)}`);
 
   const sessions = session.sessionList();
   if (sessions.length === 0) {
