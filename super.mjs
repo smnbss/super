@@ -45,7 +45,7 @@ function markUpdateChecked() {
   try { writeFileSync(join(SUPER_HOME, '.last-update-check'), String(Date.now()) + '\n'); } catch {}
 }
 
-function autoUpdate(targetCli) {
+function autoUpdate() {
   if (!shouldCheckUpdates()) return;
 
   // Update super itself (best-effort, silent)
@@ -54,11 +54,16 @@ function autoUpdate(targetCli) {
     execSync('npm install', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 30000 });
   } catch {}
 
-  // Update the target CLI using its catalog install command
-  const cliCfg = config.catalogClis().find(c => c.name === targetCli);
-  if (cliCfg?.install) {
+  // Update all installed CLIs using their catalog install/upgrade command
+  for (const cliCfg of config.catalogClis()) {
+    if (!cliCfg.install || !catalog.isInstalled(cliCfg.name)) continue;
+    let cmd = cliCfg.install;
+    // uv tool install does not upgrade; switch to upgrade when already installed
+    if (cmd.includes('uv tool install')) {
+      cmd = cmd.replace(/uv tool install/g, 'uv tool upgrade');
+    }
     try {
-      execSync(cliCfg.install, { stdio: 'ignore', shell: true, timeout: 120000 });
+      execSync(cmd, { stdio: 'ignore', shell: true, timeout: 120000 });
     } catch {}
   }
 
