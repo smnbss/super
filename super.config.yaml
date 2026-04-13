@@ -124,50 +124,13 @@ skills:
     source: obra/superpowers/skills/writing-skills
     description: How to write effective skills
     enabled: false
-  brain-pull-sources:
-    source: smnbss/brain/plugins/brain/skills/brain-pull-sources
-    description: Export all external sources — ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase
-    enabled: true
-  brain-rebuild-memory:
-    source: smnbss/brain/plugins/brain/skills/brain-rebuild-memory
-    description: Rebuild L2 (domain knowledge) and L1 (navigation MOCs) from src/ + outputs/services/
-    enabled: true
-  brain-rebuild-services:
-    source: smnbss/brain/plugins/brain/skills/brain-rebuild-services
-    description: Generate deep service .AGENT.MD docs from cloned GitHub repos
-    enabled: true
-  brain-git-sync:
-    source: smnbss/brain/plugins/brain/skills/brain-git-sync
-    description: Commit and push all brain changes
-    enabled: true
-
-# ─── Commands ───────────────────────────────────────────────────────────────
-# Claude slash commands — cloned to .agents/commands/<name>.md
-# source: owner/repo/path/to/file.md (GitHub)
-# Symlinked from .claude/commands/ → .agents/commands/
-
-commands:
-  morning-start:
-    source: smnbss/brain/plugins/brain/commands/morning-start.md
-    description: Update tools, sync brain, harvest meeting notes, prepare today
-    enabled: true
-  prepare-my-day:
-    source: smnbss/brain/plugins/brain/commands/prepare-my-day.md
-    description: Prepare agendas for today's deep dives and 1:1s
-    enabled: true
-  push-reports:
-    source: smnbss/brain/plugins/brain/commands/push-reports.md
-    description: Push latest report outputs to ClickUp document pages
-    enabled: true
-  weekly-review:
-    source: smnbss/brain/plugins/brain/commands/weekly-review.md
-    description: Compile weekly summary from workflowy + x.com + linear
-    enabled: true
-
 # ─── Plugins ─────────────────────────────────────────────────────────────────
-# Claude only — configured via extraKnownMarketplaces + enabledPlugins
-# in .claude/settings.json (non-interactive, auto-updates from GitHub)
-# source: owner/repo (GitHub repo with .claude-plugin/marketplace.json)
+# Plugins are GitHub repos with a plugins/ directory structure.
+# Installing a plugin auto-discovers and installs:
+#   - Skills:   plugins/*/skills/*/SKILL.md  → .agents/skills/
+#   - Commands: plugins/*/commands/*.md      → .agents/commands/
+#   - Claude marketplace config              → .claude/settings.json
+# Repos without a plugins/ dir are treated as Claude-only marketplaces.
 
 plugins:
   smnbss-brain:
