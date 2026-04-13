@@ -141,10 +141,33 @@ skills:
     description: Commit and push all brain changes
     enabled: true
 
+# ─── Commands ───────────────────────────────────────────────────────────────
+# Claude slash commands — cloned to .agents/commands/<name>.md
+# source: owner/repo/path/to/file.md (GitHub)
+# Symlinked from .claude/commands/ → .agents/commands/
+
+commands:
+  morning-start:
+    source: smnbss/brain/plugins/brain/commands/morning-start.md
+    description: Update tools, sync brain, harvest meeting notes, prepare today
+    enabled: true
+  prepare-my-day:
+    source: smnbss/brain/plugins/brain/commands/prepare-my-day.md
+    description: Prepare agendas for today's deep dives and 1:1s
+    enabled: true
+  push-reports:
+    source: smnbss/brain/plugins/brain/commands/push-reports.md
+    description: Push latest report outputs to ClickUp document pages
+    enabled: true
+  weekly-review:
+    source: smnbss/brain/plugins/brain/commands/weekly-review.md
+    description: Compile weekly summary from workflowy + x.com + linear
+    enabled: true
+
 # ─── Plugins ─────────────────────────────────────────────────────────────────
-# Claude only — installed via: claude plugins install <source>
-# source: marketplace/plugin-name
-# Other CLIs have no equivalent plugin system
+# Claude only — configured via extraKnownMarketplaces + enabledPlugins
+# in .claude/settings.json (non-interactive, auto-updates from GitHub)
+# source: owner/repo (GitHub repo with .claude-plugin/marketplace.json)
 
 plugins:
   smnbss-brain:
