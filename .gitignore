@@ -3,3 +3,9 @@ dist/
 lib/__pycache__/
 node_modules/
 super-debug.log
+.DS_Store
+.last-update-check
+.claude/settings.json
+.codex/hooks.json
+.kimi/config.toml
+.gemini/settings.json
