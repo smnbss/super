@@ -9,7 +9,7 @@ Then delete ~/.super
 
 git clone https://github.com/smnbss/super ~/.super
 
-Then run super install, and check that everything is there.
+Run super install, and check that everything is there.
 Then for each cli (super kimi, super codex, super claude, super gemini), 
 check that they are working properly and that all the necessary files and dependencies are in place.
 check that the agents are properly installed and configured,

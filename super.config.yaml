@@ -125,17 +125,17 @@ skills:
     description: How to write effective skills
     enabled: false
 # ─── Plugins ─────────────────────────────────────────────────────────────────
-# Plugins are GitHub repos with a plugins/ directory structure.
-# Installing a plugin auto-discovers and installs:
-#   - Skills:   plugins/*/skills/*/SKILL.md  → .agents/skills/
-#   - Commands: plugins/*/commands/*.md      → .agents/commands/
-#   - Claude marketplace config              → .claude/settings.json
-# Repos without a plugins/ dir are treated as Claude-only marketplaces.
+# Plugins are GitHub repos that bundle multiple skills (and optionally commands).
+# Installing a plugin clones the repo and auto-discovers:
+#   - Skills:   skills/*/SKILL.md  OR  plugins/*/skills/*/SKILL.md
+#   - Commands: plugins/*/commands/*.md
+#   - Claude marketplace config → .claude/settings.json
+# Repos without discoverable content are treated as Claude-only marketplaces.
 
 plugins:
   smnbss-brain:
     source: smnbss/brain
-    description: Knowledge brain — sync, memory rebuild, service docs, daily commands
+    description: Knowledge brain — sync, memory rebuild, service docs, daily routines
     enabled: true
   weroad-ai:
     source: weroad/ai
