@@ -10,6 +10,7 @@
     "test": "for t in tests/test_*.mjs; do echo \"\n▸ $t\"; node \"$t\" || exit 1; done"
   },
   "dependencies": {
+    "chrome-devtools-mcp": "^0.21.0",
     "js-yaml": "^4.1.0"
   }
 }
