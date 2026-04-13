@@ -248,18 +248,15 @@ function installHooksKimi() {
   const cfg = join(dir, 'config.toml');
   const template = join(SUPER_HOME, 'hooks', 'kimi', 'config.toml.template');
   const expanded = expandTemplate(template);
-  if (existsSync(cfg)) {
-    const content = readFileSync(cfg, 'utf8');
-    if (content.includes('super hooks for Kimi')) {
-      ui.warn(`super hooks already in ${cfg} — skipping`);
-    } else {
-      writeFileSync(cfg, content + '\n# super hooks\n' + expanded + '\n');
-      ui.success(`Updated ${cfg}`);
-    }
-  } else {
-    writeFileSync(cfg, '# Kimi config\n# super hooks\n' + expanded + '\n');
-    ui.success(`Created ${cfg}`);
-  }
+  
+  // Start from global config so the local file is a complete standalone config
+  const globalCfg = join(process.env.HOME, '.kimi', 'config.toml');
+  let base = existsSync(globalCfg) ? readFileSync(globalCfg, 'utf8') : '# Kimi config\n';
+  // Strip any previously-appended super hooks from global to avoid duplication
+  base = base.replace(/\n?# super hooks\n[\s\S]*$/, '');
+  
+  writeFileSync(cfg, base.trimEnd() + '\n\n# super hooks\n' + expanded + '\n');
+  ui.success(`Created ${cfg} from global config + hooks`);
 }
 
 function installHooks(target) {
@@ -736,11 +733,13 @@ function cliDefaultArgs(cli) {
     }[cli];
     if (yoloFlag) args.push(yoloFlag);
   }
-  // Kimi needs explicit MCP config path
+  // Kimi needs explicit MCP config path and local config file
   if (cli === 'kimi') {
     const root = config.findRoot();
     const mcpConfig = join(root, '.kimi', 'mcp.json');
     if (existsSync(mcpConfig)) args.push('--mcp-config-file', mcpConfig);
+    const localConfig = join(root, '.kimi', 'config.toml');
+    if (existsSync(localConfig)) args.push('--config-file', localConfig);
   }
   return args;
 }
