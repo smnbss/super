@@ -42,7 +42,7 @@ clis:
     check: "command -v codex"
     enabled: true
   kimi:
-    install: "export PATH=\"$HOME/.local/bin:$PATH\" && uv tool install kimi-cli"
+    install: "curl -LsSf https://code.kimi.com/install.sh | bash"
     check: "command -v kimi"
     enabled: true
 
