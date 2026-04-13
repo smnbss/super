@@ -1,6 +1,6 @@
 {
   "name": "super-cli",
-  "version": "4.1.8",
+  "version": "4.1.9",
   "description": "Cross-CLI session bridge for Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI",
   "type": "module",
   "bin": {
