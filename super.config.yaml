@@ -34,11 +34,11 @@ clis:
     check: "command -v claude"
     enabled: true
   gemini:
-    install: "sudo npm install -g @google/gemini-cli"
+    install: "npm install -g @google/gemini-cli"
     check: "command -v gemini"
     enabled: true
   codex:
-    install: "sudo npm install -g @openai/codex"
+    install: "npm install -g @openai/codex"
     check: "command -v codex"
     enabled: true
   kimi:
