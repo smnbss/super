@@ -265,6 +265,8 @@ function installHooksKimi() {
   let base = existsSync(globalCfg) ? readFileSync(globalCfg, 'utf8') : '# Kimi config\n';
   // Strip any previously-appended super hooks from global to avoid duplication
   base = base.replace(/\n?# super hooks\n[\s\S]*$/, '');
+  // Remove empty hooks placeholder to avoid TOML conflict with [[hooks]] array
+  base = base.replace(/^hooks\s*=\s*\[\]\s*\n/m, '');
   
   writeFileSync(cfg, base.trimEnd() + '\n\n# super hooks\n' + expanded + '\n');
   ui.success(`Created ${cfg} from global config + hooks`);
