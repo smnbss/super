@@ -185,6 +185,66 @@ session_pick() {
   echo "${files[$choice]}"
 }
 
+# ─── Header helpers ───────────────────────────────────────────────────────────
+
+_session_generate_title() {
+  local content="$1"
+  echo "$content" | python3 -c "
+import sys, re
+text = sys.stdin.read()
+text = re.sub(r'\`\`\`[\s\S]*?\`\`\`', '', text)
+text = re.sub(r'\`[^\`]+\`', '', text)
+text = text.replace('\n', ' ').strip()
+if not text:
+    print('code snippet')
+else:
+    words = re.findall(r'[\w\-]+', text)
+    title = ' '.join(words[:6])[:50]
+    print(title or 'code snippet')
+"
+}
+
+_session_generate_description() {
+  local content="$1"
+  echo "$content" | python3 -c "
+import sys, re
+text = sys.stdin.read()
+text = re.sub(r'\`\`\`[\s\S]*?\`\`\`', '', text)
+text = re.sub(r'\`[^\`]+\`', '', text)
+text = text.replace('\n', ' ').strip()
+print(text[:140] if text else 'Shared a code snippet')
+"
+}
+
+_session_update_header() {
+  local file="$1" content="$2"
+  [[ -f "$file" ]] || return
+
+  local title description
+  title="$(_session_generate_title "$content")"
+  description="$(_session_generate_description "$content")"
+
+  python3 -c "
+import sys, re
+file_path = sys.argv[1]
+title = sys.argv[2]
+description = sys.argv[3]
+
+with open(file_path) as f:
+    text = f.read()
+
+text = re.sub(r'^# Super Session: .+$', f'# Super Session: {title}', text, flags=re.M)
+
+if re.search(r'^\*\*Description:\*\* ', text, flags=re.M):
+    text = re.sub(r'^\*\*Description:\*\* .+$', f'**Description:** {description}', text, flags=re.M)
+else:
+    text = re.sub(r'^(\*\*File:\*\* .+)$', r'\1\n**Description:** ' + description, text, flags=re.M)
+
+with open(file_path, 'w') as f:
+    f.write(text)
+" "$file" "$title" "$description"
+}
+
 # ─── Turn appending ───────────────────────────────────────────────────────────
 
 session_append_turn() {
@@ -204,6 +264,7 @@ session_append_turn() {
     user)
       printf '\n---\n\n## %s `[%s %s]` 👤 User\n\n%s\n' \
         "$icon" "$cli" "$ts" "$content" >> "$file"
+      _session_update_header "$file" "$content"
       ;;
     assistant)
       printf '\n### %s `[%s %s]` 🤖 Assistant\n\n%s\n' \
