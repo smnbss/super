@@ -76,54 +76,10 @@ skills:
     setup: ./setup
     description: Dev workflow toolkit (review, security, ship, debug, QA)
     enabled: true
-  requesting-code-review:
-    source: obra/superpowers/skills/requesting-code-review
-    description: Structured code review methodology
-    enabled: true
   playwright-cli:
     source: microsoft/playwright-cli/skills/playwright-cli
     description: Browser testing with Playwright
     enabled: true
-  verification-before-completion:
-    source: obra/superpowers/skills/verification-before-completion
-    description: Thoroughness before claiming done
-    enabled: true
-  systematic-debugging:
-    source: obra/superpowers/skills/systematic-debugging
-    description: Root cause investigation methodology
-    enabled: true
-  test-driven-development:
-    source: obra/superpowers/skills/test-driven-development
-    description: Write tests first, then implement
-    enabled: true
-  writing-plans:
-    source: obra/superpowers/skills/writing-plans
-    description: Structured plan creation
-    enabled: true
-  executing-plans:
-    source: obra/superpowers/skills/executing-plans
-    description: Staying scoped when executing plan tasks
-    enabled: true
-  receiving-code-review:
-    source: obra/superpowers/skills/receiving-code-review
-    description: How to respond to review feedback
-    enabled: false
-  using-git-worktrees:
-    source: obra/superpowers/skills/using-git-worktrees
-    description: Isolated feature work in worktrees
-    enabled: false
-  subagent-driven-development:
-    source: obra/superpowers/skills/subagent-driven-development
-    description: Multi-agent coordination patterns
-    enabled: false
-  brainstorming:
-    source: obra/superpowers/skills/brainstorming
-    description: Structured brainstorming methodology
-    enabled: false
-  writing-skills:
-    source: obra/superpowers/skills/writing-skills
-    description: How to write effective skills
-    enabled: false
 # ─── Plugins ─────────────────────────────────────────────────────────────────
 # Plugins are GitHub repos that bundle multiple skills (and optionally commands).
 # Installing a plugin clones the repo and auto-discovers:
@@ -133,6 +89,10 @@ skills:
 # Repos without discoverable content are treated as Claude-only marketplaces.
 
 plugins:
+  obra-superpowers:
+    source: obra/superpowers
+    description: Core methodology marketplace — code review, debugging, TDD, planning
+    enabled: true
   smnbss-brain:
     source: smnbss/brain
     description: Knowledge brain — sync, memory rebuild, service docs, daily routines
