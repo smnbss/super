@@ -1,3 +1,6 @@
+[mcp.client]
+tool_call_timeout_ms = 300000
+
 # Append this block to your ~/.kimi/config.toml or project config.toml
 # super hooks for Kimi Code CLI
 # SUPER_HOME will be set by the CLI env

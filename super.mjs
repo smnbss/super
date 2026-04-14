@@ -265,6 +265,8 @@ function installHooksKimi() {
   let base = existsSync(globalCfg) ? readFileSync(globalCfg, 'utf8') : '# Kimi config\n';
   // Strip any previously-appended super hooks from global to avoid duplication
   base = base.replace(/\n?# super hooks\n[\s\S]*$/, '');
+  // Strip [mcp.client] so the template's value is the single source of truth
+  base = base.replace(/\n?\[mcp\.client\]\n[\s\S]*?$/, '');
   // Remove empty hooks placeholder to avoid TOML conflict with [[hooks]] array
   base = base.replace(/^hooks\s*=\s*\[\]\s*\n/m, '');
   
