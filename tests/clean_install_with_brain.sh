@@ -68,7 +68,7 @@ sleep 2
 # ---------------------------------------------------------------------------
 # 3. Delete AI-tool folders from current project
 # ---------------------------------------------------------------------------
-FOLDERS_TO_DELETE=(.agents .super .kimi .codex .claude .gemini)
+FOLDERS_TO_DELETE=(.agents .super .kimi .codex .claude .gemini .venv)
 for folder in "${FOLDERS_TO_DELETE[@]}"; do
     target="${BRAIN_DIR}/${folder}"
     if [[ -d "$target" ]]; then
