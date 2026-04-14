@@ -52,4 +52,6 @@ if [[ -n "$RESPONSE" ]]; then
   session_append_turn "Claude Code" "assistant" "$RESPONSE"
 fi
 
+session_append_turn "Claude Code" "session_end" ""
+
 exit 0

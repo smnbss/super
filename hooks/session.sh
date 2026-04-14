@@ -227,7 +227,7 @@ with open(file_path) as f:
 
 # Extract all user turns from the entire conversation
 user_contents = []
-for match in re.finditer(r'\n## [^\n]*👤 User\n\n(.*?)\n(?=\n### |\n---\n\n|\n## |$)', text, re.DOTALL):
+for match in re.finditer(r'\n## [^\n]*👤 User\n\n(.*?)(?=\n> \*\*Tool\*\*|\n### |\n---\n\n|\n## |$)', text, re.DOTALL):
     user_contents.append(match.group(1).strip())
 
 combined = ' '.join(user_contents) if user_contents else fallback

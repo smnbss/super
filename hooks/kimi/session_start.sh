@@ -9,6 +9,15 @@ source "$SUPER_HOME/hooks/session.sh"
 
 INPUT="$(cat)"
 
-session_append_turn "Kimi Code CLI" "session_start" "startup"
+trigger="$(echo "$INPUT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('trigger', 'startup'))
+except:
+    print('startup')
+" 2>/dev/null || echo "startup")"
+
+session_append_turn "Kimi Code CLI" "session_start" "trigger=$trigger"
 
 exit 0

@@ -36,4 +36,6 @@ if [[ -n "$OUTPUT" ]]; then
   session_append_turn "Codex CLI" "assistant" "$OUTPUT"
 fi
 
+session_append_turn "Codex CLI" "session_end" ""
+
 exit 0

@@ -32,4 +32,6 @@ if [[ -n "$RESPONSE" ]]; then
   session_append_turn "Kimi Code CLI" "assistant" "$RESPONSE"
 fi
 
+session_append_turn "Kimi Code CLI" "session_end" ""
+
 exit 0
