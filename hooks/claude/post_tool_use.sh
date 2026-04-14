@@ -10,12 +10,36 @@ source "$SUPER_HOME/hooks/config.sh"
 
 INPUT="$(cat)"
 
-# Extract tool info
-TOOL_NAME="$(echo "$INPUT" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("tool_name",""))' 2>/dev/null || echo "")"
+TOOL_INFO="$(echo "$INPUT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    tool = d.get('tool_name', 'unknown')
+    inp  = d.get('tool_input', {})
 
-# Log the tool use to session
-if [[ -n "$TOOL_NAME" ]]; then
-  session_append_turn "Claude Code" "tool" "$TOOL_NAME"
+    # Skip noisy read tools
+    if tool in ('read_file', 'list_directory', 'glob'):
+        sys.exit(0)
+
+    if tool == 'Bash':
+        cmd = inp.get('command', '')[:300]
+        print(f'Bash: {cmd}')
+    elif tool in ('Write', 'Edit', 'MultiEdit'):
+        path = inp.get('file_path', inp.get('path', ''))
+        print(f'{tool}: {path}')
+    elif tool == 'WebSearch':
+        q = inp.get('query', '')
+        print(f'WebSearch: {q}')
+    else:
+        print(f'{tool}')
+except SystemExit:
+    pass
+except:
+    pass
+" 2>/dev/null || echo "")"
+
+if [[ -n "$TOOL_INFO" ]]; then
+  session_append_turn "Claude Code" "tool" "$TOOL_INFO"
 fi
 
 # Run validators if configured (opt-in via hooks.postToolUse.runValidators)

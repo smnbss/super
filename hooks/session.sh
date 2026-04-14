@@ -217,6 +217,14 @@ _session_update_header() {
   local file="$1" content="$2"
   [[ -f "$file" ]] || return
 
+  # Only update title/description on first user turn (title still "untitled" or "auto")
+  local current_title
+  current_title="$(grep '^# Super Session:' "$file" 2>/dev/null | sed 's/# Super Session: //' | head -1 || true)"
+  current_title="${current_title// /}"
+  if [[ "$current_title" != "untitled" && "$current_title" != "auto" ]]; then
+    return
+  fi
+
   python3 -c "
 import sys, re
 file_path = sys.argv[1]

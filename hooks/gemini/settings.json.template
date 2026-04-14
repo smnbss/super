@@ -52,6 +52,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "name": "super-stop",
+            "type": "command",
+            "command": "{{SUPER_HOME}}/hooks/gemini/stop.sh",
+            "timeout": 5000
+          }
+        ]
+      }
     ]
   }
 }

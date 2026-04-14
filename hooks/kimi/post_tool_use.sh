@@ -16,7 +16,7 @@ try:
     tool = d.get('tool_name', 'unknown')
     inp  = d.get('tool_input', d.get('args', {}))
 
-    if tool in ('read_file', 'list_dir', 'glob'):
+    if tool in ('read_file', 'list_directory', 'glob'):
         sys.exit(0)
 
     if tool in ('shell', 'bash', 'run_command'):
