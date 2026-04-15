@@ -15,6 +15,7 @@ import * as interactive from './lib/interactive.mjs';
 import { fzfPickSession, fzfPickCli, fzfIsAvailable } from './lib/fzf.mjs';
 import { securityCheck, formatBlockReason } from './lib/security.mjs';
 import { runValidators } from './lib/validators.mjs';
+import { parseLaunchArgs, resolveProvider, buildBannerLabel } from './lib/launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 process.env.SUPER_HOME = process.env.SUPER_HOME || __dirname;
@@ -476,22 +477,16 @@ function cmdLaunch(cli, args = []) {
   if (!catalog.isInstalled(cli)) die(`${CLI[cli].label} is not installed`);
   autoUpdate(cli);
 
-  let doResume = false, resumeFile = '', title = '', provider = '';
-  const passthrough = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--resume' || args[i] === '-r') {
-      doResume = true;
-      if (args[i + 1] && !args[i + 1].startsWith('-')) { resumeFile = args[++i]; }
-    } else if (args[i] === '--title' || args[i] === '-t') { title = args[++i] || ''; }
-    else if (args[i] === '--provider') {
-      if (args[i + 1] && !args[i + 1].startsWith('-')) { provider = args[++i]; }
-    }
-    else { passthrough.push(args[i]); }
-  }
+  const { doResume, resumeFile: resumeArg, title, provider, passthrough } = parseLaunchArgs(args);
+  let resumeFile = resumeArg;
 
-  // Validate provider if specified
-  if (provider && provider !== 'ollama') {
-    die(`Unknown provider: ${provider}. Supported: ollama`);
+  // Resolve provider (if any) before session setup
+  let providerResult = null;
+  if (provider) {
+    try {
+      providerResult = resolveProvider(provider, cli);
+      if (providerResult.mode === 'env') Object.assign(process.env, providerResult.vars);
+    } catch (e) { die(e.message); }
   }
 
   // Cleanup old sessions
@@ -519,23 +514,20 @@ function cmdLaunch(cli, args = []) {
 
   ui.spacer();
   ui.rule(60);
-  ui.print(`  ${CLI[cli].icon}  ${ui.colors.bold(CLI[cli].label)}`);
+  const label = buildBannerLabel(CLI[cli].label, provider, passthrough);
+  ui.print(`  ${CLI[cli].icon}  ${ui.colors.bold(label)}`);
   ui.print(`  📄  ${basename(sf)}`);
   ui.rule(60);
   ui.spacer();
 
   // exec the CLI
   const cliArgs = [...cliDefaultArgs(cli), ...passthrough];
-
-  // Handle provider-specific execution
-  if (provider === 'ollama') {
-    // Check if ollama is installed
-    if (!catalog.isInstalled('ollama')) die('Ollama is not installed. Run: super install');
-    // Execute: ollama launch <cli> [args]
-    try { execFileSync('ollama', ['launch', cli, ...cliArgs], { stdio: 'inherit' }); }
+  if (providerResult && providerResult.mode === 'wrapper') {
+    // Wrapper mode: provider binary wraps the CLI (e.g. ollama launch claude ...)
+    const wrapperArgs = [...providerResult.prefixArgs, ...cliArgs];
+    try { execFileSync(providerResult.cmd, wrapperArgs, { stdio: 'inherit' }); }
     catch (e) { process.exit(e.status || 1); }
   } else {
-    // Standard execution
     try { execFileSync(CLI[cli].cmd, cliArgs, { stdio: 'inherit' }); }
     catch (e) { process.exit(e.status || 1); }
   }
@@ -750,10 +742,17 @@ SHORTCUTS
   super !              New session
   super ?              Fuzzy search sessions
 
+OPTIONS (launch)
+  --resume, -r           Resume a session
+  --title, -t <name>     Named session
+  --provider, -P <name>  Model provider (ollama|openai|lmstudio|groq|together)
+
 EXAMPLES
   super claude                    # New Claude session
+  super claude --model opus       # Explicit model
   super claude --resume           # Resume with picker
   super gemini --title "fix auth" # Named session
+  super claude --provider ollama --model glm-5:cloud  # Ollama provider
   super switch gemini             # Continue in Gemini
   super doctor                    # Health check
 `);
