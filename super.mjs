@@ -338,6 +338,7 @@ async function cmdInstall(args) {
 
     // Install system deps & CLIs first so they're available for hook setup
     config.invalidateCache();
+    let cliResults = { installed: [], failed: [], skipped: [] };
     if (config.findConfig()) {
       ui.brand('Installing system prerequisites...');
       ui.spacer();
@@ -345,7 +346,33 @@ async function cmdInstall(args) {
       ui.spacer();
       ui.brand('Installing enabled CLIs...');
       ui.spacer();
-      catalog.installClis();
+      cliResults = catalog.installClis();
+      ui.spacer();
+
+      // Summary report
+      ui.section('Installation Summary');
+      if (cliResults.installed.length > 0) {
+        ui.success(`  ✅ Installed: ${cliResults.installed.join(', ')}`);
+      }
+      if (cliResults.skipped.length > 0) {
+        ui.muted(`  ⏭️  Already present: ${cliResults.skipped.join(', ')}`);
+      }
+      if (cliResults.failed.length > 0) {
+        ui.error(`  ❌ Failed: ${cliResults.failed.map(f => f.name).join(', ')}`);
+        ui.spacer();
+        ui.warn('Failed installations:');
+        for (const fail of cliResults.failed) {
+          ui.muted(`    • ${fail.name}: ${fail.reason}`);
+        }
+        ui.spacer();
+        ui.info('To retry manually:');
+        const config = catalog.catalogClis().filter(c => cliResults.failed.some(f => f.name === c.name));
+        for (const cli of config) {
+          if (cli.install) {
+            ui.muted(`    ${cli.name}: ${cli.install}`);
+          }
+        }
+      }
       ui.spacer();
     }
 
@@ -437,14 +464,22 @@ function cmdLaunch(cli, args = []) {
   if (!catalog.isInstalled(cli)) die(`${CLI[cli].label} is not installed`);
   autoUpdate(cli);
 
-  let doResume = false, resumeFile = '', title = '';
+  let doResume = false, resumeFile = '', title = '', provider = '';
   const passthrough = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--resume' || args[i] === '-r') {
       doResume = true;
       if (args[i + 1] && !args[i + 1].startsWith('-')) { resumeFile = args[++i]; }
     } else if (args[i] === '--title' || args[i] === '-t') { title = args[++i] || ''; }
+    else if (args[i] === '--provider') {
+      if (args[i + 1] && !args[i + 1].startsWith('-')) { provider = args[++i]; }
+    }
     else { passthrough.push(args[i]); }
+  }
+
+  // Validate provider if specified
+  if (provider && provider !== 'ollama') {
+    die(`Unknown provider: ${provider}. Supported: ollama`);
   }
 
   // Cleanup old sessions
@@ -479,8 +514,19 @@ function cmdLaunch(cli, args = []) {
 
   // exec the CLI
   const cliArgs = [...cliDefaultArgs(cli), ...passthrough];
-  try { execFileSync(CLI[cli].cmd, cliArgs, { stdio: 'inherit' }); }
-  catch (e) { process.exit(e.status || 1); }
+
+  // Handle provider-specific execution
+  if (provider === 'ollama') {
+    // Check if ollama is installed
+    if (!catalog.isInstalled('ollama')) die('Ollama is not installed. Run: super install');
+    // Execute: ollama launch <cli> [args]
+    try { execFileSync('ollama', ['launch', cli, ...cliArgs], { stdio: 'inherit' }); }
+    catch (e) { process.exit(e.status || 1); }
+  } else {
+    // Standard execution
+    try { execFileSync(CLI[cli].cmd, cliArgs, { stdio: 'inherit' }); }
+    catch (e) { process.exit(e.status || 1); }
+  }
 }
 
 function cmdSwitch(toCli) {

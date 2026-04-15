@@ -16,9 +16,35 @@ super install
 
 ## Usage
 
+### Launch Commands
+
 ```bash
-super claude                # New session
-super switch gemini         # Continue in Gemini
+# Basic launch (uses default model)
+super claude                # Launch Claude Code (default: opus)
+super gemini                # Launch Gemini CLI
+super codex                 # Launch Codex CLI
+super kimi                  # Launch Kimi Code CLI
+
+# Launch with specific model (Claude Code only)
+super claude --model sonnet # Launch Claude with Sonnet model
+super claude --model opus   # Launch Claude with Opus model (explicit)
+super claude --model haiku  # Launch Claude with Haiku model
+
+# Launch with Ollama provider
+super claude --provider ollama --model kimi-k2.5:cloud      # Use Kimi via Ollama
+super claude --provider ollama --model minimax-m2.5:cloud  # Use MiniMax via Ollama
+super claude --provider ollama --model glm-5:cloud         # Use GLM via Ollama
+
+# Launch with title
+super claude --title "fix auth"    # Named session
+super gemini --title "docs update" # Named session
+
+# Resume session
+super claude --resume              # Resume with picker
+super claude --resume session.md   # Resume specific session
+
+# Session management
+super switch gemini         # Continue current session in Gemini
 super resume                # Pick a previous session
 super @                     # Jump to active session
 super !                     # New session (pick CLI)

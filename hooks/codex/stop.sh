@@ -9,9 +9,14 @@ source "$SUPER_HOME/hooks/session.sh"
 
 INPUT="$(cat)"
 
-# Note: Codex Stop payload does not include full assistant response transcript,
-# so assistant capture is disabled to avoid empty/misleading entries.
-# We still log the session end marker.
+# Debug: Log the full Codex Stop payload to identify correct field paths
+DEBUG_DIR="$SUPER_HOME/.debug"
+mkdir -p "$DEBUG_DIR"
+echo "$INPUT" > "$DEBUG_DIR/codex-stop-payload-$(date +%s).json"
+
+# Note: Codex Stop payload structure is being debugged.
+# The payload is saved to .debug/ for analysis.
+# Assistant capture remains disabled pending payload verification.
 
 session_append_turn "Codex CLI" "session_end" ""
 

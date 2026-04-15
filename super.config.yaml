@@ -24,6 +24,12 @@ system:
     install: "export PATH=\"$HOME/.local/bin:$PATH\" && uv tool install markitdown"
     enabled: true
 
+  ollama:
+    name: ollama
+    check: "command -v ollama"
+    install: "curl -fsSL https://ollama.com/install.sh | sh"
+    enabled: true
+
 # ─── CLIs ────────────────────────────────────────────────────────────────────
 # Install commands for each supported CLI. `super install` will run these
 # automatically if the CLI is not already on PATH.
