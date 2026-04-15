@@ -521,13 +521,15 @@ function cmdLaunch(cli, args = []) {
   ui.spacer();
 
   // exec the CLI
-  const cliArgs = [...cliDefaultArgs(cli), ...passthrough];
   if (providerResult && providerResult.mode === 'wrapper') {
     // Wrapper mode: provider binary wraps the CLI (e.g. ollama launch claude ...)
-    const wrapperArgs = [...providerResult.prefixArgs, ...cliArgs];
+    // Only pass user args — cliDefaultArgs are for the CLI binary directly and
+    // the wrapper doesn't understand them (e.g. --dangerously-skip-permissions).
+    const wrapperArgs = [...providerResult.prefixArgs, ...passthrough];
     try { execFileSync(providerResult.cmd, wrapperArgs, { stdio: 'inherit' }); }
     catch (e) { process.exit(e.status || 1); }
   } else {
+    const cliArgs = [...cliDefaultArgs(cli), ...passthrough];
     try { execFileSync(CLI[cli].cmd, cliArgs, { stdio: 'inherit' }); }
     catch (e) { process.exit(e.status || 1); }
   }

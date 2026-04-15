@@ -329,16 +329,17 @@ test('super claude --provider ollama --model kimi-k2.5:cloud', () => {
 console.log('\nOllama Cloud regression guard');
 console.log('═'.repeat(50));
 
-// Helper: simulate what super.mjs does to build the final exec call
-function simulateExec(cliName, userArgs) {
+// Helper: simulate what super.mjs does to build the final exec call.
+// fakeCliDefaultArgs simulates cliDefaultArgs() output (e.g. yolo flags).
+function simulateExec(cliName, userArgs, fakeCliDefaultArgs = []) {
   const { provider, passthrough } = parseLaunchArgs(userArgs);
   const providerResult = provider ? resolveProvider(provider, cliName) : null;
-  // cliDefaultArgs omitted (yolo flags etc.) — we test the provider path only
-  const cliArgs = [...passthrough];
   if (providerResult && providerResult.mode === 'wrapper') {
-    return { bin: providerResult.cmd, args: [...providerResult.prefixArgs, ...cliArgs] };
+    // Wrapper mode: only passthrough, NO cliDefaultArgs
+    return { bin: providerResult.cmd, args: [...providerResult.prefixArgs, ...passthrough] };
   }
-  return { bin: cliName, args: cliArgs };
+  // Direct mode: cliDefaultArgs + passthrough
+  return { bin: cliName, args: [...fakeCliDefaultArgs, ...passthrough] };
 }
 
 test('ollama provider MUST use wrapper mode, never env mode', () => {
@@ -399,6 +400,33 @@ test('env-var providers never produce wrapper exec', () => {
     assert.strictEqual(r.mode, 'env', `${name} should be env mode`);
     assert.ok(r.vars, `${name} should have vars`);
   }
+});
+
+// --- cliDefaultArgs leak regression guard ---
+// The bug: wrapper mode included cliDefaultArgs (--dangerously-skip-permissions)
+// which `ollama launch` doesn't understand. Wrapper must only get passthrough.
+
+test('wrapper mode MUST NOT include cliDefaultArgs like --dangerously-skip-permissions', () => {
+  const yoloFlags = ['--dangerously-skip-permissions'];
+  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'kimi-k2.5:cloud'], yoloFlags);
+  assert.strictEqual(exec.bin, 'ollama');
+  assert.ok(!exec.args.includes('--dangerously-skip-permissions'),
+    'wrapper args must not contain --dangerously-skip-permissions');
+  assert.deepStrictEqual(exec.args, ['launch', 'claude', '--model', 'kimi-k2.5:cloud']);
+});
+
+test('direct mode includes cliDefaultArgs', () => {
+  const yoloFlags = ['--dangerously-skip-permissions'];
+  const exec = simulateExec('claude', ['--model', 'opus'], yoloFlags);
+  assert.strictEqual(exec.bin, 'claude');
+  assert.deepStrictEqual(exec.args, ['--dangerously-skip-permissions', '--model', 'opus']);
+});
+
+test('wrapper mode with multiple cliDefaultArgs still excludes all of them', () => {
+  const manyFlags = ['--dangerously-skip-permissions', '--verbose', '--debug'];
+  const exec = simulateExec('claude', ['--provider', 'ollama'], manyFlags);
+  assert.deepStrictEqual(exec.args, ['launch', 'claude'],
+    'none of cliDefaultArgs should leak into wrapper args');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
