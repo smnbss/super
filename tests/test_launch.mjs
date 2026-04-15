@@ -1,6 +1,6 @@
 // tests/test_launch.mjs — Tests for launch arg parsing, provider resolution, and banner
 import { strict as assert } from 'assert';
-import { parseLaunchArgs, resolveProvider, buildBannerLabel, PROVIDERS } from '../lib/launch.mjs';
+import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, PROVIDERS } from '../lib/launch.mjs';
 
 let passed = 0, failed = 0;
 
@@ -321,25 +321,81 @@ test('super claude --provider ollama --model kimi-k2.5:cloud', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// buildWrapperArgs
+// ═══════════════════════════════════════════════════════════════════════════════
+console.log('\nbuildWrapperArgs');
+console.log('═'.repeat(50));
+
+// Shortcut: resolve ollama for claude then build wrapper args
+function ollamaArgs(passthrough, cliDefaults = [], yolo = true) {
+  return buildWrapperArgs(resolveProvider('ollama', 'claude'), passthrough, cliDefaults, yolo);
+}
+
+test('basic: no model, no yolo, no defaults', () => {
+  assert.deepStrictEqual(ollamaArgs([], [], false), ['launch', 'claude']);
+});
+
+test('--model goes before -- (ollama own flag)', () => {
+  assert.deepStrictEqual(
+    ollamaArgs(['--model', 'kimi-k2.5:cloud'], [], false),
+    ['launch', 'claude', '--model', 'kimi-k2.5:cloud']
+  );
+});
+
+test('yolo adds -y before --', () => {
+  assert.deepStrictEqual(
+    ollamaArgs([], [], true),
+    ['launch', 'claude', '-y']
+  );
+});
+
+test('yolo + model: -y and --model before --', () => {
+  assert.deepStrictEqual(
+    ollamaArgs(['--model', 'glm-5:cloud'], [], true),
+    ['launch', 'claude', '-y', '--model', 'glm-5:cloud']
+  );
+});
+
+test('cliDefaultArgs go after --', () => {
+  assert.deepStrictEqual(
+    ollamaArgs([], ['--dangerously-skip-permissions'], false),
+    ['launch', 'claude', '--', '--dangerously-skip-permissions']
+  );
+});
+
+test('yolo + model + cliDefaultArgs: full layout', () => {
+  assert.deepStrictEqual(
+    ollamaArgs(['--model', 'kimi-k2.5:cloud'], ['--dangerously-skip-permissions'], true),
+    ['launch', 'claude', '-y', '--model', 'kimi-k2.5:cloud', '--', '--dangerously-skip-permissions']
+  );
+});
+
+test('unknown passthrough flags go after -- with cliDefaultArgs', () => {
+  assert.deepStrictEqual(
+    ollamaArgs(['--model', 'glm-5:cloud', '--verbose'], ['--dangerously-skip-permissions'], true),
+    ['launch', 'claude', '-y', '--model', 'glm-5:cloud', '--', '--dangerously-skip-permissions', '--verbose']
+  );
+});
+
+test('no -- separator when no after-separator args', () => {
+  const args = ollamaArgs(['--model', 'minimax-m2.5:cloud'], [], true);
+  assert.ok(!args.includes('--'), 'should not have -- when nothing goes after it');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Ollama Cloud regression guard
-// The bug: a refactor switched ollama from wrapper mode (ollama launch claude ...)
-// to env-var mode (ANTHROPIC_BASE_URL=localhost:11434), which hit local Ollama
-// instead of Ollama Cloud. These tests ensure ollama ALWAYS uses wrapper mode.
 // ═══════════════════════════════════════════════════════════════════════════════
 console.log('\nOllama Cloud regression guard');
 console.log('═'.repeat(50));
 
-// Helper: simulate what super.mjs does to build the final exec call.
-// fakeCliDefaultArgs simulates cliDefaultArgs() output (e.g. yolo flags).
-function simulateExec(cliName, userArgs, fakeCliDefaultArgs = []) {
+// Helper: simulate exactly what super.mjs does to build the final exec call.
+function simulateExec(cliName, userArgs, cliDefaults = [], yolo = true) {
   const { provider, passthrough } = parseLaunchArgs(userArgs);
   const providerResult = provider ? resolveProvider(provider, cliName) : null;
   if (providerResult && providerResult.mode === 'wrapper') {
-    // Wrapper mode: only passthrough, NO cliDefaultArgs
-    return { bin: providerResult.cmd, args: [...providerResult.prefixArgs, ...passthrough] };
+    return { bin: providerResult.cmd, args: buildWrapperArgs(providerResult, passthrough, cliDefaults, yolo) };
   }
-  // Direct mode: cliDefaultArgs + passthrough
-  return { bin: cliName, args: [...fakeCliDefaultArgs, ...passthrough] };
+  return { bin: cliName, args: [...cliDefaults, ...passthrough] };
 }
 
 test('ollama provider MUST use wrapper mode, never env mode', () => {
@@ -351,46 +407,20 @@ test('ollama provider MUST use wrapper mode, never env mode', () => {
 test('ollama MUST NOT set ANTHROPIC_BASE_URL', () => {
   const r = resolveProvider('ollama', 'claude');
   assert.strictEqual(r.mode, 'wrapper');
-  // Double-check there's no vars sneaking in
   assert.strictEqual(r.vars, undefined);
 });
 
 test('ollama provider config must not have baseUrl or apiKey', () => {
   const p = PROVIDERS.ollama;
-  assert.strictEqual(p.baseUrl, undefined, 'ollama must not have baseUrl — it uses wrapper mode');
-  assert.strictEqual(p.apiKey, undefined, 'ollama must not have apiKey — it uses wrapper mode');
-  assert.strictEqual(p.envKey, undefined, 'ollama must not have envKey — it uses wrapper mode');
+  assert.strictEqual(p.baseUrl, undefined, 'ollama must not have baseUrl');
+  assert.strictEqual(p.apiKey, undefined, 'ollama must not have apiKey');
+  assert.strictEqual(p.envKey, undefined, 'ollama must not have envKey');
   assert.ok(p.wrapper, 'ollama must have wrapper field');
+  assert.strictEqual(p.yoloFlag, '-y', 'ollama yolo must be -y');
 });
 
-test('super claude --provider ollama → exec: ollama launch claude', () => {
-  const exec = simulateExec('claude', ['--provider', 'ollama']);
-  assert.strictEqual(exec.bin, 'ollama');
-  assert.deepStrictEqual(exec.args, ['launch', 'claude']);
-});
-
-test('super claude --provider ollama --model kimi-k2.5:cloud → exec: ollama launch claude --model kimi-k2.5:cloud', () => {
-  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'kimi-k2.5:cloud']);
-  assert.strictEqual(exec.bin, 'ollama');
-  assert.deepStrictEqual(exec.args, ['launch', 'claude', '--model', 'kimi-k2.5:cloud']);
-});
-
-test('super claude --provider ollama --model minimax-m2.5:cloud → exec: ollama launch claude --model minimax-m2.5:cloud', () => {
-  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'minimax-m2.5:cloud']);
-  assert.strictEqual(exec.bin, 'ollama');
-  assert.deepStrictEqual(exec.args, ['launch', 'claude', '--model', 'minimax-m2.5:cloud']);
-});
-
-test('super claude --provider ollama --model glm-5:cloud → exec: ollama launch claude --model glm-5:cloud', () => {
-  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'glm-5:cloud']);
-  assert.strictEqual(exec.bin, 'ollama');
-  assert.deepStrictEqual(exec.args, ['launch', 'claude', '--model', 'glm-5:cloud']);
-});
-
-test('without --provider → exec: claude (direct, no ollama)', () => {
-  const exec = simulateExec('claude', ['--model', 'opus']);
-  assert.strictEqual(exec.bin, 'claude');
-  assert.deepStrictEqual(exec.args, ['--model', 'opus']);
+test('ollama has --model as own flag', () => {
+  assert.ok(PROVIDERS.ollama.ownFlags.includes('--model'));
 });
 
 test('env-var providers never produce wrapper exec', () => {
@@ -402,31 +432,74 @@ test('env-var providers never produce wrapper exec', () => {
   }
 });
 
-// --- cliDefaultArgs leak regression guard ---
-// The bug: wrapper mode included cliDefaultArgs (--dangerously-skip-permissions)
-// which `ollama launch` doesn't understand. Wrapper must only get passthrough.
+// --- Full command simulations (the SCRATCHPAD cases) ---
 
-test('wrapper mode MUST NOT include cliDefaultArgs like --dangerously-skip-permissions', () => {
-  const yoloFlags = ['--dangerously-skip-permissions'];
-  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'kimi-k2.5:cloud'], yoloFlags);
-  assert.strictEqual(exec.bin, 'ollama');
-  assert.ok(!exec.args.includes('--dangerously-skip-permissions'),
-    'wrapper args must not contain --dangerously-skip-permissions');
-  assert.deepStrictEqual(exec.args, ['launch', 'claude', '--model', 'kimi-k2.5:cloud']);
+test('super claude → claude --dangerously-skip-permissions', () => {
+  const exec = simulateExec('claude', [], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'claude');
+  assert.deepStrictEqual(exec.args, ['--dangerously-skip-permissions']);
 });
 
-test('direct mode includes cliDefaultArgs', () => {
-  const yoloFlags = ['--dangerously-skip-permissions'];
-  const exec = simulateExec('claude', ['--model', 'opus'], yoloFlags);
+test('super claude --model opus → claude --dangerously-skip-permissions --model opus', () => {
+  const exec = simulateExec('claude', ['--model', 'opus'], ['--dangerously-skip-permissions']);
   assert.strictEqual(exec.bin, 'claude');
   assert.deepStrictEqual(exec.args, ['--dangerously-skip-permissions', '--model', 'opus']);
 });
 
-test('wrapper mode with multiple cliDefaultArgs still excludes all of them', () => {
-  const manyFlags = ['--dangerously-skip-permissions', '--verbose', '--debug'];
-  const exec = simulateExec('claude', ['--provider', 'ollama'], manyFlags);
-  assert.deepStrictEqual(exec.args, ['launch', 'claude'],
-    'none of cliDefaultArgs should leak into wrapper args');
+test('super claude --model sonnet → claude --dangerously-skip-permissions --model sonnet', () => {
+  const exec = simulateExec('claude', ['--model', 'sonnet'], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'claude');
+  assert.deepStrictEqual(exec.args, ['--dangerously-skip-permissions', '--model', 'sonnet']);
+});
+
+test('super claude --model haiku → claude --dangerously-skip-permissions --model haiku', () => {
+  const exec = simulateExec('claude', ['--model', 'haiku'], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'claude');
+  assert.deepStrictEqual(exec.args, ['--dangerously-skip-permissions', '--model', 'haiku']);
+});
+
+test('super gemini → gemini --yolo', () => {
+  const exec = simulateExec('gemini', [], ['--yolo']);
+  assert.strictEqual(exec.bin, 'gemini');
+  assert.deepStrictEqual(exec.args, ['--yolo']);
+});
+
+test('super codex → codex --full-auto', () => {
+  const exec = simulateExec('codex', [], ['--full-auto']);
+  assert.strictEqual(exec.bin, 'codex');
+  assert.deepStrictEqual(exec.args, ['--full-auto']);
+});
+
+test('super kimi → kimi --yolo', () => {
+  const exec = simulateExec('kimi', [], ['--yolo']);
+  assert.strictEqual(exec.bin, 'kimi');
+  assert.deepStrictEqual(exec.args, ['--yolo']);
+});
+
+test('super claude --provider ollama --model kimi-k2.5:cloud (yolo)', () => {
+  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'kimi-k2.5:cloud'], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'ollama');
+  assert.deepStrictEqual(exec.args, ['launch', 'claude', '-y', '--model', 'kimi-k2.5:cloud', '--', '--dangerously-skip-permissions']);
+});
+
+test('super claude --provider ollama --model minimax-m2.5:cloud (yolo)', () => {
+  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'minimax-m2.5:cloud'], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'ollama');
+  assert.deepStrictEqual(exec.args, ['launch', 'claude', '-y', '--model', 'minimax-m2.5:cloud', '--', '--dangerously-skip-permissions']);
+});
+
+test('super claude --provider ollama --model glm-5:cloud (yolo)', () => {
+  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'glm-5:cloud'], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'ollama');
+  assert.deepStrictEqual(exec.args, ['launch', 'claude', '-y', '--model', 'glm-5:cloud', '--', '--dangerously-skip-permissions']);
+});
+
+test('--dangerously-skip-permissions NEVER appears before -- in ollama', () => {
+  const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'kimi-k2.5:cloud'], ['--dangerously-skip-permissions']);
+  const sepIdx = exec.args.indexOf('--');
+  const dspIdx = exec.args.indexOf('--dangerously-skip-permissions');
+  assert.ok(sepIdx !== -1, 'must have -- separator');
+  assert.ok(dspIdx > sepIdx, '--dangerously-skip-permissions must be after --');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

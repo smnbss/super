@@ -15,7 +15,7 @@ import * as interactive from './lib/interactive.mjs';
 import { fzfPickSession, fzfPickCli, fzfIsAvailable } from './lib/fzf.mjs';
 import { securityCheck, formatBlockReason } from './lib/security.mjs';
 import { runValidators } from './lib/validators.mjs';
-import { parseLaunchArgs, resolveProvider, buildBannerLabel } from './lib/launch.mjs';
+import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs } from './lib/launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 process.env.SUPER_HOME = process.env.SUPER_HOME || __dirname;
@@ -521,15 +521,17 @@ function cmdLaunch(cli, args = []) {
   ui.spacer();
 
   // exec the CLI
+  const defaults = cliDefaultArgs(cli);
+  const isYolo = config.yoloMode();
   if (providerResult && providerResult.mode === 'wrapper') {
-    // Wrapper mode: provider binary wraps the CLI (e.g. ollama launch claude ...)
-    // Only pass user args — cliDefaultArgs are for the CLI binary directly and
-    // the wrapper doesn't understand them (e.g. --dangerously-skip-permissions).
-    const wrapperArgs = [...providerResult.prefixArgs, ...passthrough];
+    // Wrapper mode: e.g. ollama launch claude -y --model X -- --dangerously-skip-permissions
+    // Wrapper gets its own yolo flag + its own flags (--model) before --,
+    // CLI-specific flags (--dangerously-skip-permissions) go after --.
+    const wrapperArgs = buildWrapperArgs(providerResult, passthrough, defaults, isYolo);
     try { execFileSync(providerResult.cmd, wrapperArgs, { stdio: 'inherit' }); }
     catch (e) { process.exit(e.status || 1); }
   } else {
-    const cliArgs = [...cliDefaultArgs(cli), ...passthrough];
+    const cliArgs = [...defaults, ...passthrough];
     try { execFileSync(CLI[cli].cmd, cliArgs, { stdio: 'inherit' }); }
     catch (e) { process.exit(e.status || 1); }
   }
