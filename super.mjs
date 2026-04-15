@@ -330,6 +330,18 @@ async function cmdInstall(args) {
   const root = config.findRoot();
   const isFirstTime = !existsSync(join(root, '.super', 'super.config.yaml')) && !existsSync(join(root, 'super.config.yaml'));
 
+  // Force update global ~/.super first
+  ui.brand('Updating super...');
+  ui.spacer();
+  try {
+    execSync('git pull', { cwd: SUPER_HOME, stdio: 'inherit', timeout: 15000 });
+    execSync('npm install', { cwd: SUPER_HOME, stdio: 'inherit', timeout: 30000 });
+    ui.success('super updated');
+  } catch {
+    ui.warn('super update failed — continuing with current version');
+  }
+  ui.spacer();
+
   let selectedClis = null;
 
   if (!target || target === '--all') {
