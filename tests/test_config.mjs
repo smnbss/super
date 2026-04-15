@@ -64,12 +64,19 @@ test('catalogSkills items have required fields', () => {
   assert.ok(typeof first.enabled === 'boolean', 'enabled should be boolean');
 });
 
-test('catalogSkills respects enabled: false', () => {
+test('catalog enabled field defaults to true and is always boolean', () => {
   const skills = catalogSkills();
-  const disabled = skills.filter(s => !s.enabled);
-  assert.ok(disabled.length > 0, 'Should have some disabled skills');
-  const enabled = skills.filter(s => s.enabled);
-  assert.ok(enabled.length > 0, 'Should have some enabled skills');
+  skills.forEach(s => {
+    assert.ok(typeof s.enabled === 'boolean', `skill ${s.name} enabled should be boolean`);
+  });
+  const mcps = catalogMcps();
+  mcps.forEach(m => {
+    assert.ok(typeof m.enabled === 'boolean', `mcp ${m.name} enabled should be boolean`);
+  });
+  const plugins = catalogPlugins();
+  plugins.forEach(p => {
+    assert.ok(typeof p.enabled === 'boolean', `plugin ${p.name} enabled should be boolean`);
+  });
 });
 
 test('catalogPlugins returns array', () => {

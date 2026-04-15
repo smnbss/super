@@ -26,19 +26,22 @@ if ! command -v node &>/dev/null; then
   exit 1
 fi
 
-if ! command -v npm &>/dev/null; then
-  if command -v apt-get &>/dev/null; then
-    echo "⚙️  npm not found. Installing via apt-get..." >&2
-    sudo apt-get update && sudo apt-get install -y npm >&2
-  fi
-fi
-
-if ! command -v npm &>/dev/null; then
-  echo "🛑 npm installation failed. Please install manually." >&2
-  exit 1
-fi
-
 if [[ ! -d "${SUPER_HOME}/node_modules" ]]; then
+  if ! command -v npm &>/dev/null; then
+    if command -v apt-get &>/dev/null; then
+      echo "⚙️  npm not found. Installing via apt-get..." >&2
+      sudo apt-get update && sudo apt-get install -y npm >&2
+    fi
+  fi
+
+  if ! command -v npm &>/dev/null; then
+    echo "🛑 npm is not installed (needed to install dependencies)." >&2
+    echo "   Install it first, e.g.:" >&2
+    echo "   sudo apt-get install -y npm   # Debian/Ubuntu" >&2
+    echo "   brew install node             # macOS (includes npm)" >&2
+    exit 1
+  fi
+
   echo "⚙️  super dependencies missing. Running npm install in ${SUPER_HOME} ..." >&2
   saved_tty="$(stty -g 2>/dev/null || true)"
   if (cd "${SUPER_HOME}" && npm install); then
