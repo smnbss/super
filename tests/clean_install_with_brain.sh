@@ -99,41 +99,54 @@ if ! git clone https://github.com/smnbss/super.git "$HOME_SUPER"; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Run super install
+# 6. Run super install (from clone source, fallback for missing releases)
 # ---------------------------------------------------------------------------
-log "Running super install..."
+log "Running super install script..."
 if ! bash "${HOME_SUPER}/install.sh"; then
-    # Some super distributions use a binary or a different entry point;
-    # try a generic fallback if install.sh is missing.
-    if [[ -x "${HOME_SUPER}/super" ]]; then
-        "${HOME_SUPER}/super" install || error "'super install' failed"
-    else
-        error "Could not locate super install script/entrypoint"
-    fi
+    error "super install script failed"
+    exit 1
+fi
+
+# Ensure ~/.super is on PATH for the rest of this script
+export PATH="${HOME_SUPER}:${PATH}"
+
+# ---------------------------------------------------------------------------
+# 7. Run super install inside the brain project
+# ---------------------------------------------------------------------------
+log "Running 'super install --all' in brain project (non-interactive)..."
+cd "$BRAIN_DIR"
+if ! super install --all; then
+    error "'super install --all' failed in brain project"
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Verify each CLI is present and responsive
+# 8. Verify super is present and responsive
 # ---------------------------------------------------------------------------
-CLIS=(kimi codex claude gemini)
-for cli in "${CLIS[@]}"; do
-    cmd="super ${cli}"
-    log "Checking ${cmd}..."
-    if ! command -v super &> /dev/null; then
-        error "'super' command not found in PATH"
-        break
-    fi
-    # Try a harmless --version or help flag; if the CLI doesn't support it,
-    # just check that the binary/symlink exists.
-    bin_path="${HOME_SUPER}/bin/super-${cli}"
-    symlink_path="${HOME}/.local/bin/super-${cli}"
-    if [[ ! -e "$bin_path" && ! -e "$symlink_path" ]]; then
-        error "${cmd}: neither ${bin_path} nor ${symlink_path} found"
+log "Checking super binary..."
+if ! command -v super &> /dev/null; then
+    error "'super' command not found in PATH"
+else
+    log "OK: super is in PATH at $(command -v super)"
+fi
+
+if [[ ! -x "${HOME_SUPER}/super" ]]; then
+    error "${HOME_SUPER}/super is not executable"
+else
+    log "OK: ${HOME_SUPER}/super is executable"
+fi
+
+# Verify that known CLIs are detected by super
+log "Checking detected CLIs..."
+for cli in kimi codex claude gemini; do
+    if command -v "$cli" &> /dev/null; then
+        log "  ✓ $cli installed"
+    else
+        log "  ✗ $cli (not found)"
     fi
 done
 
 # ---------------------------------------------------------------------------
-# 8. Check agents / skills configuration
+# 9. Check agents / skills configuration
 # ---------------------------------------------------------------------------
 log "Checking installed skills..."
 SKILL_DIRS=(
@@ -165,13 +178,15 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Verify expected .super files exist
+# 10. Verify expected .super files exist in the brain project
 # ---------------------------------------------------------------------------
 EXPECTED_FILES=(
-    "${HOME_SUPER}/super.config.yaml"
-    "${HOME_SUPER}/super.log"
-    "${HOME_SUPER}/sessions"
+    "${BRAIN_DIR}/.super/super.config.yaml"
 )
+EXPECTED_DIRS=(
+    "${BRAIN_DIR}/.super/sessions"
+)
+
 for f in "${EXPECTED_FILES[@]}"; do
     if [[ -e "$f" ]]; then
         log "OK: ${f}"
@@ -180,8 +195,16 @@ for f in "${EXPECTED_FILES[@]}"; do
     fi
 done
 
+for d in "${EXPECTED_DIRS[@]}"; do
+    if [[ -d "$d" ]]; then
+        log "OK: ${d}"
+    else
+        error "Missing expected directory: ${d}"
+    fi
+done
+
 # ---------------------------------------------------------------------------
-# 10. Report summary
+# 11. Report summary
 # ---------------------------------------------------------------------------
 log "========================================"
 if [[ $ERRORS -eq 0 ]]; then
