@@ -524,16 +524,15 @@ function cmdLaunch(cli, args = []) {
   const defaults = cliDefaultArgs(cli);
   const isYolo = config.yoloMode();
   if (providerResult && providerResult.mode === 'wrapper') {
-    // Wrapper mode: e.g. ollama launch claude -y --model X -- --dangerously-skip-permissions
-    // Wrapper gets its own yolo flag + its own flags (--model) before --,
-    // CLI-specific flags (--dangerously-skip-permissions) go after --.
     const wrapperArgs = buildWrapperArgs(providerResult, passthrough, defaults, isYolo);
+    ui.muted(`  exec: ${providerResult.cmd} ${wrapperArgs.join(' ')}`);
     try { execFileSync(providerResult.cmd, wrapperArgs, { stdio: 'inherit' }); }
-    catch (e) { process.exit(e.status || 1); }
+    catch (e) { ui.error(`exec failed: ${e.message}`); process.exit(e.status || 1); }
   } else {
     const cliArgs = [...defaults, ...passthrough];
+    ui.muted(`  exec: ${CLI[cli].cmd} ${cliArgs.join(' ')}`);
     try { execFileSync(CLI[cli].cmd, cliArgs, { stdio: 'inherit' }); }
-    catch (e) { process.exit(e.status || 1); }
+    catch (e) { ui.error(`exec failed: ${e.message}`); process.exit(e.status || 1); }
   }
 }
 
@@ -688,11 +687,10 @@ function cmdUninstall() {
 async function cmdMenu() {
   const sessions = session.sessionList();
   const hasSessions = sessions.length > 0;
-  const active = session.sessionFile();
 
   ui.banner(VERSION);
 
-  const options = ['🆕 Start a new session'];
+  const options = ['🚀 Launch a new session'];
   if (hasSessions) options.push('↩️  Resume a previous session');
   options.push('⚙️  Configure super (skills, plugins, MCPs)');
   options.push('🩺 Run health check (doctor)');
@@ -702,7 +700,7 @@ async function cmdMenu() {
   if (choice === null) { ui.info('Bye!'); return; }
 
   let idx = 0;
-  if (choice === idx) { const cli = await fzfPickCli(); if (cli) cmdLaunch(cli); return; }
+  if (choice === idx) { await launchWizard(); return; }
   idx++;
   if (hasSessions && choice === idx) { await cmdResume(); return; }
   if (hasSessions) idx++;
@@ -711,6 +709,56 @@ async function cmdMenu() {
   if (choice === idx) { cmdDoctor(); return; }
   idx++;
   ui.info('Bye!');
+}
+
+// ─── Launch wizard (interactive CLI + model/provider picker) ────────────────
+
+const OLLAMA_MODELS = [
+  { label: 'Kimi K2.5',    model: 'kimi-k2.5:cloud' },
+  { label: 'MiniMax M2.5', model: 'minimax-m2.5:cloud' },
+  { label: 'GLM 5',        model: 'glm-5:cloud' },
+  { label: 'Gemma 4 31B',  model: 'gemma4:31b-cloud' },
+];
+
+async function launchWizard() {
+  // Step 1: Pick CLI
+  const clis = ['claude', 'gemini', 'codex', 'kimi'].filter(c => catalog.isInstalled(c));
+  if (clis.length === 0) { die('No CLI tools installed. Run: super install'); return; }
+
+  const cliOptions = clis.map(c => `${CLI[c].icon}  ${CLI[c].label}`);
+  const cliChoice = await interactive.selectSingle('Which CLI?', cliOptions, 0);
+  if (cliChoice === null) { ui.muted('[wizard] CLI selection cancelled'); return; }
+  const cli = clis[cliChoice];
+  ui.muted(`[wizard] CLI: ${cli}`);
+
+  // Step 2: For Claude, pick model or provider
+  if (cli === 'claude') {
+    const modeOptions = [
+      '🟠 Opus (default)',
+      '⚡ Sonnet',
+      '🪶 Haiku',
+      '🌐 Ollama provider →',
+    ];
+    const modeChoice = await interactive.selectSingle('Model / provider?', modeOptions, 0);
+    if (modeChoice === null) { ui.muted('[wizard] Model selection cancelled'); return; }
+    ui.muted(`[wizard] mode: ${modeChoice} (${modeOptions[modeChoice]})`);
+
+    switch (modeChoice) {
+      case 0: cmdLaunch('claude', []); break;
+      case 1: cmdLaunch('claude', ['--model', 'sonnet']); break;
+      case 2: cmdLaunch('claude', ['--model', 'haiku']); break;
+      case 3: {
+        const ollamaOptions = OLLAMA_MODELS.map(m => `${m.label} (${m.model})`);
+        const ollamaChoice = await interactive.selectSingle('Ollama model?', ollamaOptions, 0);
+        if (ollamaChoice === null) { ui.muted('[wizard] Ollama selection cancelled'); return; }
+        ui.muted(`[wizard] ollama model: ${OLLAMA_MODELS[ollamaChoice].model}`);
+        cmdLaunch('claude', ['--provider', 'ollama', '--model', OLLAMA_MODELS[ollamaChoice].model]);
+        break;
+      }
+    }
+  } else {
+    cmdLaunch(cli, []);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

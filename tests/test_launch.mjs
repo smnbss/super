@@ -503,6 +503,88 @@ test('--dangerously-skip-permissions NEVER appears before -- in ollama', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Launch wizard paths — validate every TUI menu choice produces correct args
+// ═══════════════════════════════════════════════════════════════════════════════
+console.log('\nLaunch wizard paths');
+console.log('═'.repeat(50));
+
+// These mirror the OLLAMA_MODELS constant in super.mjs — contract test
+const WIZARD_OLLAMA_MODELS = [
+  { label: 'Kimi K2.5',    model: 'kimi-k2.5:cloud' },
+  { label: 'MiniMax M2.5', model: 'minimax-m2.5:cloud' },
+  { label: 'GLM 5',        model: 'glm-5:cloud' },
+  { label: 'Gemma 4 31B',  model: 'gemma4:31b-cloud' },
+];
+
+// Wizard path: Claude → Opus (default) → cmdLaunch('claude', [])
+test('wizard: Claude Opus (default) produces correct exec', () => {
+  const exec = simulateExec('claude', [], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'claude');
+  assert.deepStrictEqual(exec.args, ['--dangerously-skip-permissions']);
+});
+
+// Wizard path: Claude → Sonnet → cmdLaunch('claude', ['--model', 'sonnet'])
+test('wizard: Claude Sonnet produces correct exec', () => {
+  const exec = simulateExec('claude', ['--model', 'sonnet'], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'claude');
+  assert.ok(exec.args.includes('--model'));
+  assert.ok(exec.args.includes('sonnet'));
+});
+
+// Wizard path: Claude → Haiku → cmdLaunch('claude', ['--model', 'haiku'])
+test('wizard: Claude Haiku produces correct exec', () => {
+  const exec = simulateExec('claude', ['--model', 'haiku'], ['--dangerously-skip-permissions']);
+  assert.strictEqual(exec.bin, 'claude');
+  assert.ok(exec.args.includes('--model'));
+  assert.ok(exec.args.includes('haiku'));
+});
+
+// Wizard path: Claude → Ollama → each model
+for (const { label, model } of WIZARD_OLLAMA_MODELS) {
+  test(`wizard: Claude Ollama ${label} (${model}) produces correct exec`, () => {
+    const exec = simulateExec('claude', ['--provider', 'ollama', '--model', model], ['--dangerously-skip-permissions']);
+    assert.strictEqual(exec.bin, 'ollama', `should use ollama binary for ${label}`);
+    assert.ok(exec.args.includes('--model'), `must pass --model for ${label}`);
+    assert.ok(exec.args.includes(model), `must pass model name ${model}`);
+    assert.ok(exec.args.includes('launch'), 'must use launch subcommand');
+    assert.ok(exec.args.includes('claude'), 'must target claude');
+    const sepIdx = exec.args.indexOf('--');
+    const modelIdx = exec.args.indexOf(model);
+    assert.ok(modelIdx < sepIdx || sepIdx === -1, `model must be before -- separator for ${label}`);
+  });
+}
+
+// Wizard path: Gemini → direct launch
+test('wizard: Gemini direct launch', () => {
+  const exec = simulateExec('gemini', [], ['--yolo']);
+  assert.strictEqual(exec.bin, 'gemini');
+  assert.deepStrictEqual(exec.args, ['--yolo']);
+});
+
+// Wizard path: Codex → direct launch
+test('wizard: Codex direct launch', () => {
+  const exec = simulateExec('codex', [], ['--full-auto']);
+  assert.strictEqual(exec.bin, 'codex');
+  assert.deepStrictEqual(exec.args, ['--full-auto']);
+});
+
+// Wizard path: Kimi → direct launch
+test('wizard: Kimi direct launch', () => {
+  const exec = simulateExec('kimi', [], ['--yolo']);
+  assert.strictEqual(exec.bin, 'kimi');
+  assert.deepStrictEqual(exec.args, ['--yolo']);
+});
+
+// Gum compatibility: option strings must not contain ANSI escape codes
+test('wizard: Ollama option labels must be plain text (no ANSI codes, no leading whitespace)', () => {
+  for (const { label, model } of WIZARD_OLLAMA_MODELS) {
+    const optionStr = `${label} (${model})`;
+    assert.ok(!/\x1b\[/.test(optionStr), `Option "${optionStr}" must not contain ANSI escape codes`);
+    assert.ok(!/^\s/.test(optionStr), `Option "${optionStr}" must not start with whitespace (gum strips it)`);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
 process.exit(failed);

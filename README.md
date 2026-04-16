@@ -34,6 +34,7 @@ super claude --model haiku  # Launch Claude with Haiku model
 super claude --provider ollama --model kimi-k2.5:cloud      # Use Kimi via Ollama
 super claude --provider ollama --model minimax-m2.5:cloud  # Use MiniMax via Ollama
 super claude --provider ollama --model glm-5:cloud         # Use GLM via Ollama
+super claude --provider ollama --model gemma4:31b-cloud    # Use Gemma 4 via Ollama
 
 # Launch with title
 super claude --title "fix auth"    # Named session
