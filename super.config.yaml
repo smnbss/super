@@ -99,10 +99,6 @@ plugins:
     source: obra/superpowers
     description: Core methodology marketplace — code review, debugging, TDD, planning
     enabled: true
-  smnbss-brain:
-    source: smnbss/brain
-    description: Knowledge brain — sync, memory rebuild, service docs, daily routines
-    enabled: false  # Installed via npx skills instead
   weroad-ai:
     source: weroad/ai
     description: WeRoad AI — dbt-modeling, presentations, devops, data-analyst, codex
