@@ -98,7 +98,7 @@ plugins:
   smnbss-brain:
     source: smnbss/brain
     description: Knowledge brain — sync, memory rebuild, service docs, daily routines
-    enabled: true
+    enabled: false  # Installed via npx skills instead
   weroad-ai:
     source: weroad/ai
     description: WeRoad AI — dbt-modeling, presentations, devops, data-analyst, codex
@@ -141,11 +141,12 @@ plugins:
 # into each CLI's config. Re-run `super install` after rotating tokens.
 
 mcps:
-  bigquery:
-    type: http
-    url: https://bigquery.googleapis.com/mcp
-    description: Google BigQuery via HTTP MCP (uses ADC token)
-    enabled: true
+  # Disabled — using bq CLI instead
+  # bigquery:
+  #   type: http
+  #   url: https://bigquery.googleapis.com/mcp
+  #   description: Google BigQuery via HTTP MCP (uses ADC token)
+  #   enabled: false
   linear:
     type: http
     url: https://mcp.linear.app/mcp
