@@ -7,17 +7,14 @@ super-debug.log
 .last-update-check
 .claude/settings.json
 .codex/hooks.json
-.kimi/config.toml
 .gemini/settings.json
 .env.local
 .venv
-.kimi/
 .codex/
 .claude/
 .gemini/
 .agents/
 .super/.super
-.kimi/.kimi
 .codex/.codex
 .claude/.claude
 .gemini/.gemini

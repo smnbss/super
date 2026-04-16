@@ -29,7 +29,7 @@ test('installedClis returns array of strings', () => {
 });
 
 test('installedClis only returns valid CLI names', () => {
-  const valid = ['claude', 'gemini', 'codex', 'kimi'];
+  const valid = ['claude', 'gemini', 'codex'];
   const clis = installedClis();
   for (const cli of clis) {
     assert.ok(valid.includes(cli), `Unexpected CLI: ${cli}`);

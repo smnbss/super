@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // super.mjs — Cross-CLI session bridge
-// Claude Code · Gemini CLI · Codex CLI · Kimi Code CLI
+// Claude Code · Gemini CLI · Codex CLI
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, symlinkSync, unlinkSync, lstatSync, copyFileSync, chmodSync } from 'fs';
 import { join, basename, dirname } from 'path';
@@ -26,7 +26,6 @@ const CLI = {
   claude: { cmd: 'claude', icon: '🟠', label: 'Claude Code', ctx: 'CLAUDE.md' },
   gemini: { cmd: 'gemini', icon: '🔵', label: 'Gemini CLI', ctx: 'GEMINI.md' },
   codex:  { cmd: 'codex',  icon: '🟢', label: 'Codex CLI',  ctx: 'AGENTS.md' },
-  kimi:   { cmd: 'kimi',   icon: '🟡', label: 'Kimi Code CLI', ctx: 'AGENTS.md' },
 };
 
 function die(msg) { ui.error(msg); process.exit(1); }
@@ -133,7 +132,6 @@ function cmdDoctor() {
     claude: join(root, '.claude', 'settings.json'),
     gemini: join(root, '.gemini', 'settings.json'),
     codex:  join(root, '.codex', 'hooks.json'),
-    kimi:   join(root, '.kimi', 'config.toml'),
   };
   for (const [name, path] of Object.entries(hookFiles)) {
     const c = CLI[name];
@@ -254,32 +252,11 @@ function installHooksCodex() {
   else { writeFileSync(hf, JSON.stringify(data, null, 2) + '\n'); ui.success(`Created ${hf}`); }
 }
 
-function installHooksKimi() {
-  const root = config.findRoot();
-  const dir = join(root, '.kimi'); mkdirSync(dir, { recursive: true });
-  const cfg = join(dir, 'config.toml');
-  const template = join(SUPER_HOME, 'hooks', 'kimi', 'config.toml.template');
-  const expanded = expandTemplate(template);
-  
-  // Start from global config so the local file is a complete standalone config
-  const globalCfg = join(process.env.HOME, '.kimi', 'config.toml');
-  let base = existsSync(globalCfg) ? readFileSync(globalCfg, 'utf8') : '# Kimi config\n';
-  // Strip any previously-appended super hooks from global to avoid duplication
-  base = base.replace(/\n?# super hooks\n[\s\S]*$/, '');
-  // Strip [mcp.client] so the template's value is the single source of truth
-  base = base.replace(/\n?\[mcp\.client\]\n[\s\S]*?$/, '');
-  // Remove empty hooks placeholder to avoid TOML conflict with [[hooks]] array
-  base = base.replace(/^hooks\s*=\s*\[\]\s*\n/m, '');
-  
-  writeFileSync(cfg, base.trimEnd() + '\n\n# super hooks\n' + expanded + '\n');
-  ui.success(`Created ${cfg} from global config + hooks`);
-}
-
 function installHooks(target) {
-  const installers = { claude: installHooksClaude, gemini: installHooksGemini, codex: installHooksCodex, kimi: installHooksKimi };
+  const installers = { claude: installHooksClaude, gemini: installHooksGemini, codex: installHooksCodex };
   if (target === 'all') { Object.values(installers).forEach(fn => fn()); }
   else if (installers[target]) { installers[target](); }
-  else die(`Unknown CLI: ${target}. Use: all|claude|gemini|codex|kimi`);
+  else die(`Unknown CLI: ${target}. Use: all|claude|gemini|codex`);
 }
 
 function setupContextFiles() {
@@ -525,14 +502,12 @@ function cmdLaunch(cli, args = []) {
   const isYolo = config.yoloMode();
   if (providerResult && providerResult.mode === 'wrapper') {
     const wrapperArgs = buildWrapperArgs(providerResult, passthrough, defaults, isYolo);
-    ui.muted(`  exec: ${providerResult.cmd} ${wrapperArgs.join(' ')}`);
     try { execFileSync(providerResult.cmd, wrapperArgs, { stdio: 'inherit' }); }
-    catch (e) { ui.error(`exec failed: ${e.message}`); process.exit(e.status || 1); }
+    catch (e) { process.exit(e.status || 1); }
   } else {
     const cliArgs = [...defaults, ...passthrough];
-    ui.muted(`  exec: ${CLI[cli].cmd} ${cliArgs.join(' ')}`);
     try { execFileSync(CLI[cli].cmd, cliArgs, { stdio: 'inherit' }); }
-    catch (e) { ui.error(`exec failed: ${e.message}`); process.exit(e.status || 1); }
+    catch (e) { process.exit(e.status || 1); }
   }
 }
 
@@ -722,14 +697,13 @@ const OLLAMA_MODELS = [
 
 async function launchWizard() {
   // Step 1: Pick CLI
-  const clis = ['claude', 'gemini', 'codex', 'kimi'].filter(c => catalog.isInstalled(c));
+  const clis = ['claude', 'gemini', 'codex'].filter(c => catalog.isInstalled(c));
   if (clis.length === 0) { die('No CLI tools installed. Run: super install'); return; }
 
   const cliOptions = clis.map(c => `${CLI[c].icon}  ${CLI[c].label}`);
   const cliChoice = await interactive.selectSingle('Which CLI?', cliOptions, 0);
-  if (cliChoice === null) { ui.muted('[wizard] CLI selection cancelled'); return; }
+  if (cliChoice === null) return;
   const cli = clis[cliChoice];
-  ui.muted(`[wizard] CLI: ${cli}`);
 
   // Step 2: For Claude, pick model or provider
   if (cli === 'claude') {
@@ -740,8 +714,7 @@ async function launchWizard() {
       '🌐 Ollama provider →',
     ];
     const modeChoice = await interactive.selectSingle('Model / provider?', modeOptions, 0);
-    if (modeChoice === null) { ui.muted('[wizard] Model selection cancelled'); return; }
-    ui.muted(`[wizard] mode: ${modeChoice} (${modeOptions[modeChoice]})`);
+    if (modeChoice === null) return;
 
     switch (modeChoice) {
       case 0: cmdLaunch('claude', []); break;
@@ -750,8 +723,7 @@ async function launchWizard() {
       case 3: {
         const ollamaOptions = OLLAMA_MODELS.map(m => `${m.label} (${m.model})`);
         const ollamaChoice = await interactive.selectSingle('Ollama model?', ollamaOptions, 0);
-        if (ollamaChoice === null) { ui.muted('[wizard] Ollama selection cancelled'); return; }
-        ui.muted(`[wizard] ollama model: ${OLLAMA_MODELS[ollamaChoice].model}`);
+        if (ollamaChoice === null) return;
         cmdLaunch('claude', ['--provider', 'ollama', '--model', OLLAMA_MODELS[ollamaChoice].model]);
         break;
       }
@@ -772,8 +744,8 @@ USAGE
   super [command] [options]
 
 COMMANDS
-  install [target]     Install hooks (all|claude|gemini|codex|kimi)
-  claude|gemini|codex|kimi  Launch CLI with session tracking
+  install [target]     Install hooks (all|claude|gemini|codex)
+  claude|gemini|codex  Launch CLI with session tracking
   resume [session]     Resume a previous session
   switch <cli>         Continue session in different CLI
   sessions             List all sessions
@@ -822,7 +794,6 @@ async function cmdQuickActive() {
   let cli = 'claude';
   if (lastTurn.includes('🔵')) cli = 'gemini';
   else if (lastTurn.includes('🟢')) cli = 'codex';
-  else if (lastTurn.includes('🟡')) cli = 'kimi';
   cmdLaunch(cli, ['--resume', active]);
 }
 
@@ -847,26 +818,16 @@ function which(cli) {
   try { return execSync(`command -v ${cli}`, { encoding: 'utf8' }).trim(); } catch { return ''; }
 }
 
-// Build CLI-specific default args (e.g. yolo mode, kimi mcp config)
+// Build CLI-specific default args (e.g. yolo mode)
 function cliDefaultArgs(cli) {
   const args = [];
-  // Yolo mode — auto-accept all tool calls
   if (config.yoloMode()) {
     const yoloFlag = {
       claude: '--dangerously-skip-permissions',
       gemini: '--yolo',
       codex:  '--full-auto',
-      kimi:   '--yolo',
     }[cli];
     if (yoloFlag) args.push(yoloFlag);
-  }
-  // Kimi needs explicit MCP config path and local config file
-  if (cli === 'kimi') {
-    const root = config.findRoot();
-    const mcpConfig = join(root, '.kimi', 'mcp.json');
-    if (existsSync(mcpConfig)) args.push('--mcp-config-file', mcpConfig);
-    const localConfig = join(root, '.kimi', 'config.toml');
-    if (existsSync(localConfig)) args.push('--config-file', localConfig);
   }
   return args;
 }
@@ -902,7 +863,7 @@ async function main() {
     case '--version': case '-v': console.log(`super v${VERSION}`); break;
     case 'help': case '--help': case '-h': cmdHelp(); break;
     case 'menu': await cmdMenu(); break;
-    case 'claude': case 'gemini': case 'codex': case 'kimi': cmdLaunch(cmd, rest); break;
+    case 'claude': case 'gemini': case 'codex': cmdLaunch(cmd, rest); break;
     default: die(`Unknown command: ${cmd}. Run: super help`);
   }
 }

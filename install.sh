@@ -102,7 +102,7 @@ log "Run 'super --help' to get started"
 
 # Check for CLIs
 log "Detected CLIs:"
-for cli in claude gemini codex kimi; do
+for cli in claude gemini codex; do
   if command -v "$cli" >/dev/null 2>&1; then
     echo "  ✓ $cli"
   else

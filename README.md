@@ -1,6 +1,6 @@
 # super
 
-Cross-CLI session bridge for **Claude Code**, **Gemini CLI**, **Codex CLI**, and **Kimi Code CLI**.
+Cross-CLI session bridge for **Claude Code**, **Gemini CLI**, and **Codex CLI**.
 
 Work in one CLI, switch to another, and your conversation follows you. Sessions are plain Markdown files tracked in git.
 
@@ -23,7 +23,6 @@ super install
 super claude                # Launch Claude Code (default: opus)
 super gemini                # Launch Gemini CLI
 super codex                 # Launch Codex CLI
-super kimi                  # Launch Kimi Code CLI
 
 # Launch with specific model (Claude Code only)
 super claude --model sonnet # Launch Claude with Sonnet model
@@ -116,14 +115,14 @@ Plugins (Claude Code only) and MCP servers are declared in `super.config.yaml`. 
 
 ### Hooks coverage
 
-| Event | Claude | Gemini | Codex | Kimi |
-|-------|:------:|:------:|:-----:|:----:|
-| Session start | yes | yes | yes | yes |
-| User prompt | yes | yes | yes | yes |
-| AI response | yes | yes | partial | yes |
-| Shell commands | yes | yes | Bash only | yes |
-| File writes | yes | yes | no | yes |
-| Session end | yes | yes | no | yes |
+| Event | Claude | Gemini | Codex |
+|-------|:------:|:------:|:-----:|
+| Session start | yes | yes | yes |
+| User prompt | yes | yes | yes |
+| AI response | yes | yes | partial |
+| Shell commands | yes | yes | Bash only |
+| File writes | yes | yes | no |
+| Session end | yes | yes | no |
 
 ## Ubuntu setup
 

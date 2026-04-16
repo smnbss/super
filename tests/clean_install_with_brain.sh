@@ -68,7 +68,7 @@ sleep 2
 # ---------------------------------------------------------------------------
 # 3. Delete AI-tool folders from current project
 # ---------------------------------------------------------------------------
-FOLDERS_TO_DELETE=(.agents .super .kimi .codex .claude .gemini .venv)
+FOLDERS_TO_DELETE=(.agents .super .codex .claude .gemini .venv)
 for folder in "${FOLDERS_TO_DELETE[@]}"; do
     target="${BRAIN_DIR}/${folder}"
     if [[ -d "$target" ]]; then
@@ -137,7 +137,7 @@ fi
 
 # Verify that known CLIs are detected by super
 log "Checking detected CLIs..."
-for cli in kimi codex claude gemini; do
+for cli in codex claude gemini; do
     if command -v "$cli" &> /dev/null; then
         log "  ✓ $cli installed"
     else
@@ -150,7 +150,6 @@ done
 # ---------------------------------------------------------------------------
 log "Checking installed skills..."
 SKILL_DIRS=(
-    "${BRAIN_DIR}/.kimi/skills"
     "${BRAIN_DIR}/.codex/skills"
     "${BRAIN_DIR}/.claude/skills"
     "${BRAIN_DIR}/.gemini/skills"

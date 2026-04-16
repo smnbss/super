@@ -470,12 +470,6 @@ test('super codex → codex --full-auto', () => {
   assert.deepStrictEqual(exec.args, ['--full-auto']);
 });
 
-test('super kimi → kimi --yolo', () => {
-  const exec = simulateExec('kimi', [], ['--yolo']);
-  assert.strictEqual(exec.bin, 'kimi');
-  assert.deepStrictEqual(exec.args, ['--yolo']);
-});
-
 test('super claude --provider ollama --model kimi-k2.5:cloud (yolo)', () => {
   const exec = simulateExec('claude', ['--provider', 'ollama', '--model', 'kimi-k2.5:cloud'], ['--dangerously-skip-permissions']);
   assert.strictEqual(exec.bin, 'ollama');
@@ -566,13 +560,6 @@ test('wizard: Codex direct launch', () => {
   const exec = simulateExec('codex', [], ['--full-auto']);
   assert.strictEqual(exec.bin, 'codex');
   assert.deepStrictEqual(exec.args, ['--full-auto']);
-});
-
-// Wizard path: Kimi → direct launch
-test('wizard: Kimi direct launch', () => {
-  const exec = simulateExec('kimi', [], ['--yolo']);
-  assert.strictEqual(exec.bin, 'kimi');
-  assert.deepStrictEqual(exec.args, ['--yolo']);
 });
 
 // Gum compatibility: option strings must not contain ANSI escape codes

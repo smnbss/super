@@ -55,7 +55,6 @@ _cli_icon() {
     claude|claude-code|claude\ code)    echo "🟠" ;;
     gemini|gemini\ cli)                 echo "🔵" ;;
     codex|codex\ cli)                   echo "🟢" ;;
-    kimi|kimi\ code|kimi\ code\ cli)    echo "🟡" ;;
     *)                                  echo "⚪" ;;
   esac
 }
@@ -363,7 +362,7 @@ EOF
   case "${cli,,}" in
     claude|claude-code) _inject_to_file "$root/CLAUDE.md"  ;;
     gemini)             _inject_to_file "$root/GEMINI.md"  ;;
-    codex|kimi)         _inject_to_file "$root/AGENTS.md"  ;;
+    codex)              _inject_to_file "$root/AGENTS.md"  ;;
   esac
 }
 

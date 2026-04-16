@@ -30,18 +30,16 @@ test('icons object has required keys', () => {
   assert.ok(ui.icons.active);
 });
 
-test('cliIcons has all 4 CLIs', () => {
+test('cliIcons has all 3 CLIs', () => {
   assert.ok(ui.cliIcons.claude);
   assert.ok(ui.cliIcons.gemini);
   assert.ok(ui.cliIcons.codex);
-  assert.ok(ui.cliIcons.kimi);
 });
 
-test('cliLabels has all 4 CLIs', () => {
+test('cliLabels has all 3 CLIs', () => {
   assert.strictEqual(ui.cliLabels.claude, 'Claude Code');
   assert.strictEqual(ui.cliLabels.gemini, 'Gemini CLI');
   assert.strictEqual(ui.cliLabels.codex, 'Codex CLI');
-  assert.strictEqual(ui.cliLabels.kimi, 'Kimi Code CLI');
 });
 
 test('cliIcon returns correct icons', () => {

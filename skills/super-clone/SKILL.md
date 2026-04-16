@@ -15,9 +15,8 @@ Create a cloned OrbStack Ubuntu machine for the current project.
 
 1. Locate the `setup_ubuntu.sh` script in the skill directory:
    - `.agents/skills/super-clone/setup_ubuntu.sh` (Claude)
-   - `~/.kimi/skills/super-clone/setup_ubuntu.sh` (Kimi)
-   - `~/.codex/skills/super-clone/setup_ubuntu.sh` (Codex)
-   - `~/.gemini/skills/super-clone/setup_ubuntu.sh` (Gemini)
+   - `.codex/skills/super-clone/setup_ubuntu.sh` (Codex)
+   - `.gemini/skills/super-clone/setup_ubuntu.sh` (Gemini)
 2. Run it with the current working directory as the project path:
    ```bash
    <skill-dir>/super-clone/setup_ubuntu.sh "$(pwd)"

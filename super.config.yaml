@@ -1,7 +1,7 @@
 version: "3.0"
 
 # Super - Cross-CLI Session Bridge Configuration
-# Works with: Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI
+# Works with: Claude Code, Gemini CLI, Codex CLI
 #
 # This file is a REFERENCE CATALOG — it declares what's available and
 # whether it's enabled. `super install` reads this and uses each CLI's
@@ -47,10 +47,6 @@ clis:
     install: "npm install -g @openai/codex"
     check: "command -v codex"
     enabled: true
-  kimi:
-    install: "curl -LsSf https://code.kimi.com/install.sh | bash"
-    check: "command -v kimi"
-    enabled: true
 
 security:
   yoloMode: true
@@ -74,7 +70,7 @@ session:
 # ─── Skills ──────────────────────────────────────────────────────────────────
 # source: owner/repo or owner/repo/subpath (GitHub)
 # Claude: cloned to .agents/skills/<name>/ (project-level)
-# Gemini/Codex/Kimi: cloned to ~/.<cli>/skills/<name>/
+# Gemini/Codex: cloned to ~/.<cli>/skills/<name>/
 
 skills:
   gstack:
@@ -137,7 +133,6 @@ plugins:
 #   Claude: .claude/settings.local.json (project-level, dict)
 #   Gemini: ~/.gemini/settings.json (dict)
 #   Codex:  ~/.codex/config.json (array format)
-#   Kimi:   .kimi/mcp.json (project-level, dict with transport field)
 #
 # type: http → url-based transport | type: stdio → command + args
 #

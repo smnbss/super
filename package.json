@@ -1,7 +1,7 @@
 {
   "name": "super-cli",
-  "version": "4.5.2",
-  "description": "Cross-CLI session bridge for Claude Code, Gemini CLI, Codex CLI, Kimi Code CLI",
+  "version": "5.0.0",
+  "description": "Cross-CLI session bridge for Claude Code, Gemini CLI, Codex CLI",
   "type": "module",
   "bin": {
     "super": "./super"
