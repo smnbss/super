@@ -129,6 +129,10 @@ plugins:
     source: claude-plugins-official/telegram
     description: Telegram bot integration
     enabled: true
+  ralph-loop:
+    source: claude-plugins-official/ralph-loop
+    description: Ralph loop plugin
+    enabled: true
   codex:
     source: openai-codex/codex
     description: OpenAI Codex CLI integration
