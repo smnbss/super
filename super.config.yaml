@@ -20,8 +20,15 @@ system:
 
   markitdown:
     name: markitdown
-    check: "command -v markitdown"
-    install: "export PATH=\"$HOME/.local/bin:$PATH\" && uv tool install markitdown"
+    # Verify the markitdown CLI exists AND the optional format converters are installed.
+    # markitdown 0.1.x split docx/pdf/xlsx/pptx support into the [all] extras —
+    # a bare install imports cleanly but every conversion fails at runtime.
+    check: >-
+      command -v markitdown >/dev/null 2>&1 &&
+      MD_PY="$(head -n1 "$(command -v markitdown)" 2>/dev/null | sed 's|^#!||' | awk '{print $1}')" &&
+      [ -x "$MD_PY" ] &&
+      "$MD_PY" -c "import mammoth, pdfminer, openpyxl, pptx" 2>/dev/null
+    install: "export PATH=\"$HOME/.local/bin:$PATH\" && uv tool install --force 'markitdown[all]'"
     enabled: true
 
   ollama:
@@ -128,6 +135,10 @@ plugins:
   telegram:
     source: claude-plugins-official/telegram
     description: Telegram bot integration
+    enabled: true
+  ralph-loop:
+    source: claude-plugins-official/ralph-loop
+    description: Ralph loop plugin
     enabled: true
   codex:
     source: openai-codex/codex
