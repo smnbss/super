@@ -71,6 +71,11 @@ session:
 # source: owner/repo or owner/repo/subpath (GitHub)
 # Claude: cloned to .agents/skills/<name>/ (project-level)
 # Gemini/Codex: cloned to ~/.<cli>/skills/<name>/
+#
+# Options:
+#   - discover: <subpath>/  Auto-discover multiple skills from a subfolder within the repo.
+#                         Each subdirectory containing SKILL.md becomes a separate skill.
+#                         Use for repos like smnbss/brain that bundle multiple skills.
 
 skills:
   gstack:
@@ -82,58 +87,11 @@ skills:
     source: microsoft/playwright-cli/skills/playwright-cli
     description: Browser testing with Playwright
     enabled: true
-  brain-pull-sources:
-    source: smnbss/brain/skills/brain-pull-sources
-    description: Export all external sources — ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase
+  brain:
+    source: smnbss/brain
+    description: Knowledge brain — sync, memory rebuild, service docs, daily routines
     enabled: true
-  brain-rebuild-services:
-    source: smnbss/brain/skills/brain-rebuild-services
-    description: Generate deep service .AGENT.MD docs from cloned GitHub repos
-    enabled: true
-  brain-rebuild-memory:
-    source: smnbss/brain/skills/brain-rebuild-memory
-    description: Rebuild L2 (domain knowledge) and L1 (navigation MOCs) from src/ + outputs/services/
-    enabled: true
-  brain-pull-my-meeting-notes:
-    source: smnbss/brain/skills/brain-pull-my-meeting-notes
-    description: Harvest meeting notes, recordings, and transcripts from Google Calendar and Drive
-    enabled: true
-  brain-prepare-my-one-on-one:
-    source: smnbss/brain/skills/brain-prepare-my-one-on-one
-    description: Prepare 1:1 meeting agendas from Linear, brain context, and previous agendas
-    enabled: true
-  brain-prepare-my-deep-dives:
-    source: smnbss/brain/skills/brain-prepare-my-deep-dives
-    description: Prepare deep-dive meeting agendas from Linear project data per team
-    enabled: true
-  brain-morning-start:
-    source: smnbss/brain/skills/brain-morning-start
-    description: Daily bootstrap — update tools, sync brain, harvest meeting notes, prepare agendas
-    enabled: true
-  brain-git-sync:
-    source: smnbss/brain/skills/brain-git-sync
-    description: Commit and push all brain changes
-    enabled: true
-  brain-push-reports:
-    source: smnbss/brain/skills/brain-push-reports
-    description: Push latest agent report outputs to ClickUp document pages
-    enabled: true
-  brain-weekly-review:
-    source: smnbss/brain/skills/brain-weekly-review
-    description: Compile weekly summary from Workflowy, X posts, and Linear updates
-    enabled: true
-  brain-linear-create-project-context:
-    source: smnbss/brain/skills/brain-linear-create-project-context
-    description: Enrich a Linear project description with structured context from its issues
-    enabled: true
-  brain-linear-process-ideas:
-    source: smnbss/brain/skills/brain-linear-process-ideas
-    description: Pick next "Idea:" issue from a Linear project and refine it in 3 passes
-    enabled: true
-  brain-linear-process-tasks:
-    source: smnbss/brain/skills/brain-linear-process-tasks
-    description: Pick next task from a Linear project, implement it, commit, and mark done
-    enabled: true
+    discover: skills/  # Auto-discover all skills from this subfolder
 # ─── Plugins ─────────────────────────────────────────────────────────────────
 # Plugins are GitHub repos that bundle multiple skills (and optionally commands).
 # Installing a plugin clones the repo and auto-discovers:
