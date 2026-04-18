@@ -1,0 +1,71 @@
+#!/bin/bash
+# Pull all sources listed in a sources.md file
+# Usage: pull_sources [sources.md]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SOURCES_FILE="${1:-$REPO_ROOT/sources.md}"
+
+if [[ ! -f "$SOURCES_FILE" ]]; then
+  echo "Error: sources file not found: $SOURCES_FILE"
+  exit 1
+fi
+
+# Load .env.local if present (tokens and secrets)
+if [[ -f "$REPO_ROOT/.env.local" ]]; then
+  set -a
+  source "$REPO_ROOT/.env.local"
+  set +a
+fi
+
+echo "Pulling sources from: $SOURCES_FILE"
+echo ""
+
+success=0
+failed=0
+
+while IFS= read -r line; do
+  # Strip inline comments and trim whitespace
+  cmd="${line%%#*}"
+  cmd="${cmd%"${cmd##*[![:space:]]}"}"
+
+  # Skip empty lines
+  [[ -z "$cmd" ]] && continue
+
+  # Extract the tool name (first word)
+  tool="${cmd%% *}"
+
+  # Resolve to bin/ wrapper if available, else fall back to python3 utils/
+  if [[ -x "$SCRIPT_DIR/$tool" ]]; then
+    runner="$SCRIPT_DIR/$tool"
+    args="${cmd#* }"
+  else
+    echo "Unknown command: $tool — skipping"
+    continue
+  fi
+
+  echo ">>> $cmd"
+  if "$runner" $args; then
+    ((success++))
+  else
+    echo "FAILED: $cmd"
+    ((failed++))
+  fi
+  echo ""
+
+done < "$SOURCES_FILE"
+
+# Write export manifest for brain-sync
+MANIFEST="$REPO_ROOT/src/.last_export.json"
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+{
+  echo "{"
+  echo "  \"timestamp\": \"$NOW\","
+  echo "  \"success\": $success,"
+  echo "  \"failed\": $failed"
+  echo "}"
+} > "$MANIFEST"
+
+echo "Done. $success succeeded, $failed failed."
+echo "Manifest written to src/.last_export.json"

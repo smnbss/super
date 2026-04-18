@@ -1,0 +1,8 @@
+#!/bin/bash
+# Medium RSS Feed to Markdown exporter wrapper
+# Usage: medium_to_md <rss_feed_url>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+python3 "$PROJECT_ROOT/utils/medium_to_md.py" "$@"

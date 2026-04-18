@@ -65,13 +65,13 @@ else
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [ -f "$SCRIPT_DIR/super" ] && [ -f "$SCRIPT_DIR/super.mjs" ]; then
     log "Installing from local source ($SCRIPT_DIR)..."
-    cp -r "$SCRIPT_DIR"/super "$SCRIPT_DIR"/super.mjs "$SCRIPT_DIR"/lib "$SCRIPT_DIR"/hooks "$SCRIPT_DIR"/skills "$SCRIPT_DIR"/tests "$SCRIPT_DIR"/README.md "$SCRIPT_DIR"/VERSION "$SCRIPT_DIR"/super.config.yaml "$SCRIPT_DIR"/package.json "$SCRIPT_DIR"/package-lock.json "$INSTALL_DIR"/ 2>/dev/null || true
+    cp -r "$SCRIPT_DIR"/super "$SCRIPT_DIR"/super.mjs "$SCRIPT_DIR"/lib "$SCRIPT_DIR"/hooks "$SCRIPT_DIR"/skills "$SCRIPT_DIR"/references "$SCRIPT_DIR"/tests "$SCRIPT_DIR"/README.md "$SCRIPT_DIR"/VERSION "$SCRIPT_DIR"/super.config.yaml "$SCRIPT_DIR"/package.json "$SCRIPT_DIR"/package-lock.json "$INSTALL_DIR"/ 2>/dev/null || true
   else
     # Final fallback: clone repo and copy files
     log "Cloning $REPO and installing from source..."
     TMP_DIR=$(mktemp -d)
     git clone --depth 1 "https://github.com/$REPO.git" "$TMP_DIR"
-    cp -r "$TMP_DIR"/super "$TMP_DIR"/super.mjs "$TMP_DIR"/lib "$TMP_DIR"/hooks "$TMP_DIR"/skills "$TMP_DIR"/tests "$TMP_DIR"/README.md "$TMP_DIR"/VERSION "$TMP_DIR"/super.config.yaml "$TMP_DIR"/package.json "$TMP_DIR"/package-lock.json "$INSTALL_DIR"/ 2>/dev/null || true
+    cp -r "$TMP_DIR"/super "$TMP_DIR"/super.mjs "$TMP_DIR"/lib "$TMP_DIR"/hooks "$TMP_DIR"/skills "$TMP_DIR"/references "$TMP_DIR"/tests "$TMP_DIR"/README.md "$TMP_DIR"/VERSION "$TMP_DIR"/super.config.yaml "$TMP_DIR"/package.json "$TMP_DIR"/package-lock.json "$INSTALL_DIR"/ 2>/dev/null || true
     rm -rf "$TMP_DIR"
   fi
 fi
@@ -80,6 +80,48 @@ fi
 chmod +x "$INSTALL_DIR/super"
 chmod +x "$INSTALL_DIR/hooks"/*/*.sh 2>/dev/null || true
 chmod +x "$INSTALL_DIR/skills"/*/*.sh 2>/dev/null || true
+chmod +x "$INSTALL_DIR/skills"/*/bin/* 2>/dev/null || true
+
+# Install brain config sample (only if not already present — never clobber user edits)
+BRAIN_CONFIG_DEST="$HOME/.super/brain.config.yml"
+BRAIN_CONFIG_SRC=""
+for candidate in \
+  "$INSTALL_DIR/references/brain-config.sample.yml" \
+  "${SCRIPT_DIR:-}/references/brain-config.sample.yml"; do
+  if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+    BRAIN_CONFIG_SRC="$candidate"
+    break
+  fi
+done
+if [ -n "$BRAIN_CONFIG_SRC" ]; then
+  if [ -f "$BRAIN_CONFIG_DEST" ]; then
+    log "Brain config already exists at $BRAIN_CONFIG_DEST (leaving untouched)"
+  else
+    mkdir -p "$(dirname "$BRAIN_CONFIG_DEST")"
+    cp "$BRAIN_CONFIG_SRC" "$BRAIN_CONFIG_DEST"
+    log "Installed brain config sample → $BRAIN_CONFIG_DEST (edit to match your org)"
+  fi
+
+  # Read brain.path from the config and scaffold the 4 top-level dirs.
+  BRAIN_PATH="$(awk '
+    /^brain:/ { in_brain=1; next }
+    in_brain && /^[^[:space:]]/ { in_brain=0 }
+    in_brain && /^[[:space:]]+path:/ {
+      sub(/^[[:space:]]+path:[[:space:]]*/, "")
+      gsub(/^["\x27]|["\x27]$/, "")
+      print; exit
+    }
+  ' "$BRAIN_CONFIG_DEST")"
+  BRAIN_PATH="${BRAIN_PATH/#\~/$HOME}"
+  if [ -n "$BRAIN_PATH" ]; then
+    for d in agents memory outputs src; do
+      if [ ! -d "$BRAIN_PATH/$d" ]; then
+        mkdir -p "$BRAIN_PATH/$d"
+        log "  ✓ created $BRAIN_PATH/$d"
+      fi
+    done
+  fi
+fi
 
 # Check if in PATH
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
@@ -100,6 +142,22 @@ fi
 log "SuperCLI installed successfully!"
 log "Run 'super --help' to get started"
 
+# Install qmd (brain hybrid-search indexer used by smnbss/brain skills)
+if command -v npm >/dev/null 2>&1; then
+  if command -v qmd >/dev/null 2>&1; then
+    log "qmd already installed"
+  else
+    log "Installing qmd..."
+    if npm install -g @tobilu/qmd >/dev/null 2>&1; then
+      log "  ✓ qmd installed"
+    else
+      warn "  ✗ qmd install failed (run manually: npm install -g @tobilu/qmd)"
+    fi
+  fi
+else
+  warn "npm not found — skipping qmd install (install Node.js, then: npm install -g @tobilu/qmd)"
+fi
+
 # Check for CLIs
 log "Detected CLIs:"
 for cli in claude gemini codex; do
@@ -109,3 +167,15 @@ for cli in claude gemini codex; do
     echo "  ✗ $cli (not found)"
   fi
 done
+
+# Point the user at the interactive setup skill
+echo ""
+echo "Next: run the interactive setup wizard to configure your brain."
+echo ""
+echo "  In Claude Code / Gemini CLI / Codex CLI, invoke:"
+echo "      /super-setup"
+echo ""
+echo "  It will walk you through ~/.super/brain.config.yml"
+echo "  (org, Linear slug, Medium handle, sources, teams) and"
+echo "  generate a starter \$BRAIN/sources.md from the template."
+echo ""

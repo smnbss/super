@@ -1,0 +1,8 @@
+#!/bin/bash
+# Confluence Space to Markdown exporter wrapper
+# Usage: confluence_space_to_md <confluence_space_url>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+python3 "$PROJECT_ROOT/utils/confluence_space_to_md.py" "$@"

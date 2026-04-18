@@ -1,0 +1,8 @@
+#!/bin/bash
+# Linear team projects to Markdown exporter wrapper
+# Usage: linear_to_md <linear_team_url>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+python3 "$PROJECT_ROOT/utils/linear_to_md.py" "$@"

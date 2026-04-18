@@ -1,0 +1,119 @@
+# Brain config — knobs for smnbss/brain skills.
+#
+# Super installs this sample to ~/.super/brain.config.yml on first install.
+# Edit that copy; skills read it at runtime via $BRAIN_CONFIG (default: ~/.super/brain.config.yml).
+#
+# The defaults below are Simone Basso / WeRoad. Adapt to your own org.
+
+brain:
+  # Path to the brain git repo (contains memory/, outputs/, src/, bin/)
+  path: ~/code/brain
+
+organization:
+  # Human-readable name — used in qmd globalContext and report templates
+  name: WeRoad
+  # Short role label — e.g. "CTO/CPO of WeRoad"
+  role: CTO/CPO of WeRoad
+
+linear:
+  # Your Linear org slug. From URLs like linear.app/<org>/project/...
+  org: weroad
+
+medium:
+  # Medium handle for src/medium exports (e.g. medium.com/@<handle>)
+  handle: smnbss
+
+# Source systems feeding the brain. Disable the ones you don't use.
+sources:
+  clickup:
+    enabled: true
+    # ClickUp folders that carry special meaning in this org.
+    # WeRoad prefixes with emoji — your org likely doesn't.
+    monkeys_wiki_path: "🐵 Monkeys Wiki"
+    team_docs_prefix: "Docs "  # e.g. "Docs BUKTU", "Docs Tium"
+  confluence:
+    enabled: true
+    intranet_path: "Intranet"
+    wiki_path: "Monkeys Wiki"
+  gdrive:
+    enabled: true
+    # Named GDrive folders mirrored into src/gdrive/
+    exco_folder: "WeRoad ExCo"
+    projects_folder: "Monkeys_Projects"
+    one_pagers_folder: "Monkeys"
+  github:
+    enabled: true
+    orgs: [weroad]
+    personal_orgs: [smnbss]
+  gws:
+    enabled: true
+  linear:
+    enabled: true
+  medium:
+    enabled: true
+  metabase:
+    enabled: true
+  personio:
+    enabled: true
+    roster_file: staff-roster.tsv
+    # Expected columns in the roster TSV
+    columns:
+      - First Name
+      - Last Name
+      - Position
+      - Department
+      - Hire Date
+      - Status
+      - Supervisor
+
+# Engineering teams. Drives L2 team-*.md scaffolding and calendar → file-slug mapping
+# for brain-prepare-my-deep-dives.
+teams:
+  - name: Buktu
+    slug: buktu
+    calendar_patterns: [Buktu]
+    linear_teams: [TEAM_BUKTU]
+  - name: Tium
+    slug: tium
+    calendar_patterns: [Tium]
+    linear_teams: [TIUM]
+  - name: Saitama
+    slug: saitama
+    calendar_patterns: [SAITAMA, "SAITAMA - Deep Dive"]
+    linear_teams: [SAITAMA]
+  - name: SAIan
+    slug: saian
+    calendar_patterns: [SAIan]
+    linear_teams: []
+  - name: Voyager
+    slug: voyager
+    calendar_patterns: [Voyager]
+    linear_teams: [VOYAGER]
+  - name: DevOps
+    slug: devops
+    calendar_patterns: [DevOps]
+    linear_teams: [DEVOPS]
+  - name: CyclOps
+    slug: cyclops
+    calendar_patterns: [CyclOps]
+    linear_teams: [CYCLOPS]
+  - name: Stomp
+    slug: stomp
+    calendar_patterns: [Stomp]
+    linear_teams: [STOMP]
+  - name: Rocket
+    slug: rocket
+    calendar_patterns: [Rocket]
+    linear_teams: [ROCKET]
+  - name: YoData
+    slug: yodata
+    calendar_patterns: [YoData]
+    linear_teams: [YODATA]
+  - name: IT
+    slug: it
+    calendar_patterns: [IT]
+    linear_teams: [IT]
+  - name: Staff
+    slug: staff
+    calendar_patterns: [Staff]
+    linear_teams: []

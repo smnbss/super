@@ -94,9 +94,29 @@ Skills are prompt-based capabilities installed into each CLI's native skill dire
 
 | Skill | Description |
 |-------|-------------|
+| **super-setup** | Interactive setup wizard — walks you through `~/.super/brain.config.yml` and generates `$BRAIN/sources.md`. Run right after `super install`. |
 | **super-persist** | Summarize the conversation and save it to the session file |
 | **super-resume** | Read the session file and summarize what the session is about |
 | **super-clone** | Create an OrbStack Ubuntu machine pre-configured for the current project |
+
+### Brain skills
+
+Skills for building and syncing a personal knowledge brain (formerly the `smnbss/brain` repo, merged in). They share a config file at `~/.super/brain.config.yml` — super installs the sample on first run; edit it to match your org (Linear slug, teams, source paths).
+
+| Skill | Description |
+|-------|-------------|
+| **brain-pull-sources** | Export ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase into `src/` |
+| **brain-rebuild-services** | Generate `.AGENT.MD` service docs from cloned GitHub repos |
+| **brain-rebuild-memory** | Rebuild L1/L2 memory from `src/` + `outputs/services/` |
+| **brain-reindex** | Rebuild qmd hybrid search index (requires qmd, auto-installed) |
+| **brain-pull-my-meeting-notes** | Harvest Meet transcripts from Calendar + Drive |
+| **brain-prepare-my-one-on-one** | Prepare 1:1 agendas from Linear + brain context |
+| **brain-prepare-my-deep-dives** | Prepare deep-dive agendas per team |
+| **brain-morning-start** | Daily bootstrap (sync + meeting notes + agendas) |
+| **brain-push-reports** | Push agent outputs back to ClickUp |
+| **brain-weekly-review** | Weekly summary from Workflowy + X + Linear |
+| **brain-git-sync** | Commit and push brain changes |
+| **brain-linear-create-project-context** / **-process-ideas** / **-process-tasks** | Linear workflows |
 
 ### Available but disabled
 

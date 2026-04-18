@@ -1,0 +1,8 @@
+#!/bin/bash
+# Metabase index exporter wrapper
+# Usage: metabase_index <metabase_url>
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+python3 "$PROJECT_ROOT/utils/metabase_to_md.py" "$@"

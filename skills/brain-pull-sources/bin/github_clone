@@ -1,0 +1,75 @@
+#!/bin/bash
+# Full-clone or update a GitHub repo into src/github/<owner>/<repo>/
+# Usage: github_clone <github_repo_url>
+#
+# If the repo already exists locally, pulls latest changes.
+# If not, does a full clone.
+#
+# Auth: uses local git/gh credential helper (no separate token needed).
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+OUTPUT_BASE="$PROJECT_ROOT/src/github"
+
+URL="$1"
+if [[ -z "$URL" ]]; then
+  echo "Usage: github_clone <github_repo_url>"
+  exit 1
+fi
+
+# Parse owner/repo from URL
+# Handles: https://github.com/owner/repo, https://github.com/owner/repo.git,
+#           https://github.com/owner/repo/tree/main/docs
+OWNER=$(echo "$URL" | sed -E 's|https?://github\.com/([^/]+)/.*|\1|')
+REPO=$(echo "$URL" | sed -E 's|https?://github\.com/[^/]+/([^/.]+).*|\1|')
+
+if [[ -z "$OWNER" || -z "$REPO" ]]; then
+  echo "ERROR: Could not parse GitHub URL: $URL"
+  echo "Expected format: https://github.com/<owner>/<repo>"
+  exit 1
+fi
+
+TARGET="$OUTPUT_BASE/$OWNER/$REPO"
+CLONE_URL="https://github.com/$OWNER/$REPO.git"
+
+if [[ -d "$TARGET/.git" ]]; then
+  # Repo exists — pull latest
+  echo "Updating $OWNER/$REPO..."
+  cd "$TARGET"
+
+  # If this was a shallow clone, unshallow it first
+  if [[ -f .git/shallow ]]; then
+    echo "  Converting shallow clone to full clone..."
+    git fetch --unshallow origin 2>/dev/null || true
+  fi
+
+  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+  if [[ -z "$DEFAULT_BRANCH" ]]; then
+    DEFAULT_BRANCH="main"
+  fi
+
+  if git fetch origin 2>/dev/null && git reset --hard "origin/$DEFAULT_BRANCH" 2>/dev/null; then
+    echo "✓ $OWNER/$REPO (updated)"
+  else
+    # Fetch failed — re-clone from scratch
+    echo "⚠ $OWNER/$REPO (fetch failed, re-cloning)"
+    cd "$PROJECT_ROOT"
+    rm -rf "$TARGET"
+    if git clone "$CLONE_URL" "$TARGET" 2>/dev/null; then
+      echo "✓ $OWNER/$REPO (re-cloned)"
+    else
+      echo "✗ $OWNER/$REPO (clone failed)"
+      exit 1
+    fi
+  fi
+else
+  # Fresh clone
+  mkdir -p "$(dirname "$TARGET")"
+  echo "Cloning $OWNER/$REPO..."
+  if git clone "$CLONE_URL" "$TARGET" 2>/dev/null; then
+    echo "✓ $OWNER/$REPO (cloned)"
+  else
+    echo "✗ $OWNER/$REPO (clone failed — may not exist or no access)"
+    exit 1
+  fi
+fi

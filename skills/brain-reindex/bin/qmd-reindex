@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# qmd-reindex — write qmd config and rebuild the full brain index
+# Usage: qmd-reindex
+#
+# Writes ~/.config/qmd/index.yml covering bin/, memory/, outputs/, src/
+# then runs `qmd update` + `qmd embed` to rebuild FTS + vector indexes.
+# First run downloads ~2GB of GGUF embedding models.
+
+BRAIN_CONFIG="${BRAIN_CONFIG:-${HOME}/.super/brain.config.yml}"
+
+# Read a top-level scalar from the YAML config (path/name/role etc.).
+# Minimal YAML — we only pull scalars here, so a grep is enough.
+yaml_scalar() {
+  local key="$1" file="$2" section="${3:-}"
+  if [ -n "$section" ]; then
+    awk -v sect="$section" -v key="$key" '
+      $0 ~ "^"sect":" { in_s=1; next }
+      in_s && /^[^[:space:]]/ { in_s=0 }
+      in_s && $0 ~ "^[[:space:]]+"key":" {
+        sub("^[[:space:]]+"key":[[:space:]]*", "")
+        gsub(/^["\x27]|["\x27]$/, "")
+        print; exit
+      }
+    ' "$file"
+  else
+    awk -v key="$key" '
+      $0 ~ "^"key":" {
+        sub("^"key":[[:space:]]*", "")
+        gsub(/^["\x27]|["\x27]$/, "")
+        print; exit
+      }
+    ' "$file"
+  fi
+}
+
+if [ -f "${BRAIN_CONFIG}" ]; then
+  CFG_BRAIN="$(yaml_scalar path "${BRAIN_CONFIG}" brain)"
+  CFG_ROLE="$(yaml_scalar role "${BRAIN_CONFIG}" organization)"
+  CFG_ORG_NAME="$(yaml_scalar name "${BRAIN_CONFIG}" organization)"
+fi
+BRAIN="${BRAIN:-${CFG_BRAIN:-${HOME}/code/brain}}"
+BRAIN="${BRAIN/#\~/${HOME}}"
+ROLE="${CFG_ROLE:-brain owner}"
+ORG_NAME="${CFG_ORG_NAME:-their org}"
+
+if ! command -v qmd &>/dev/null; then
+  echo "qmd not found — reinstall super (it installs qmd), or run: npm install -g @tobilu/qmd"
+  exit 1
+fi
+
+if [ ! -d "${BRAIN}" ]; then
+  echo "BRAIN directory not found: ${BRAIN}"
+  echo "Set BRAIN env var, or edit brain.path in ${BRAIN_CONFIG}"
+  exit 1
+fi
+
+# Ensure the 4 default brain dirs exist so qmd doesn't error on empty paths.
+for d in agents memory outputs src; do
+  [ -d "${BRAIN}/${d}" ] || mkdir -p "${BRAIN}/${d}"
+done
+
+mkdir -p "${HOME}/.config/qmd"
+cat > "${HOME}/.config/qmd/index.yml" << EOF
+globalContext: >
+  This is the personal brain of ${ROLE}.
+  Four top-level folders: agents/ (agent outputs), memory/ (curated knowledge — L1 navigation MOCs
+  and L2 domain knowledge), outputs/ (service docs, agent reports, project workspaces),
+  src/ (raw exports from ClickUp, Confluence, Google Drive, GitHub, Google Workspace, Linear,
+  Medium, Metabase, and others). If you see a [[WikiWord]], search for that term to get more context.
+
+collections:
+  agents:
+    path: ${BRAIN}/agents
+    pattern: "**/*.md"
+    contexts:
+      "": "Agent outputs — ad-hoc agents operating on the brain (SEO, press, inbox triage, WorkFlowy, X.com, etc.)"
+
+  memory:
+    path: ${BRAIN}/memory
+    pattern: "**/*.md"
+    contexts:
+      "L1/": "L1 navigation MOCs — high-level domain maps for teams, products, data, sources"
+      "L2/": "L2 curated knowledge — teams, technologies, cross-references, executive docs"
+
+  outputs:
+    path: ${BRAIN}/outputs
+    pattern: "**/*.{md,AGENT.MD}"
+    contexts:
+      "services/": "Per-service agent docs — stack, schema, messaging, auth, APIs"
+      "agents/": "Agent time-series reports — monthly decks, meeting prep, audits"
+      "projects/": "Project workspaces — ad-hoc investigations, analyses, research"
+
+  src:
+    path: ${BRAIN}/src
+    pattern: "**/*.md"
+    contexts:
+      "clickup/": "ClickUp docs — team docs, wikis"
+      "confluence/": "Confluence — intranet, wikis"
+      "gdrive/": "Google Drive — one-pagers, ExCo docs, investor updates, team updates"
+      "github/": "GitHub repos — source code docs, CLAUDE.md, AGENTS.md, READMEs"
+      "gws/": "Google Workspace — Meet transcripts and meeting digests"
+      "linear/": "Linear — project updates, issue tracking, team workflows"
+      "medium/": "Medium — blog posts"
+      "metabase/": "Metabase — dashboard and card index"
+
+EOF
+
+echo "✓ wrote ~/.config/qmd/index.yml"
+echo "Scanning files..."
+qmd update
+echo "Building embeddings..."
+qmd embed
+echo "✓ qmd index ready"
