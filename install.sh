@@ -3,6 +3,7 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/smnbss/super/main/install.sh | bash
 
 set -e
+set -o pipefail  # so `curl ... | tar` correctly fails when curl 404s
 
 REPO="smnbss/super"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.super}"
