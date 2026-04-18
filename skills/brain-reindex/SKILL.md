@@ -17,8 +17,8 @@ Rebuild the qmd hybrid search index over the 4 top-level brain folders: `agents/
 ## Prerequisites
 
 - `qmd` must be on PATH. Super installs it automatically via `npm install -g @tobilu/qmd` during `install.sh`. Reinstall super if qmd is missing.
-- Brain path is read from `$BRAIN_CONFIG` (default `~/.super/brain.config.yml`) → key `brain.path`. You can override per-run with the `BRAIN` env var.
-- `globalContext` in the generated qmd index uses `organization.name` + `organization.role` from the config.
+- The brain is the project root — the dir containing `.super/`. The script walks up from `$SUPER_PROJECT_DIR` (or cwd) to find it.
+- `<project>/.super/brain.config.yml` is read for `organization.name` + `organization.role` (used in qmd `globalContext`). If missing, sensible fallbacks are used. Run `/super-setup` to create it.
 
 ## What it does
 
@@ -34,10 +34,10 @@ First run downloads ~2GB of GGUF embedding models (one-time).
 ./bin/qmd-reindex
 ```
 
-Or with a non-default brain location:
+Run from anywhere inside your brain project — the script finds the root via the nearest `.super/`. Override with `SUPER_PROJECT_DIR` if needed:
 
 ```bash
-BRAIN="$HOME/code/some-other-brain" ./bin/qmd-reindex
+SUPER_PROJECT_DIR="$HOME/code/another-brain" ./bin/qmd-reindex
 ```
 
 ## Collections

@@ -13,7 +13,7 @@ clarifying questions, implement the change, run tests, commit, and mark done.
 
 ## Input
 
-The Linear org slug is read from `$BRAIN_CONFIG` (default `~/.super/brain.config.yml`) → `linear.org`. The user can provide a Linear project URL, e.g.:
+The Linear org slug is read from `$BRAIN_CONFIG` (default `<project>/.super/brain.config.yml`) → `linear.org`. The user can provide a Linear project URL, e.g.:
 ```
 https://linear.app/<org>/project/super-edc40903e247/issues
 ```

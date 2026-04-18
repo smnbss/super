@@ -20,7 +20,7 @@ LOOKAHEAD_DAYS: 5
 TODAY: (compute dynamically)
 ```
 
-Calendar-pattern → file-slug → Linear-team mapping originates in `$BRAIN_CONFIG` (default `~/.super/brain.config.yml`) → `teams[]`. `brain-rebuild-memory` projects that into `memory/L1/teams.md`, which this skill reads at runtime. To add/rename a team, edit the config and re-run `brain-rebuild-memory`.
+Calendar-pattern → file-slug → Linear-team mapping originates in `$BRAIN_CONFIG` (default `<project>/.super/brain.config.yml`) → `teams[]`. `brain-rebuild-memory` projects that into `memory/L1/teams.md`, which this skill reads at runtime. To add/rename a team, edit the config and re-run `brain-rebuild-memory`.
 
 ### Calendar-to-Linear team mapping
 

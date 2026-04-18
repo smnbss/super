@@ -1,17 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# qmd-reindex — write qmd config and rebuild the full brain index
+# qmd-reindex — write qmd config and rebuild the brain index for the current project
 # Usage: qmd-reindex
 #
-# Writes ~/.config/qmd/index.yml covering bin/, memory/, outputs/, src/
-# then runs `qmd update` + `qmd embed` to rebuild FTS + vector indexes.
+# The "brain" is the project root: the dir containing .super/. Found by walking up
+# from $SUPER_PROJECT_DIR (or cwd). Reads <project>/.super/brain.config.yml for
+# org/role values, writes ~/.config/qmd/index.yml covering agents/memory/outputs/src,
+# then runs `qmd update` + `qmd embed`.
 # First run downloads ~2GB of GGUF embedding models.
 
-BRAIN_CONFIG="${BRAIN_CONFIG:-${HOME}/.super/brain.config.yml}"
+# ─── Locate project root (the .super-bearing dir is the brain) ─────────────────
+find_super_project() {
+  local dir="${SUPER_PROJECT_DIR:-$(pwd)}"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -d "$dir/.super" ]]; then
+      echo "$dir"; return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
 
-# Read a top-level scalar from the YAML config (path/name/role etc.).
-# Minimal YAML — we only pull scalars here, so a grep is enough.
+if ! BRAIN="$(find_super_project)"; then
+  echo "No .super/ directory found walking up from $(pwd)."
+  echo "Run 'super install' inside your brain project first, then '/super-setup'."
+  exit 1
+fi
+
+BRAIN_CONFIG="${BRAIN_CONFIG:-${BRAIN}/.super/brain.config.yml}"
+
+# ─── Read scalars from the project-local config (org name + role) ──────────────
 yaml_scalar() {
   local key="$1" file="$2" section="${3:-}"
   if [ -n "$section" ]; then
@@ -24,24 +43,13 @@ yaml_scalar() {
         print; exit
       }
     ' "$file"
-  else
-    awk -v key="$key" '
-      $0 ~ "^"key":" {
-        sub("^"key":[[:space:]]*", "")
-        gsub(/^["\x27]|["\x27]$/, "")
-        print; exit
-      }
-    ' "$file"
   fi
 }
 
 if [ -f "${BRAIN_CONFIG}" ]; then
-  CFG_BRAIN="$(yaml_scalar path "${BRAIN_CONFIG}" brain)"
   CFG_ROLE="$(yaml_scalar role "${BRAIN_CONFIG}" organization)"
   CFG_ORG_NAME="$(yaml_scalar name "${BRAIN_CONFIG}" organization)"
 fi
-BRAIN="${BRAIN:-${CFG_BRAIN:-${HOME}/code/brain}}"
-BRAIN="${BRAIN/#\~/${HOME}}"
 ROLE="${CFG_ROLE:-brain owner}"
 ORG_NAME="${CFG_ORG_NAME:-their org}"
 
@@ -50,16 +58,12 @@ if ! command -v qmd &>/dev/null; then
   exit 1
 fi
 
-if [ ! -d "${BRAIN}" ]; then
-  echo "BRAIN directory not found: ${BRAIN}"
-  echo "Set BRAIN env var, or edit brain.path in ${BRAIN_CONFIG}"
-  exit 1
-fi
-
-# Ensure the 4 default brain dirs exist so qmd doesn't error on empty paths.
+# Ensure the 4 brain dirs exist so qmd doesn't error on empty paths.
 for d in agents memory outputs src; do
   [ -d "${BRAIN}/${d}" ] || mkdir -p "${BRAIN}/${d}"
 done
+
+echo "Indexing brain at: ${BRAIN}"
 
 mkdir -p "${HOME}/.config/qmd"
 cat > "${HOME}/.config/qmd/index.yml" << EOF
