@@ -13,11 +13,35 @@ set -euo pipefail
 # ─── Locate project root (the .super-bearing dir is the brain) ─────────────────
 # The `.super/` match must be a real dir. `<project>/.super/.super` is a debug
 # symlink to ~/.super and must not be treated as a project root.
+#
+# Guardrails against misrooting to $HOME:
+#   1. Stop the walk before reaching $HOME. $HOME/.super is the global super
+#      install, never a project root. Without this, running qmd-reindex from
+#      any directory that isn't under a brain would walk up past its parents,
+#      hit $HOME, and start creating agents/memory/outputs/src at the top of
+#      the user's home directory.
+#   2. Additionally skip any `.super/` whose realpath equals the realpath of
+#      $HOME/.super, catching the debug symlink `<project>/.super/.super` and
+#      any other alias of the global install.
 find_super_project() {
   local dir="${SUPER_PROJECT_DIR:-$(pwd)}"
-  while [[ "$dir" != "/" ]]; do
+  local home="${HOME:-}"
+  local global_super=""
+  if [[ -n "$home" && -d "$home/.super" ]]; then
+    # realpath may be unavailable on some systems; fall back to `cd && pwd -P`
+    global_super="$(cd "$home/.super" 2>/dev/null && pwd -P)" || global_super=""
+  fi
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ -n "$home" && "$dir" == "$home" ]]; then
+      return 1 # never treat $HOME as a project root
+    fi
     if [[ -d "$dir/.super" && ! -L "$dir/.super" ]]; then
-      echo "$dir"; return 0
+      local candidate_real="$(cd "$dir/.super" 2>/dev/null && pwd -P)" || candidate_real=""
+      if [[ -n "$candidate_real" && -n "$global_super" && "$candidate_real" == "$global_super" ]]; then
+        : # candidate resolves to the global install — skip
+      else
+        echo "$dir"; return 0
+      fi
     fi
     dir="$(dirname "$dir")"
   done
@@ -25,8 +49,15 @@ find_super_project() {
 }
 
 if ! BRAIN="$(find_super_project)"; then
-  echo "No .super/ directory found walking up from $(pwd)."
+  echo "No project .super/ directory found walking up from $(pwd)."
+  echo "(\$HOME/.super is the global install, not a project — it is intentionally ignored.)"
   echo "Run 'super install' inside your brain project first, then '/super-setup'."
+  exit 1
+fi
+
+if [[ -n "${HOME:-}" && "$BRAIN" == "$HOME" ]]; then
+  echo "Refusing to reindex into \$HOME ($HOME)."
+  echo "cd into your brain project and re-run qmd-reindex."
   exit 1
 fi
 

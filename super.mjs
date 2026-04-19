@@ -306,6 +306,20 @@ async function cmdInstall(args) {
   const installStart = Date.now();
   const target = args[0];
   const root = config.findRoot();
+
+  // Refuse to install into $HOME or into the global install dir itself.
+  // Without this, a fresh directory with no ancestor `.super/` used to walk
+  // all the way up and treat $HOME as the project root — scattering
+  // AGENTS.md, CLAUDE.md, .super/sessions/, .claude/settings.json etc.
+  // across the user's home directory.
+  const home = process.env.HOME;
+  if (home && root === home) {
+    die(`Refusing to install into $HOME (${home}).\n  cwd: ${process.cwd()}\n  Create or cd into a project directory and re-run 'super install'.`);
+  }
+  if (root === SUPER_HOME) {
+    die(`Refusing to install into the super install dir itself (${SUPER_HOME}).\n  cwd: ${process.cwd()}\n  Create or cd into a project directory and re-run 'super install'.`);
+  }
+
   const isFirstTime = !existsSync(join(root, '.super', 'super.config.yaml')) && !existsSync(join(root, 'super.config.yaml'));
 
   // Force update global ~/.super first
