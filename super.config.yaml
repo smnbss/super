@@ -94,11 +94,6 @@ skills:
     source: microsoft/playwright-cli/skills/playwright-cli
     description: Browser testing with Playwright
     enabled: true
-  brain:
-    source: smnbss/brain
-    description: Knowledge brain — sync, memory rebuild, service docs, daily routines
-    enabled: true
-    discover: skills/  # Auto-discover all skills from this subfolder
 # ─── Plugins ─────────────────────────────────────────────────────────────────
 # Plugins are GitHub repos that bundle multiple skills (and optionally commands).
 # Installing a plugin clones the repo and auto-discovers:
