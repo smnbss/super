@@ -17,7 +17,7 @@ Rebuild the qmd hybrid search index over the 4 top-level brain folders: `agents/
 ## Prerequisites
 
 - `qmd` must be on PATH. Super installs it automatically via `npm install -g @tobilu/qmd` during `install.sh`. Reinstall super if qmd is missing.
-- The brain is the project root — the dir containing `.super/`. The script walks up from `$SUPER_PROJECT_DIR` (or cwd) to find it.
+- The brain is the project root — the dir containing a real `.super/`. The script walks up from `$SUPER_PROJECT_DIR` (or cwd) to find it; the `<project>/.super/.super → ~/.super` debug symlink is skipped.
 - `<project>/.super/brain.config.yml` is read for `organization.name` + `organization.role` (used in qmd `globalContext`). If missing, sensible fallbacks are used. Run `/super-setup` to create it.
 
 ## What it does

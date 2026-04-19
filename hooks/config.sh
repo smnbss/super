@@ -6,10 +6,13 @@ SUPER_CONFIG_FILE="${SUPER_CONFIG_FILE:-super.config.yaml}"
 # Project root discovery (also defined in session.sh — duplicated here so
 # config.sh can be sourced standalone by hooks without session.sh)
 if ! declare -f _super_find_root >/dev/null 2>&1; then
+  # The `.super/` match must be a real directory, not a symlink — the
+  # `<project>/.super/.super` debug symlink (→ ~/.super) must not be mistaken
+  # for a project root marker.
   _super_find_root() {
     local dir="${SUPER_PROJECT_DIR:-$(pwd)}"
     while [[ "$dir" != "/" ]]; do
-      if [[ -d "$dir/.super" ]]; then echo "$dir"; return; fi
+      if [[ -d "$dir/.super" && ! -L "$dir/.super" ]]; then echo "$dir"; return; fi
       if [[ -d "$dir/.git" ]]; then echo "$dir"; return; fi
       dir="$(dirname "$dir")"
     done
@@ -17,26 +20,28 @@ if ! declare -f _super_find_root >/dev/null 2>&1; then
   }
 fi
 
-# Find config file (prefer .super/super.config.yaml, fall back to project root)
+# Find config file (prefer .super/super.config.yaml, fall back to project root).
+# Any `.super/` match must be a real dir, not the `<project>/.super/.super`
+# debug symlink — so we skip matches when `.super` itself is a symlink.
 _super_find_config() {
   local root; root="$(_super_find_root)"
-  
+
   # First priority: .super/super.config.yaml (new standard location)
-  if [[ -f "$root/.super/$SUPER_CONFIG_FILE" ]]; then
+  if [[ -f "$root/.super/$SUPER_CONFIG_FILE" && ! -L "$root/.super" ]]; then
     echo "$root/.super/$SUPER_CONFIG_FILE"
     return 0
   fi
-  
+
   # Second priority: project root super.config.yaml (legacy)
   if [[ -f "$root/$SUPER_CONFIG_FILE" ]]; then
     echo "$root/$SUPER_CONFIG_FILE"
     return 0
   fi
-  
+
   # Third priority: search up from cwd (legacy behavior)
   local dir="$(pwd)"
   while [[ "$dir" != "/" ]]; do
-    if [[ -f "$dir/.super/$SUPER_CONFIG_FILE" ]]; then
+    if [[ -f "$dir/.super/$SUPER_CONFIG_FILE" && ! -L "$dir/.super" ]]; then
       echo "$dir/.super/$SUPER_CONFIG_FILE"
       return 0
     fi

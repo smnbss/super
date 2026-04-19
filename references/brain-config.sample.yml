@@ -5,7 +5,8 @@
 # IS the brain — agents/, memory/, outputs/, src/ live alongside .super/.
 #
 # Skills read this via $BRAIN_CONFIG (default: <project-root>/.super/brain.config.yml,
-# discovered by walking up from cwd until a .super/ directory is found).
+# discovered by walking up from cwd until a real .super/ directory is found — the
+# <project>/.super/.super debug symlink to ~/.super is ignored).
 #
 # The defaults below are Simone Basso / WeRoad. Adapt to your own org.
 

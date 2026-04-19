@@ -11,10 +11,12 @@ set -euo pipefail
 # First run downloads ~2GB of GGUF embedding models.
 
 # ─── Locate project root (the .super-bearing dir is the brain) ─────────────────
+# The `.super/` match must be a real dir. `<project>/.super/.super` is a debug
+# symlink to ~/.super and must not be treated as a project root.
 find_super_project() {
   local dir="${SUPER_PROJECT_DIR:-$(pwd)}"
   while [[ "$dir" != "/" ]]; do
-    if [[ -d "$dir/.super" ]]; then
+    if [[ -d "$dir/.super" && ! -L "$dir/.super" ]]; then
       echo "$dir"; return 0
     fi
     dir="$(dirname "$dir")"

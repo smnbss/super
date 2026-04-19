@@ -9,14 +9,43 @@
 #       2026-04-11_160042.md
 #     super.log
 
+# ─── Debug-only symlinks (must always be ignored) ───────────────────────────
+# `super install` creates <project>/.CLI/.CLI → ~/.CLI for each CLI (claude,
+# codex, gemini, super) so developers can cd into the global home from inside
+# the project. These links are a pure developer convenience — nothing in super
+# or its skills should ever read, write, or recurse through them.
+_super_is_cli_debug_symlink() {
+  # usage: _super_is_cli_debug_symlink <path>
+  # returns 0 if path is one of <anywhere>/.{claude,codex,gemini,super}/.{same}
+  # AND is a symlink.
+  local path="$1"
+  local base parent
+  base="$(basename "$path")"
+  parent="$(basename "$(dirname "$path")")"
+  [[ "$base" == "$parent" ]] || return 1
+  case "$base" in
+    .claude|.codex|.gemini|.super) [[ -L "$path" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
 # ─── Project root discovery ──────────────────────────────────────────────────
 
 _super_find_root() {
-  local dir="${SUPER_PROJECT_DIR:-$(pwd)}"
+  # Prefer `.super` at any depth over `.git`, so nested git repos (e.g. vendored
+  # skills with their own .git) don't get mistaken for the project root.
+  # The match must be a REAL directory — the `.super/.super` debug symlink that
+  # points back to ~/.super must not be treated as a project root marker.
+  local start="${SUPER_PROJECT_DIR:-$(pwd)}"
+  local dir="$start"
   while [[ "$dir" != "/" ]]; do
-    if [[ -d "$dir/.super" ]]; then
+    if [[ -d "$dir/.super" && ! -L "$dir/.super" ]]; then
       echo "$dir"; return 0
     fi
+    dir="$(dirname "$dir")"
+  done
+  dir="$start"
+  while [[ "$dir" != "/" ]]; do
     if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then
       echo "$dir"; return 0
     fi

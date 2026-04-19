@@ -62,6 +62,19 @@ super doctor                # Health check
 super cleanup [days]        # Remove old sessions (default: 7)
 ```
 
+## Debug symlinks
+
+`super install` creates a convenience symlink inside each CLI's project dir:
+
+- `<project>/.claude/.claude → ~/.claude`
+- `<project>/.codex/.codex → ~/.codex`
+- `<project>/.gemini/.gemini → ~/.gemini`
+- `<project>/.super/.super → ~/.super`
+
+These are **debug-only**. They let a developer `cd` into the CLI's global home from inside a project. super and every skill shipped with super **must ignore them**: never walk up through them, never enumerate into them, never write config through them. The project's real state lives at `<project>/.CLI/…` (not `<project>/.CLI/.CLI/…`).
+
+Walk-up discovery (bash and JS) treats a symlinked `.CLI/` candidate as invalid — only a real `.CLI/` directory marks a project root.
+
 ## Configuration
 
 All configuration lives in `super.config.yaml` (project-level in `.super/` or global in `~/.super/`).
