@@ -33,7 +33,8 @@ The current directory (or an ancestor **strictly between cwd and `$HOME`**) must
 
 1. `<project>/.super/brain.config.yml` — the project-scoped config consumed by every `brain-*` skill (org, role, Linear slug, Medium handle, source toggles, teams)
 2. `<project>/{agents,memory,outputs,src}/` — scaffolded if missing
-3. `<project>/sources.md` — generated from `~/.super/skills/brain-pull-sources/references/sources.md` (only if the file doesn't already exist)
+3. `<project>/.env.local` — copied from `~/.super/references/env.example` (only if the file doesn't already exist). The brain pull/rebuild skills read this for tokens. The user fills in the secrets after setup.
+4. `<project>/sources.md` — generated from `~/.super/skills/brain-pull-sources/references/sources.md` (only if the file doesn't already exist)
 
 ## Flow
 
@@ -128,7 +129,20 @@ Ask: *"Generate a starter `sources.md` at `<project>/sources.md`?"* (Yes/No).
      - `<your-domain>` → ask for the Metabase hostname (skip if Metabase disabled)
   3. Write to `<project>/sources.md`
 
-### Step 9 — Recap + next steps
+### Step 9 — .env.local
+
+Ensure the brain project has a `<project>/.env.local` scaffold so the pull/rebuild skills can read tokens.
+
+- If `<project>/.env.local` already exists → note it and skip (write-once, never overwrite).
+- Otherwise, prefer a project-shipped template in this order and copy the first one that exists:
+  1. `<project>/.env.example` (e.g. a template committed to the brain repo)
+  2. `~/.super/references/env.example` (the super default)
+- After copying, tell the user: *".env.local created from <template path>. Fill in secrets before running /brain-pull-sources or /brain-rebuild-*."*
+- Never print secrets to the transcript. Do not ask the user for token values here — that belongs in their own editor.
+
+Suggest at the end: substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders copied from the template using the values already collected in Steps 2–5 where unambiguous, via targeted `Edit` calls on `<project>/.env.local`. Leave placeholders alone when in doubt.
+
+### Step 10 — Recap + next steps
 
 Print a concise summary:
 
@@ -136,16 +150,18 @@ Print a concise summary:
 - Config file: `<project>/.super/brain.config.yml` — N values changed
 - Dirs scaffolded: <list>
 - Sources file: `<project>/sources.md` — created / skipped / existing
+- Env file: `<project>/.env.local` — created / skipped / existing
 
 Then suggest:
 
 ```
 Next steps (run from inside the brain project):
-  1. Edit sources.md to add your actual source URLs and repos
-  2. /brain-pull-sources         → populate src/
-  3. /brain-rebuild-services     → generate service docs
-  4. /brain-rebuild-memory       → build L1/L2 navigation
-  5. /brain-reindex              → build the qmd hybrid search index
+  1. Fill in secrets in .env.local (LINEAR_TOKEN, CONFLUENCE_TOKEN, etc.)
+  2. Edit sources.md to add your actual source URLs and repos
+  3. /brain-pull-sources         → populate src/
+  4. /brain-rebuild-services     → generate service docs
+  5. /brain-rebuild-memory       → build L1/L2 navigation
+  6. /brain-reindex              → build the qmd hybrid search index
 ```
 
 ## Rules
