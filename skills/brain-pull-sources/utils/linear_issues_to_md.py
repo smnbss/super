@@ -3,19 +3,23 @@ from __future__ import annotations
 """
 Linear Issues -> Markdown exporter with incremental sync.
 
-Exports ALL issues for a Linear team, including triage and backlog issues
-that are not assigned to any project. This complements `linear_to_md.py`
+Exports ALL issues for a Linear team or project, including triage and backlog
+issues that are not assigned to any project. This complements `linear_to_md.py`
 which only exports project-bound issues.
 
 Usage:
     # Team issues (all states including triage)
     python linear_issues_to_md.py https://linear.app/<workspace>/team/<team>/...
 
+    # Project issues
+    python linear_issues_to_md.py https://linear.app/<workspace>/project/<project-slug>/issues
+
     python linear_issues_to_md.py --force   # re-export everything
     python linear_issues_to_md.py --list
 
 Output is saved to:
-    src/linear/<workspace>/<team>-issues/
+    src/linear/<workspace>/<team>-issues/       # for team exports
+    src/linear/<workspace>/<project-slug>-issues/  # for project exports
     ├── issues/
     │   ├── TEAM-123.md    # one file per issue
     │   ├── TEAM-124.md
@@ -92,33 +96,44 @@ def save_registry(entries: list[dict]):
         json.dump(entries, f, indent=2, ensure_ascii=False)
 
 
-def upsert_registry(url: str, workspace: str, team_key: str, team_name: str,
+def upsert_registry(url: str, workspace: str,
+                    team_key: Optional[str], team_name: Optional[str],
+                    project_slug: Optional[str], project_name: Optional[str],
                     output_path: str, stats: dict):
+    """Upsert registry entry for either team or project export."""
     entries = load_registry()
     now = datetime.now(timezone.utc).isoformat()
-    existing = next((e for e in entries if e.get("team_key") == team_key), None)
+
+    # Determine the key for matching existing entries
+    if team_key:
+        match_key = ("team_key", team_key)
+    else:
+        match_key = ("project_slug", project_slug)
+
+    existing = next((e for e in entries if e.get(match_key[0]) == match_key[1]), None)
+
+    entry_data = {
+        "url": url,
+        "workspace": workspace,
+        "output_path": output_path,
+        "last_exported": now,
+        "stats": stats,
+    }
+
+    if team_key:
+        entry_data["team_key"] = team_key
+        entry_data["team_name"] = team_name
+    else:
+        entry_data["project_slug"] = project_slug
+        entry_data["project_name"] = project_name
 
     if existing:
-        existing.update({
-            "url": url,
-            "team_name": team_name,
-            "output_path": output_path,
-            "last_exported": now,
-            "export_count": existing.get("export_count", 0) + 1,
-            "stats": stats,
-        })
+        entry_data["export_count"] = existing.get("export_count", 0) + 1
+        existing.update(entry_data)
     else:
-        entries.append({
-            "url": url,
-            "workspace": workspace,
-            "team_key": team_key,
-            "team_name": team_name,
-            "output_path": output_path,
-            "first_exported": now,
-            "last_exported": now,
-            "export_count": 1,
-            "stats": stats,
-        })
+        entry_data["export_count"] = 1
+        entry_data["first_exported"] = now
+        entries.append(entry_data)
 
     save_registry(entries)
 
@@ -126,28 +141,45 @@ def upsert_registry(url: str, workspace: str, team_key: str, team_name: str,
 def print_registry():
     entries = load_registry()
     if not entries:
-        print("No Linear team issues exported yet.")
+        print("No Linear issues exported yet.")
         return
-    print(f"{'Team':<30} {'Issues':>8}  {'Exports':>7}  {'Last Exported':<20}  URL")
-    print("-" * 110)
+    print(f"{'Name':<30} {'Type':<10} {'Issues':>8}  {'Exports':>7}  {'Last Exported':<20}  URL")
+    print("-" * 120)
     for e in sorted(entries, key=lambda x: x.get("last_exported", ""), reverse=True):
         last = e.get("last_exported", "")[:19].replace("T", " ")
         n = e.get("stats", {}).get("total", 0)
-        print(f"{e.get('team_name','')[:30]:<30} {n:>8}  {e.get('export_count',1):>7}  {last:<20}  {e['url']}")
+        if e.get("team_key"):
+            name = e.get("team_name", e["team_key"])[:30]
+            entry_type = "team"
+        else:
+            name = e.get("project_name", e.get("project_slug", "Unknown"))[:30]
+            entry_type = "project"
+        print(f"{name:<30} {entry_type:<10} {n:>8}  {e.get('export_count',1):>7}  {last:<20}  {e['url']}")
 
 
 # -- URL parsing ---------------------------------------------------------------
 
-TEAM_URL_PATTERN = re.compile(r"https?://linear\.app/([^/]+)/team/([^/]+)")
+TEAM_URL_PATTERN    = re.compile(r"https?://linear\.app/([^/]+)/team/([^/]+)")
+PROJECT_URL_PATTERN = re.compile(r"https?://linear\.app/([^/]+)/project/([^/]+)")
 
 
-def parse_linear_url(url: str) -> tuple[str, str]:
-    """Return (workspace, team_key) from a Linear team URL."""
+def parse_linear_url(url: str) -> tuple[str, Optional[str], Optional[str]]:
+    """Return (workspace, team_key, project_slug) from a Linear URL.
+
+    Returns:
+        - Team URL: (workspace, team_key, None)
+        - Project URL: (workspace, None, project_slug)
+    """
     m = TEAM_URL_PATTERN.search(url)
     if m:
-        return m.group(1), m.group(2)
-    print(f"ERROR: Could not parse Linear team URL: {url}", file=sys.stderr)
-    print("Expected: https://linear.app/<workspace>/team/<team>/...", file=sys.stderr)
+        return m.group(1), m.group(2), None
+    m = PROJECT_URL_PATTERN.search(url)
+    if m:
+        return m.group(1), None, m.group(2)
+    print(f"ERROR: Could not parse Linear URL: {url}", file=sys.stderr)
+    print("Expected:", file=sys.stderr)
+    print("  Team:    https://linear.app/<workspace>/team/<team>/...", file=sys.stderr)
+    print("  Project: https://linear.app/<workspace>/project/<project>/issues", file=sys.stderr)
     sys.exit(1)
 
 
@@ -197,9 +229,47 @@ query GetTeam($key: String!) {
 }
 """
 
+PROJECT_QUERY = """
+query GetProject($slug: String!) {
+  projects(filter: { slugId: { eq: $slug } }) {
+    nodes { id name slugId url }
+  }
+}
+"""
+
 TEAM_ISSUES_QUERY = """
 query GetTeamIssues($teamId: String!, $after: String) {
   team(id: $teamId) {
+    issues(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        identifier
+        title
+        priority
+        estimate
+        dueDate
+        createdAt
+        updatedAt
+        url
+        triagedAt
+        snoozedUntilAt
+        state      { name type }
+        assignee   { name }
+        labels     { nodes { name } }
+        parent     { identifier title }
+        project    { name url }
+        projectMilestone { id name }
+        cycle      { name number }
+      }
+    }
+  }
+}
+"""
+
+PROJECT_ISSUES_QUERY = """
+query GetProjectIssues($projectId: String!, $after: String) {
+  project(id: $projectId) {
     issues(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -263,6 +333,16 @@ def fetch_team(team_key: str, token: str) -> dict:
     return nodes[0]
 
 
+def fetch_project(project_slug: str, token: str) -> dict:
+    """Fetch a project by its slug ID (e.g., 'release-notes-1bc4d3fcb947')."""
+    data = gql(PROJECT_QUERY, {"slug": project_slug}, token)
+    nodes = data.get("projects", {}).get("nodes", [])
+    if not nodes:
+        print(f"ERROR: Project with slug '{project_slug}' not found.", file=sys.stderr)
+        sys.exit(1)
+    return nodes[0]
+
+
 def fetch_all_team_issues(team_id: str, token: str) -> list[dict]:
     """Fetch every issue for a team, paginated."""
     issues = []
@@ -272,6 +352,26 @@ def fetch_all_team_issues(team_id: str, token: str) -> list[dict]:
         page_num += 1
         data = gql(TEAM_ISSUES_QUERY, {"teamId": team_id, "after": cursor}, token)
         page = data.get("team", {}).get("issues", {})
+        batch = page.get("nodes", [])
+        issues.extend(batch)
+        info = page.get("pageInfo", {})
+        if batch:
+            print(f"  Page {page_num}: fetched {len(batch)} issues (total: {len(issues)})", flush=True)
+        if not info.get("hasNextPage"):
+            break
+        cursor = info["endCursor"]
+    return issues
+
+
+def fetch_all_project_issues(project_id: str, token: str) -> list[dict]:
+    """Fetch every issue for a project, paginated."""
+    issues = []
+    cursor = None
+    page_num = 0
+    while True:
+        page_num += 1
+        data = gql(PROJECT_ISSUES_QUERY, {"projectId": project_id, "after": cursor}, token)
+        page = data.get("project", {}).get("issues", {})
         batch = page.get("nodes", [])
         issues.extend(batch)
         info = page.get("pageInfo", {})
@@ -384,12 +484,16 @@ def render_issue_file(issue: dict) -> str:
     return "\n".join(lines)
 
 
-def render_index_file(team_name: str, team_key: str, issues: list[dict],
-                      export_time: str, issues_dir: str) -> str:
+def render_index_file(name: str, key: str, issues: list[dict],
+                      export_time: str, issues_dir: str,
+                      is_project: bool = False) -> str:
     """Render an index file linking to all issue files."""
     lines = []
 
-    lines.append(f"# {team_name} ({team_key}) — All Issues")
+    if is_project:
+        lines.append(f"# {name} — Project Issues")
+    else:
+        lines.append(f"# {name} ({key}) — Team Issues")
     lines.append("")
     lines.append(f"*Exported: {export_time}*")
     lines.append("")
@@ -502,10 +606,11 @@ def write_issue_files(issues: list[dict], out_dir: str, issues_subdir: str = "is
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Export ALL Linear team issues (including triage) to Markdown."
+        description="Export ALL Linear issues (team or project) to Markdown."
     )
     parser.add_argument("url", nargs="?",
-                        help="Linear team URL — e.g. https://linear.app/org/team/MOL/...")
+                        help="Linear URL — team: https://linear.app/org/team/MOL/... "
+                             "or project: https://linear.app/org/project/SLUG/issues")
     parser.add_argument("--token", default=os.environ.get("LINEAR_TOKEN", ""),
                         help="Linear API key (or set LINEAR_TOKEN env var)")
     parser.add_argument("--list", action="store_true",
@@ -527,22 +632,48 @@ def main():
         print("Get your key from: https://linear.app/settings/api", file=sys.stderr)
         sys.exit(1)
 
-    workspace, team_key = parse_linear_url(args.url)
+    workspace, team_key, project_slug = parse_linear_url(args.url)
 
-    print(f"Fetching team '{team_key}'...")
-    team      = fetch_team(team_key, token)
-    team_name = team["name"]
-    team_id   = team["id"]
-    print(f"  Team: {team_name} ({team_key})")
+    if team_key:
+        # Team mode
+        print(f"Fetching team '{team_key}'...")
+        team = fetch_team(team_key, token)
+        team_name = team["name"]
+        team_id = team["id"]
+        print(f"  Team: {team_name} ({team_key})")
 
-    out_dir = os.path.join(OUTPUT_BASE, workspace, f"{team_key}-issues")
-    os.makedirs(out_dir, exist_ok=True)
-    rel_path = os.path.relpath(out_dir, PROJECT_ROOT)
-    print(f"Output folder: {rel_path}")
+        out_dir = os.path.join(OUTPUT_BASE, workspace, f"{team_key}-issues")
+        os.makedirs(out_dir, exist_ok=True)
+        rel_path = os.path.relpath(out_dir, PROJECT_ROOT)
+        print(f"Output folder: {rel_path}")
 
-    print("Fetching all team issues (including triage)...")
-    issues = fetch_all_team_issues(team_id, token)
-    print(f"  Total: {len(issues)} issues")
+        print("Fetching all team issues (including triage)...")
+        issues = fetch_all_team_issues(team_id, token)
+        print(f"  Total: {len(issues)} issues")
+
+        is_project_mode = False
+        name, key = team_name, team_key
+    else:
+        # Project mode
+        print(f"Fetching project '{project_slug}'...")
+        project = fetch_project(project_slug, token)
+        project_name = project["name"]
+        project_id = project["id"]
+        print(f"  Project: {project_name}")
+
+        # Create a safe directory name from project slug
+        safe_slug = sanitize_filename(project_slug)
+        out_dir = os.path.join(OUTPUT_BASE, workspace, f"{safe_slug}-issues")
+        os.makedirs(out_dir, exist_ok=True)
+        rel_path = os.path.relpath(out_dir, PROJECT_ROOT)
+        print(f"Output folder: {rel_path}")
+
+        print("Fetching all project issues...")
+        issues = fetch_all_project_issues(project_id, token)
+        print(f"  Total: {len(issues)} issues")
+
+        is_project_mode = True
+        name, key = project_name, project_slug
 
     # Fetch full descriptions for each issue (bulk queries truncate descriptions)
     issues = enrich_issues_with_full_descriptions(issues, token)
@@ -556,7 +687,8 @@ def main():
     print(f"  {files_written} issue files written to {rel_path}/issues/")
 
     # Write index file
-    index_content = render_index_file(team_name, team_key, issues, export_time, "issues")
+    index_content = render_index_file(name, key, issues, export_time, "issues",
+                                      is_project=is_project_mode)
     index_path = os.path.join(out_dir, "index.md")
     with open(index_path, "w", encoding="utf-8") as f:
         f.write(index_content)
@@ -573,14 +705,28 @@ def main():
         "by_state": state_counts,
     }
 
-    upsert_registry(
-        url=args.url,
-        workspace=workspace,
-        team_key=team_key,
-        team_name=team_name,
-        output_path=rel_path,
-        stats=stats,
-    )
+    if is_project_mode:
+        upsert_registry(
+            url=args.url,
+            workspace=workspace,
+            team_key=None,
+            team_name=None,
+            project_slug=project_slug,
+            project_name=project_name,
+            output_path=rel_path,
+            stats=stats,
+        )
+    else:
+        upsert_registry(
+            url=args.url,
+            workspace=workspace,
+            team_key=team_key,
+            team_name=team_name,
+            project_slug=None,
+            project_name=None,
+            output_path=rel_path,
+            stats=stats,
+        )
 
     print(f"\nDone! {len(issues)} issues exported to {rel_path}/")
     print(f"  - {files_written} individual files in issues/")

@@ -1,6 +1,12 @@
 #!/bin/bash
-# Linear team issues (all, including triage) to Markdown exporter wrapper
-# Usage: linear_issues_to_md <linear_team_url>
+# Linear issues (all, including triage) to Markdown exporter wrapper
+# Usage:
+#   linear_issues_to_md <linear_team_url>
+#   linear_issues_to_md <linear_project_url>
+#
+# Examples:
+#   linear_issues_to_md https://linear.app/weroad/team/MOL/all
+#   linear_issues_to_md https://linear.app/weroad/project/release-notes-1bc4d3fcb947/issues
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
