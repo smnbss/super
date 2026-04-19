@@ -475,6 +475,19 @@ async function cmdConfigure(args) {
 // LAUNCH / RESUME / SWITCH
 // ═══════════════════════════════════════════════════════════════════════════════
 
+function extractModelFromPassthrough(passthrough) {
+  const modelIdx = passthrough.indexOf('--model');
+  if (modelIdx !== -1 && passthrough[modelIdx + 1]) {
+    return passthrough[modelIdx + 1];
+  }
+  // Also check for shorthand -m
+  const shortIdx = passthrough.indexOf('-m');
+  if (shortIdx !== -1 && passthrough[shortIdx + 1]) {
+    return passthrough[shortIdx + 1];
+  }
+  return '';
+}
+
 function cmdLaunch(cli, args = []) {
   if (!cli) { cmdMenu(); return; }
   cli = cli.toLowerCase();
@@ -494,6 +507,9 @@ function cmdLaunch(cli, args = []) {
     } catch (e) { die(e.message); }
   }
 
+  // Extract model from passthrough args
+  const model = extractModelFromPassthrough(passthrough);
+
   // Cleanup old sessions
   if (config.configEnabled('session.cleanupOnStart')) {
     const maxAge = config.configGet('session.maxAgeDays') || 7;
@@ -506,9 +522,9 @@ function cmdLaunch(cli, args = []) {
     sf = session.sessionResume(resumeFile);
   } else if (doResume) {
     // Would need async for fzf picker — for simplicity, create new
-    sf = session.sessionNew(title || 'untitled');
+    sf = session.sessionNew(title || 'untitled', cli, provider || '', model);
   } else {
-    sf = session.sessionNew(title || 'untitled');
+    sf = session.sessionNew(title || 'untitled', cli, provider || '', model);
   }
 
   const size = statSync(sf).size;
@@ -578,9 +594,116 @@ async function cmdResume(input) {
     if (picked === 'QUIT') { ui.info('Cancelled.'); return; }
     if (picked === 'NEW' || !picked) { await cmdMenu(); return; }
 
-    const cli = await fzfPickCli();
-    if (!cli) { ui.info('Cancelled.'); return; }
-    cmdLaunch(cli, ['--resume', picked]);
+    // Read session metadata for recovery options
+    const sessionContent = readFileSync(picked, 'utf8');
+    const originalCliMatch = sessionContent.match(/^\*\*CLI:\*\* (.+)$/m);
+    const originalModelMatch = sessionContent.match(/^\*\*Model:\*\* (.+)$/m);
+    const originalProviderMatch = sessionContent.match(/^\*\*Provider:\*\* (.+)$/m);
+
+    const originalCli = originalCliMatch?.[1] || 'claude';
+    const originalModel = originalModelMatch?.[1] || '';
+    const originalProvider = originalProviderMatch?.[1] || '';
+
+    // Build recovery options
+    const modelInfo = originalModel ? ` [${originalModel}]` : '';
+    const cliIcon = { claude: '🟠', gemini: '🔵', codex: '🟢' }[originalCli] || '⚪';
+
+    const options = [
+      `↩️  Resume with same settings (${cliIcon} ${originalCli}${modelInfo})`,
+      '🔀 Switch CLI only',
+      '⚙️  Switch model only',
+      '🔀⚙️  Switch both CLI and model',
+      '❌ Cancel'
+    ];
+
+    const choice = await interactive.selectSingle('Resume session — which settings?', options, 0);
+    if (choice === null || choice === 4) { ui.info('Cancelled.'); return; }
+
+    let launchCli = originalCli;
+    let launchArgs = ['--resume', picked];
+
+    if (choice === 0) {
+      // Same settings — use original CLI, model, provider
+      launchCli = originalCli;
+      if (originalProvider) launchArgs.push('--provider', originalProvider);
+      if (originalModel) launchArgs.push('--model', originalModel);
+    } else if (choice === 1) {
+      // Switch CLI only — pick new CLI, keep model/provider
+      const newCli = await fzfPickCli();
+      if (!newCli) { ui.info('Cancelled.'); return; }
+      launchCli = newCli;
+      if (originalProvider) launchArgs.push('--provider', originalProvider);
+      if (originalModel) launchArgs.push('--model', originalModel);
+    } else if (choice === 2) {
+      // Switch model only — keep CLI, pick new model
+      if (originalCli === 'claude') {
+        const modelOptions = [
+          '🟠 Opus (default)',
+          '⚡ Sonnet',
+          '🪶 Haiku',
+          '🌐 Ollama provider →',
+        ];
+        const modelChoice = await interactive.selectSingle('Select model:', modelOptions, 0);
+        if (modelChoice === null) { ui.info('Cancelled.'); return; }
+
+        switch (modelChoice) {
+          case 0: break; // default
+          case 1: launchArgs.push('--model', 'sonnet'); break;
+          case 2: launchArgs.push('--model', 'haiku'); break;
+          case 3: {
+            const ollamaOptions = [
+              'Kimi K2.5 (kimi-k2.5:cloud)',
+              'MiniMax M2.5 (minimax-m2.5:cloud)',
+              'GLM 5 (glm-5:cloud)',
+              'Gemma 4 31B (gemma4:31b-cloud)',
+            ];
+            const ollamaChoice = await interactive.selectSingle('Ollama model?', ollamaOptions, 0);
+            if (ollamaChoice === null) { ui.info('Cancelled.'); return; }
+            const ollamaModels = ['kimi-k2.5:cloud', 'minimax-m2.5:cloud', 'glm-5:cloud', 'gemma4:31b-cloud'];
+            launchArgs.push('--provider', 'ollama', '--model', ollamaModels[ollamaChoice]);
+            break;
+          }
+        }
+      }
+    } else if (choice === 3) {
+      // Switch both CLI and model
+      const newCli = await fzfPickCli();
+      if (!newCli) { ui.info('Cancelled.'); return; }
+      launchCli = newCli;
+
+      // Prompt for model if Claude
+      if (newCli === 'claude') {
+        const modelOptions = [
+          '🟠 Opus (default)',
+          '⚡ Sonnet',
+          '🪶 Haiku',
+          '🌐 Ollama provider →',
+        ];
+        const modelChoice = await interactive.selectSingle('Select model:', modelOptions, 0);
+        if (modelChoice === null) { ui.info('Cancelled.'); return; }
+
+        switch (modelChoice) {
+          case 0: break; // default
+          case 1: launchArgs.push('--model', 'sonnet'); break;
+          case 2: launchArgs.push('--model', 'haiku'); break;
+          case 3: {
+            const ollamaOptions = [
+              'Kimi K2.5 (kimi-k2.5:cloud)',
+              'MiniMax M2.5 (minimax-m2.5:cloud)',
+              'GLM 5 (glm-5:cloud)',
+              'Gemma 4 31B (gemma4:31b-cloud)',
+            ];
+            const ollamaChoice = await interactive.selectSingle('Ollama model?', ollamaOptions, 0);
+            if (ollamaChoice === null) { ui.info('Cancelled.'); return; }
+            const ollamaModels = ['kimi-k2.5:cloud', 'minimax-m2.5:cloud', 'glm-5:cloud', 'gemma4:31b-cloud'];
+            launchArgs.push('--provider', 'ollama', '--model', ollamaModels[ollamaChoice]);
+            break;
+          }
+        }
+      }
+    }
+
+    cmdLaunch(launchCli, launchArgs);
   }
 }
 
@@ -594,7 +717,9 @@ function cmdSessions() {
   ui.section('Sessions');
   sessions.forEach((s, i) => {
     const marker = s.isActive ? ` ${ui.colors.success(ui.icons.active)}` : '';
-    ui.print(`  ${ui.colors.bold(String(i + 1).padStart(2))}  ${s.started.padEnd(20)}  ${String(s.turns).padStart(2)} turns  ${s.title.padEnd(55)}${marker}`);
+    const cliIcon = { claude: '🟠', gemini: '🔵', codex: '🟢' }[s.cli] || '⚪';
+    const modelInfo = s.model ? ` [${s.model}]` : '';
+    ui.print(`  ${ui.colors.bold(String(i + 1).padStart(2))}  ${cliIcon}  ${s.started.padEnd(20)}  ${String(s.turns).padStart(2)} turns  ${s.title.padEnd(40)}${modelInfo}${marker}`);
   });
   ui.spacer();
 }

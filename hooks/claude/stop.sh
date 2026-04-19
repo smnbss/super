@@ -54,4 +54,8 @@ fi
 
 session_append_turn "Claude Code" "session_end" ""
 
+# Clear terminal title on session end
+printf '\033]0;\007'
+printf '\033]2;\007'
+
 exit 0
