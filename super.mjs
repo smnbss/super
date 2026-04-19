@@ -310,8 +310,7 @@ async function cmdInstall(args) {
   // Refuse to install into $HOME or into the global install dir itself.
   // Without this, a fresh directory with no ancestor `.super/` used to walk
   // all the way up and treat $HOME as the project root — scattering
-  // AGENTS.md, CLAUDE.md, .super/sessions/, .claude/settings.json etc.
-  // across the user's home directory.
+  // .super/sessions/, .claude/settings.json etc. across $HOME.
   const home = process.env.HOME;
   if (home && root === home) {
     die(`Refusing to install into $HOME (${home}).\n  cwd: ${process.cwd()}\n  Create or cd into a project directory and re-run 'super install'.`);
@@ -334,93 +333,71 @@ async function cmdInstall(args) {
   }
   ui.spacer();
 
-  let selectedClis = null;
+  // Write the project config template so the catalog has something to read.
+  if (isFirstTime) { installConfigTemplate(); ui.spacer(); }
+  config.invalidateCache();
 
-  if (!target || target === '--all') {
-    // Interactive mode (or forced all)
-    if (isFirstTime) { installConfigTemplate(); ui.spacer(); }
-
-    // Install system deps & CLIs first so they're available for hook setup
-    config.invalidateCache();
-    let cliResults = { installed: [], failed: [], skipped: [] };
-    if (config.findConfig()) {
-      ui.brand('Installing system prerequisites...');
-      ui.spacer();
-      catalog.installSystem();
-      ui.spacer();
-      ui.brand('Installing enabled CLIs...');
-      ui.spacer();
-      cliResults = catalog.installClis();
-      ui.spacer();
-
-      // Summary report
-      ui.section('Installation Summary');
-      if (cliResults.installed.length > 0) {
-        ui.success(`  ✅ Installed: ${cliResults.installed.join(', ')}`);
-      }
-      if (cliResults.skipped.length > 0) {
-        ui.muted(`  ⏭️  Already present: ${cliResults.skipped.join(', ')}`);
-      }
-      if (cliResults.failed.length > 0) {
-        ui.error(`  ❌ Failed: ${cliResults.failed.map(f => f.name).join(', ')}`);
-        ui.spacer();
-        ui.warn('Failed installations:');
-        for (const fail of cliResults.failed) {
-          ui.muted(`    • ${fail.name}: ${fail.reason}`);
-        }
-        ui.spacer();
-        ui.info('To retry manually:');
-        const config = catalog.catalogClis().filter(c => cliResults.failed.some(f => f.name === c.name));
-        for (const cli of config) {
-          if (cli.install) {
-            ui.muted(`    ${cli.name}: ${cli.install}`);
-          }
-        }
-      }
-      ui.spacer();
-    }
-
-    // Pick CLIs (now that they've been installed)
-    const clis = catalog.installedClis();
-    if (target === '--all' || clis.length === 0) {
-      ui.brand('Installing hooks for all available CLIs');
-      ui.spacer();
-      installHooks('all');
-      selectedClis = clis;
-    } else {
-      const options = clis.map(c => `${CLI[c].icon} ${CLI[c].label}`);
-      const indices = await interactive.selectMulti('Select CLIs to configure:', options);
-      if (indices && indices.length > 0) {
-        selectedClis = indices.map(idx => clis[idx]);
-        for (const cli of selectedClis) installHooks(cli);
-      } else {
-        ui.warn('No CLIs selected — installing all available hooks.');
-        installHooks('all');
-        selectedClis = clis;
-      }
-    }
-
-    // Install skills, plugins, MCPs
-    config.invalidateCache();
-    if (config.findConfig()) {
-      ui.spacer();
-      if (await interactive.confirm('Install enabled skills, plugins & MCPs?', true)) {
-        catalog.installEnabled(selectedClis, { skipPrereqs: true });
-      }
-    }
-  } else {
-    // Non-interactive
-    ui.brand(`Installing hooks (target: ${target})`);
+  // System prereqs + CLI binaries come from the catalog, not super-setup.
+  let cliResults = { installed: [], failed: [], skipped: [] };
+  if (config.findConfig()) {
+    ui.brand('Installing system prerequisites...');
     ui.spacer();
-    installHooks(target);
-    if (target !== 'all') selectedClis = [target];
-    if (isFirstTime) { ui.spacer(); installConfigTemplate(); }
-    config.invalidateCache();
-    if (config.findConfig()) { ui.spacer(); catalog.installEnabled(selectedClis); }
+    catalog.installSystem();
+    ui.spacer();
+    ui.brand('Installing enabled CLIs...');
+    ui.spacer();
+    cliResults = catalog.installClis();
+    ui.spacer();
+
+    ui.section('Installation Summary');
+    if (cliResults.installed.length > 0) {
+      ui.success(`  ✅ Installed: ${cliResults.installed.join(', ')}`);
+    }
+    if (cliResults.skipped.length > 0) {
+      ui.muted(`  ⏭️  Already present: ${cliResults.skipped.join(', ')}`);
+    }
+    if (cliResults.failed.length > 0) {
+      ui.error(`  ❌ Failed: ${cliResults.failed.map(f => f.name).join(', ')}`);
+      ui.spacer();
+      ui.warn('Failed installations:');
+      for (const fail of cliResults.failed) ui.muted(`    • ${fail.name}: ${fail.reason}`);
+      ui.spacer();
+      ui.info('To retry manually:');
+      const cfg = catalog.catalogClis().filter(c => cliResults.failed.some(f => f.name === c.name));
+      for (const cli of cfg) if (cli.install) ui.muted(`    ${cli.name}: ${cli.install}`);
+    }
+    ui.spacer();
   }
 
-  // Ensure SUPER_HOME is on PATH in shell profile (idempotent)
-  // Linux: use .profile (loaded by login shells without the interactive guard that .bashrc has)
+  // Pick CLIs and install hooks.
+  let selectedClis = null;
+  const clis = catalog.installedClis();
+  if (!target || target === '--all' || clis.length === 0) {
+    ui.brand('Installing hooks for all available CLIs');
+    ui.spacer();
+    installHooks('all');
+    selectedClis = clis;
+  } else if (target && target !== '--all' && clis.length > 0) {
+    const options = clis.map(c => `${CLI[c].icon} ${CLI[c].label}`);
+    const indices = await interactive.selectMulti('Select CLIs to configure:', options);
+    if (indices && indices.length > 0) {
+      selectedClis = indices.map(idx => clis[idx]);
+      for (const cli of selectedClis) installHooks(cli);
+    } else {
+      ui.warn('No CLIs selected — installing all available hooks.');
+      installHooks('all');
+      selectedClis = clis;
+    }
+  }
+
+  // Core phase: bootstrap + built-in skills shipped in $SUPER_HOME/skills,
+  // CLI home symlinks, and skill-dir sync. Never pulls external skills,
+  // plugins, or MCPs — those live in `super configure`.
+  if (config.findConfig()) {
+    catalog.installPhaseInstall(selectedClis);
+  }
+
+  // Ensure SUPER_HOME is on PATH in shell profile (idempotent).
   const profile = process.platform === 'darwin'
     ? join(process.env.HOME, '.zshrc')
     : join(process.env.HOME, '.profile');
@@ -434,27 +411,53 @@ async function cmdInstall(args) {
     }
   } catch {}
 
-  // Finish
   mkdirSync(config.sessionsDir(), { recursive: true });
-  setupContextFiles();
   ui.spacer();
   ui.success(`Sessions folder ready: ${config.sessionsDir()}`);
-  ui.muted(`Run ${ui.colors.bold('super launch <cli>')} to start your first session`);
-  ui.spacer();
   ui.success(`Total install time: ${ui.elapsed(installStart)}`);
 
-  const sessions = session.sessionList();
-  if (sessions.length === 0) {
-    ui.spacer();
-    ui.box(
-      'What super does:', '',
-      '1. Start: super claude',
-      '2. Work — super logs silently',
-      '3. Switch: super switch gemini',
-      '4. Continue seamlessly', '',
-      'Your conversation follows you.',
-    );
+  ui.spacer();
+  ui.box(
+    'Next steps', '',
+    '1. Edit .env.local and fill in credentials',
+    '   (only the sources you actually use need values)', '',
+    '2. Launch a CLI: super launch <claude|codex|gemini>', '',
+    '3. Inside the CLI, run /super-setup to configure the brain',
+    '   (writes brain.config.yml, then installs external skills,',
+    '   plugins, MCPs, and context files via `super configure`)',
+  );
+}
+
+async function cmdConfigure(args) {
+  const start = Date.now();
+  const root = config.findRoot();
+  const home = process.env.HOME;
+  if (home && root === home) {
+    die(`Refusing to configure in $HOME (${home}).\n  cwd: ${process.cwd()}\n  Run 'super install' from inside a project first.`);
   }
+  if (root === SUPER_HOME) {
+    die(`Refusing to configure the super install dir itself (${SUPER_HOME}).`);
+  }
+
+  if (!config.findConfig()) {
+    die("No super.config.yaml found — run 'super install' first.");
+  }
+
+  // Scope to installed CLIs unless the caller narrows it.
+  const installed = catalog.installedClis();
+  let selectedClis = installed;
+  const target = args[0];
+  if (target && target !== '--all') {
+    if (!CLI[target]) die(`Unknown CLI: ${target}. Use: all|claude|gemini|codex`);
+    if (!installed.includes(target)) die(`${CLI[target].label} is not installed — run 'super install' first.`);
+    selectedClis = [target];
+  }
+
+  catalog.installPhaseConfigure(selectedClis);
+  setupContextFiles();
+  ui.spacer();
+  ui.success(`Configure complete (${ui.elapsed(start)})`);
+  ui.muted(`Run ${ui.colors.bold('super launch <cli>')} to start a session`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -758,7 +761,8 @@ USAGE
   super [command] [options]
 
 COMMANDS
-  install [target]     Install hooks (all|claude|gemini|codex)
+  install [target]     Install super, hooks, CLIs, and built-in skills (all|claude|gemini|codex)
+  configure [target]   Install external skills, plugins & MCPs + context files (called by /super-setup)
   claude|gemini|codex  Launch CLI with session tracking
   resume [session]     Resume a previous session
   switch <cli>         Continue session in different CLI
@@ -860,6 +864,7 @@ async function main() {
     case '!': await cmdQuickNew(); break;
     case '?': await cmdQuickSearch(); break;
     case 'install': case 'i': await cmdInstall(rest); break;
+    case 'configure': case 'setup': await cmdConfigure(rest); break;
     case 'launch': case 'l': case 'run': cmdLaunch(rest[0], rest.slice(1)); break;
     case 'resume': case 'r': await cmdResume(rest[0]); break;
     case 'sessions': case 'ls': case 'list': cmdSessions(); break;

@@ -142,7 +142,29 @@ Ensure the brain project has a `<project>/.env.local` scaffold so the pull/rebui
 
 Suggest at the end: substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders copied from the template using the values already collected in Steps 2–5 where unambiguous, via targeted `Edit` calls on `<project>/.env.local`. Leave placeholders alone when in doubt.
 
-### Step 10 — Recap + next steps
+### Step 10 — Run `super configure`
+
+`super install` only installs super itself, hooks, CLIs, and the skills shipped
+inside `$SUPER_HOME/skills/`. External catalog skills, plugins, MCPs, and the
+context files (`AGENTS.md` + `CLAUDE.md`/`GEMINI.md` symlinks) are installed
+here, **after** the user has filled in `.env.local`.
+
+Before proceeding, confirm the required tokens in `.env.local` are non-empty
+(at minimum the ones for the sources the user just enabled — `LINEAR_TOKEN`,
+`CLICKUP_TOKEN`, `CONFLUENCE_TOKEN`, etc.). If any required token is still
+blank, stop and ask the user to fill them in first.
+
+Then run:
+
+```bash
+super configure
+```
+
+from the project root. It will install external skills/plugins/MCPs listed in
+`.super/super.config.yaml`, sync skills into each CLI's skill directory, and
+create `AGENTS.md` + `CLAUDE.md`/`GEMINI.md` symlinks.
+
+### Step 11 — Recap + next steps
 
 Print a concise summary:
 
@@ -151,17 +173,17 @@ Print a concise summary:
 - Dirs scaffolded: <list>
 - Sources file: `<project>/sources.md` — created / skipped / existing
 - Env file: `<project>/.env.local` — created / skipped / existing
+- `super configure` — ran / skipped
 
 Then suggest:
 
 ```
 Next steps (run from inside the brain project):
-  1. Fill in secrets in .env.local (LINEAR_TOKEN, CONFLUENCE_TOKEN, etc.)
-  2. Edit sources.md to add your actual source URLs and repos
-  3. /brain-pull-sources         → populate src/
-  4. /brain-rebuild-services     → generate service docs
-  5. /brain-rebuild-memory       → build L1/L2 navigation
-  6. /brain-reindex              → build the qmd hybrid search index
+  1. Edit sources.md to add your actual source URLs and repos
+  2. /brain-pull-sources         → populate src/
+  3. /brain-rebuild-services     → generate service docs
+  4. /brain-rebuild-memory       → build L1/L2 navigation
+  5. /brain-reindex              → build the qmd hybrid search index
 ```
 
 ## Rules
