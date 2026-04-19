@@ -51,10 +51,11 @@ function autoUpdate() {
   const start = Date.now();
   ui.muted('Auto-update check...');
 
-  // Update super itself (best-effort)
+  // Update super itself (best-effort). --rebase --autostash lets the pull
+  // succeed even when the user has local edits under ~/.super/skills/.
   try {
     ui.muted('  Pulling super updates...');
-    execSync('git pull', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 15000 });
+    execSync('git pull --rebase --autostash', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 15000 });
     execSync('npm install', { cwd: SUPER_HOME, stdio: 'ignore', timeout: 30000 });
   } catch {}
 
@@ -321,11 +322,13 @@ async function cmdInstall(args) {
 
   const isFirstTime = !existsSync(join(root, '.super', 'super.config.yaml')) && !existsSync(join(root, 'super.config.yaml'));
 
-  // Force update global ~/.super first
+  // Force update global ~/.super first. --rebase --autostash preserves any
+  // local edits under ~/.super/skills/ (or anywhere else) so the pull — and
+  // therefore the downstream built-in-skill sync — actually lands.
   ui.brand('Updating super...');
   ui.spacer();
   try {
-    execSync('git pull', { cwd: SUPER_HOME, stdio: 'inherit', timeout: 15000 });
+    execSync('git pull --rebase --autostash', { cwd: SUPER_HOME, stdio: 'inherit', timeout: 15000 });
     execSync('npm install', { cwd: SUPER_HOME, stdio: 'inherit', timeout: 30000 });
     ui.success('super updated');
   } catch {
