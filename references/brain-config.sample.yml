@@ -48,6 +48,10 @@ sources:
     personal_orgs: [smnbss]
   gws:
     enabled: true
+  bigquery:
+    # Enables `bq`-backed data-analyst skills. On enable, /super-setup
+    # captures GCP_PROJECT_ID and prompts for `gcloud auth application-default login`.
+    enabled: true
   linear:
     enabled: true
   medium:

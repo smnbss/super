@@ -37,6 +37,26 @@ system:
     install: "curl -fsSL https://ollama.com/install.sh | sh"
     enabled: true
 
+  googleworkspace-cli:
+    name: googleworkspace-cli
+    # Provides the `gws` binary used by brain-morning-start,
+    # brain-pull-my-meeting-notes, brain-prepare-my-deep-dives,
+    # brain-prepare-my-one-on-one. The formula name is
+    # `googleworkspace-cli`, not `gws` — a different unrelated
+    # formula also installs a `gws` binary and will conflict.
+    check: "command -v gws"
+    install: "brew install googleworkspace-cli"
+    enabled: true
+
+  gcloud-cli:
+    name: gcloud-cli
+    # Provides `gcloud` and `bq`. `bq` is used by the BigQuery-backed
+    # data-analyst and dbt-modeling skills. After install, the user
+    # authenticates interactively via `/super-setup`.
+    check: "command -v gcloud && command -v bq"
+    install: "brew install --cask gcloud-cli"
+    enabled: true
+
 # ─── CLIs ────────────────────────────────────────────────────────────────────
 # Install commands for each supported CLI. `super install` will run these
 # automatically if the CLI is not already on PATH.
