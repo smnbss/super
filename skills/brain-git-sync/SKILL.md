@@ -1,11 +1,11 @@
 ---
 name: brain-git-sync
-description: Sync the local brain repo with git — stage all changes, commit, and push. Use after any session that modified brain files, or as a quick end-of-session save.
+description: Sync the local brain repo with git — stage all changes, commit, push, and save a recap. Use after any session that modified brain files, or as a quick end-of-session save.
 ---
 
 # /git-sync
 
-Sync the local brain repo with git — stage all changes, commit, and push.
+Sync the local brain repo with git — stage all changes, commit, push, and save a recap.
 
 ## Steps
 
@@ -19,7 +19,14 @@ Sync the local brain repo with git — stage all changes, commit, and push.
 
 5. **Push** — run `git push` to sync with the remote. If the push fails due to diverged history, run `git pull --rebase` first, then retry the push. Never force-push.
 
-6. **Report** — summarize what was committed and pushed (files changed, insertions, deletions).
+6. **Save recap** — create `outputs/agents/brain-git-sync/YYYY-MM-DD-HHMMSS.md` with:
+   - Timestamp of sync
+   - Commit hash (if available)
+   - Summary of files changed (counts by category: memory, src, agents, etc.)
+   - Brief description of the sync purpose
+   - Any issues encountered
+
+7. **Report** — summarize what was committed and pushed (files changed, insertions, deletions).
 
 ## When to use
 After any session that modified brain files, or as a quick end-of-session save.
