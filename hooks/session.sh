@@ -342,41 +342,27 @@ session_get_summary() {
   grep -v '^---$' "$file" 2>/dev/null | tail -n "$n" || true
 }
 
+_super_context_file() { echo "$(_super_base_dir)/session-context.md"; }
+
 session_inject_context() {
   local cli="$1"
-  local root
-  root="$(_super_find_root)"
   local summary
   summary="$(session_get_summary 80)"
   local header="<!-- super:session-context -->"
   local footer="<!-- /super:session-context -->"
-  local session_file active_name
+  local session_file active_name target
   session_file="$(_super_session_file)"
   active_name="$(basename "${session_file:-unknown}")"
+  target="$(_super_context_file)"
 
-  _inject_to_file() {
-    local target="$1"
-    if [[ -f "$target" ]]; then
-      python3 -c "
-import sys
-path,hdr,ftr = sys.argv[1],'<!-- super:session-context -->','<!-- /super:session-context -->'
-with open(path) as fh: lines = fh.readlines()
-out,skip = [],False
-for line in lines:
-    if hdr in line: skip=True
-    if not skip: out.append(line)
-    if ftr in line: skip=False
-with open(path,'w') as fh: fh.writelines(out)
-" "$target"
-    else
-      touch "$target"
-    fi
-    cat >> "$target" << EOF
+  mkdir -p "$(dirname "$target")"
 
+  cat > "$target" << EOF
 $header
 ## 📋 SuperCLI Cross-Session Context
 
 Session: \`$active_name\`
+CLI: \`${cli:-unknown}\`
 
 You are continuing a conversation that may have started in a different AI coding
 assistant. The history below is the shared session log. Pick up where things
@@ -385,35 +371,16 @@ left off.
 $summary
 $footer
 EOF
-    _log "Injected context → $target"
-  }
-
-  case "${cli,,}" in
-    claude|claude-code) _inject_to_file "$root/CLAUDE.md"  ;;
-    gemini)             _inject_to_file "$root/GEMINI.md"  ;;
-    codex)              _inject_to_file "$root/AGENTS.md"  ;;
-  esac
+  _log "Injected context → $target"
 }
 
 session_clear_injections() {
-  local root
-  root="$(_super_find_root)"
-  for f in CLAUDE.md GEMINI.md AGENTS.md; do
-    local target="$root/$f"
-    [[ -f "$target" ]] || continue
-    python3 -c "
-import sys
-path,hdr,ftr = sys.argv[1],'<!-- super:session-context -->','<!-- /super:session-context -->'
-with open(path) as fh: lines = fh.readlines()
-out,skip = [],False
-for line in lines:
-    if hdr in line: skip=True
-    if not skip: out.append(line)
-    if ftr in line: skip=False
-with open(path,'w') as fh: fh.writelines(out)
-" "$target"
-  done
-  _log "Cleared injections"
+  local target
+  target="$(_super_context_file)"
+  if [[ -f "$target" ]]; then
+    rm -f "$target"
+    _log "Cleared context → $target"
+  fi
 }
 
 
