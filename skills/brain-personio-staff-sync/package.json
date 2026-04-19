@@ -1,0 +1,13 @@
+{
+  "name": "brain-personio-staff-sync",
+  "version": "1.0.0",
+  "description": "Scrape staff roster from Personio web interface",
+  "type": "module",
+  "scripts": {
+    "scrape": "node scrape-personio.mjs",
+    "test": "echo 'Run: npm run scrape'"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}
