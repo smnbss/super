@@ -321,15 +321,19 @@ async function cmdInstall(args) {
 
   const isFirstTime = !existsSync(join(root, '.super', 'super.config.yaml')) && !existsSync(join(root, 'super.config.yaml'));
 
-  // Force update global ~/.super first
+  // Force update global ~/.super first. Capture stdout/stderr so we don't
+  // leak raw `git pull` / `npm install` chatter into the middle of the
+  // install banner. Only surface output when something actually goes wrong.
   ui.brand('Updating super...');
   ui.spacer();
   try {
-    execSync('git pull', { cwd: SUPER_HOME, stdio: 'inherit', timeout: 15000 });
-    execSync('npm install', { cwd: SUPER_HOME, stdio: 'inherit', timeout: 30000 });
+    execSync('git pull', { cwd: SUPER_HOME, stdio: 'pipe', timeout: 15000 });
+    execSync('npm install --silent --no-fund --no-audit', { cwd: SUPER_HOME, stdio: 'pipe', timeout: 30000 });
     ui.success('super updated');
-  } catch {
+  } catch (e) {
     ui.warn('super update failed — continuing with current version');
+    const stderr = (e.stderr || '').toString().trim();
+    if (stderr) ui.muted(`  ${stderr.split('\n').slice(0, 3).join('\n  ')}`);
   }
   ui.spacer();
 
@@ -370,14 +374,22 @@ async function cmdInstall(args) {
   }
 
   // Pick CLIs and install hooks.
+  //   `super install --all`            → skip prompt, install hooks for all detected CLIs
+  //   `super install <claude|codex|gemini>` → install hooks only for that CLI
+  //   `super install`                  → interactive multi-select (default)
   let selectedClis = null;
   const clis = catalog.installedClis();
-  if (!target || target === '--all' || clis.length === 0) {
+  if (target === '--all' || clis.length === 0) {
     ui.brand('Installing hooks for all available CLIs');
     ui.spacer();
     installHooks('all');
     selectedClis = clis;
-  } else if (target && target !== '--all' && clis.length > 0) {
+  } else if (target) {
+    ui.brand(`Installing hooks for ${target}`);
+    ui.spacer();
+    installHooks(target);
+    selectedClis = target === 'all' ? clis : [target];
+  } else {
     const options = clis.map(c => `${CLI[c].icon} ${CLI[c].label}`);
     const indices = await interactive.selectMulti('Select CLIs to configure:', options);
     if (indices && indices.length > 0) {
