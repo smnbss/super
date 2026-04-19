@@ -405,7 +405,7 @@ async function cmdInstall(args) {
   // CLI home symlinks, and skill-dir sync. Never pulls external skills,
   // plugins, or MCPs — those live in `super configure`.
   if (config.findConfig()) {
-    catalog.installPhaseInstall(selectedClis);
+    catalog.installBuiltinSkills(selectedClis);
   }
 
   // Ensure SUPER_HOME is on PATH in shell profile (idempotent).
