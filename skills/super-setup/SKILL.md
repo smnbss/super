@@ -151,13 +151,10 @@ Ask: *"Generate a starter `sources.md` at `<project>/sources.md`?"* (Yes/No).
 
 ### Step 9 — .env.local
 
-Ensure the brain project has a `<project>/.env.local` scaffold so the pull/rebuild skills can read tokens.
+`super install` already scaffolds `<project>/.env.local` by copying `~/.super/references/env.example` when the file is missing (see `scaffoldEnvLocal()` in `lib/catalog.mjs`). This step only verifies and nudges.
 
-- If `<project>/.env.local` already exists → note it and skip (write-once, never overwrite).
-- Otherwise, prefer a project-shipped template in this order and copy the first one that exists:
-  1. `<project>/.env.example` (e.g. a template committed to the brain repo)
-  2. `~/.super/references/env.example` (the super default)
-- After copying, tell the user: *".env.local created from <template path>. Fill in secrets before running /brain-pull-sources or /brain-rebuild-*."*
+- If `<project>/.env.local` is missing: *"Run `super install` from the project root — it will copy the env template. Stopping here."*
+- If present: tell the user *".env.local ready at `<project>/.env.local`. Fill in secrets for the sources you enabled in Step 6 before running `/brain-pull-sources` or `/brain-rebuild-*`."*
 - Never print secrets to the transcript. Do not ask the user for token values here — that belongs in their own editor.
 
 Suggest at the end: substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders copied from the template using the values already collected in Steps 2–5 where unambiguous, via targeted `Edit` calls on `<project>/.env.local`. Leave placeholders alone when in doubt.
