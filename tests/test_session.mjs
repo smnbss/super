@@ -1,8 +1,9 @@
 // tests/test_session.mjs — Tests for session module
 import { strict as assert } from 'assert';
-import { existsSync, mkdirSync, rmSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { sessionNew, sessionResume, sessionList, sessionAppendTurn, sessionGetSummary, sessionCleanupOld, sessionClearInjections, sessionFile } from '../lib/session.mjs';
+import { tmpdir } from 'os';
+import { sessionNew, sessionResume, sessionList, sessionAppendTurn, sessionGetSummary, sessionCleanupOld, sessionClearInjections, sessionInjectContext, sessionFile } from '../lib/session.mjs';
 import { findRoot } from '../lib/config.mjs';
 
 let passed = 0, failed = 0;
@@ -93,6 +94,65 @@ test('sessionGetSummary returns content', () => {
 test('sessionClearInjections does not crash', () => {
   sessionClearInjections(); // Should not throw
 });
+
+// ─── Cross-session context injection ─────────────────────────────────────────
+// Regression: inject must write ONLY to <root>/.super/session-context.md and
+// never touch CLAUDE.md / GEMINI.md / AGENTS.md at the project root.
+(() => {
+  const tmp = join(tmpdir(), `super-inject-${process.pid}-${Date.now()}`);
+  mkdirSync(join(tmp, '.super', 'sessions'), { recursive: true });
+  sessionNew('inject-fixture', tmp);
+
+  test('sessionInjectContext writes to .super/session-context.md', () => {
+    sessionInjectContext('claude', tmp);
+    const ctx = join(tmp, '.super', 'session-context.md');
+    assert.ok(existsSync(ctx), 'session-context.md should exist');
+    const content = readFileSync(ctx, 'utf8');
+    assert.ok(content.includes('<!-- super:session-context -->'));
+    assert.ok(content.includes('<!-- /super:session-context -->'));
+    assert.ok(content.includes('CLI: `claude`'));
+    assert.ok(content.includes('SuperCLI Cross-Session Context'));
+  });
+
+  test('sessionInjectContext never writes to root CLAUDE/GEMINI/AGENTS files', () => {
+    // Pre-seed with sentinels so we can detect any mutation.
+    for (const f of ['CLAUDE.md', 'GEMINI.md', 'AGENTS.md']) {
+      writeFileSync(join(tmp, f), `SENTINEL-${f}\n`);
+    }
+    sessionInjectContext('codex', tmp);
+    for (const f of ['CLAUDE.md', 'GEMINI.md', 'AGENTS.md']) {
+      assert.strictEqual(
+        readFileSync(join(tmp, f), 'utf8'),
+        `SENTINEL-${f}\n`,
+        `${f} must not be touched by sessionInjectContext`,
+      );
+    }
+  });
+
+  test('sessionInjectContext overwrites (not appends) on repeat call', () => {
+    sessionInjectContext('claude', tmp);
+    const first = readFileSync(join(tmp, '.super', 'session-context.md'), 'utf8');
+    sessionInjectContext('gemini', tmp);
+    const second = readFileSync(join(tmp, '.super', 'session-context.md'), 'utf8');
+    assert.ok(second.includes('CLI: `gemini`'));
+    assert.ok(!second.includes('CLI: `claude`'), 'old CLI line should be gone');
+    // Exactly one HEADER occurrence — no duplication.
+    const occurrences = (second.match(/<!-- super:session-context -->/g) || []).length;
+    assert.strictEqual(occurrences, 1);
+    assert.notStrictEqual(first, second);
+  });
+
+  test('sessionClearInjections deletes .super/session-context.md', () => {
+    sessionInjectContext('claude', tmp);
+    const ctx = join(tmp, '.super', 'session-context.md');
+    assert.ok(existsSync(ctx));
+    sessionClearInjections(tmp);
+    assert.ok(!existsSync(ctx), 'session-context.md should be removed');
+  });
+
+  // Cleanup tempdir.
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+})();
 
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);

@@ -6,13 +6,38 @@ Work in one CLI, switch to another, and your conversation follows you. Sessions 
 
 ## Install
 
+Installation is a two-step flow so tokens don't have to exist before the installer runs.
+
 ```bash
 git clone https://github.com/smnbss/super ~/.super
 cd ~/your-project
-super install
+
+super install                              # bootstrap super itself
+# → edit .env.local with your credentials
+super launch claude                        # or: super claude
+# inside the CLI:
+#   /super-setup                           # collects brain config, runs `super configure`
 ```
 
-`super install` sets up hooks for all detected CLIs, installs enabled skills/plugins/MCPs, and adds `SUPER_HOME` to your shell profile.
+**`super install`** bootstraps super only — no credentials required:
+
+- git-pulls `~/.super` + `npm install`
+- writes `<project>/.super/super.config.yaml` from template
+- installs system prereqs and CLI binaries (claude, gemini, codex) per catalog
+- installs hooks into each CLI's native config
+- copies built-in skills shipped in `$SUPER_HOME/skills/` into each CLI
+- creates CLI-home debug symlinks and syncs skill directories
+- scaffolds `<project>/.env.local` from `$SUPER_HOME/references/env.example` (never overwrites)
+- adds `SUPER_HOME` to your shell profile
+- prints a next-steps banner pointing at `.env.local` and `/super-setup`
+
+**`super configure`** (also `super setup`) installs everything that needs credentials — called by the `/super-setup` skill after the user has filled in `.env.local`:
+
+- installs enabled external skills from `super.config.yaml` (cloned from GitHub)
+- installs enabled plugins (Claude Code marketplaces)
+- resyncs skill directories so new skills surface in each CLI
+- configures enabled MCP servers, resolving `$env:VAR` from `.env.local`
+- creates `AGENTS.md` + `CLAUDE.md`/`GEMINI.md` symlinks at the project root
 
 ## Usage
 
@@ -107,7 +132,7 @@ Skills are prompt-based capabilities installed into each CLI's native skill dire
 
 | Skill | Description |
 |-------|-------------|
-| **super-setup** | Project-scoped setup wizard — run from inside your brain project. Writes `<project>/.super/brain.config.yml`, scaffolds `agents/memory/outputs/src`, generates `<project>/sources.md`. Run right after `super install`. |
+| **super-setup** | Project-scoped setup wizard — run from inside your brain project. Writes `<project>/.super/brain.config.yml`, scaffolds `agents/memory/outputs/src`, generates `<project>/sources.md`, and runs `super configure` at the end to install external skills/plugins/MCPs. Run right after `super install`. |
 | **super-persist** | Summarize the conversation and save it to the session file |
 | **super-resume** | Read the session file and summarize what the session is about |
 | **super-clone** | Create an OrbStack Ubuntu machine pre-configured for the current project |
@@ -133,18 +158,19 @@ Skills for building and syncing a personal knowledge brain (formerly the `smnbss
 
 ### Available but disabled
 
-receiving-code-review, using-git-worktrees, subagent-driven-development, brainstorming, writing-skills (all from obra/superpowers). Enable in `super.config.yaml` and re-run `super install`.
+receiving-code-review, using-git-worktrees, subagent-driven-development, brainstorming, writing-skills (all from obra/superpowers). Enable in `super.config.yaml` and re-run `super configure`.
 
 ## Plugins and MCPs
 
-Plugins (Claude Code only) and MCP servers are declared in `super.config.yaml`. `super install` configures them across all CLIs. See `super.config.yaml` for the full list and how to add your own.
+Plugins (Claude Code only) and MCP servers are declared in `super.config.yaml`. `super configure` configures them across all CLIs — called by the `/super-setup` skill after you've filled in `.env.local`. See `super.config.yaml` for the full list and how to add your own.
 
 ## How it works
 
-1. `super install` writes hooks into each CLI's native config
-2. Hooks log turns to a shared `.super/sessions/*.md` file
-3. `super switch <cli>` injects session history into the target CLI's context
-4. Plain Markdown throughout — readable by any AI, trackable in git
+1. `super install` writes hooks into each CLI's native config and installs super's built-in skills
+2. `super configure` (invoked by `/super-setup`) installs external skills, plugins, and MCPs from `super.config.yaml`
+3. Hooks log turns to a shared `.super/sessions/*.md` file
+4. `super launch` / `super switch <cli>` writes a context snapshot to `<project>/.super/session-context.md`; the CLI reads it when it starts so your conversation follows you
+5. Plain Markdown throughout — readable by any AI, trackable in git
 
 ### Hooks coverage
 
