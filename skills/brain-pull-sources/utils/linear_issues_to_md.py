@@ -15,7 +15,12 @@ Usage:
     python linear_issues_to_md.py --list
 
 Output is saved to:
-    src/linear/<workspace>/<team>-issues/all.md
+    src/linear/<workspace>/<team>-issues/
+    ├── issues/
+    │   ├── TEAM-123.md    # one file per issue
+    │   ├── TEAM-124.md
+    │   └── ...
+    └── index.md           # summary with links
 
 Environment:
     LINEAR_TOKEN  -- Linear Personal API key
@@ -68,6 +73,8 @@ PRIORITY_LABELS = {0: "No priority", 1: "Urgent", 2: "High", 3: "Normal", 4: "Lo
 
 # Ordering for state types when rendering
 STATE_TYPE_ORDER = ["triage", "started", "unstarted", "backlog", "completed", "cancelled"]
+
+INVALID_CHARS = re.compile(r'[<>"/\\|?*\x00-\x1f]')
 
 
 # -- Registry ------------------------------------------------------------------
@@ -308,51 +315,78 @@ def enrich_issues_with_full_descriptions(issues: list[dict], token: str) -> list
 
 # -- Markdown rendering --------------------------------------------------------
 
-def render_issue_row(issue: dict) -> str:
-    """Render a single issue as a compact markdown block."""
+def sanitize_filename(name: str) -> str:
+    """Sanitize a string for use as a filename."""
+    name = INVALID_CHARS.sub("-", name)
+    name = name.strip(". ")
+    name = re.sub(r"-{2,}", "-", name)
+    return name[:150]
+
+
+def render_issue_file(issue: dict) -> str:
+    """Render a single issue as a standalone markdown file."""
     identifier = issue.get("identifier", "")
-    title      = issue.get("title", "Untitled")
-    assignee   = (issue.get("assignee") or {}).get("name", "—")
-    priority   = PRIORITY_LABELS.get(issue.get("priority", 0), "—")
-    labels     = ", ".join(l["name"] for l in issue.get("labels", {}).get("nodes", []))
-    parent     = issue.get("parent")
-    project    = issue.get("project")
-    issue_url  = issue.get("url", "")
-    cycle      = issue.get("cycle")
+    title = issue.get("title", "Untitled")
+    assignee = (issue.get("assignee") or {}).get("name", "—")
+    priority = PRIORITY_LABELS.get(issue.get("priority", 0), "—")
+    labels = ", ".join(l["name"] for l in issue.get("labels", {}).get("nodes", []))
+    parent = issue.get("parent")
+    project = issue.get("project")
+    issue_url = issue.get("url", "")
+    cycle = issue.get("cycle")
+    state = issue.get("state", {})
+    state_name = state.get("name", "Unknown")
+    state_type = state.get("type", "unknown")
+    created_at = issue.get("createdAt", "")[:10] if issue.get("createdAt") else "—"
+    updated_at = issue.get("updatedAt", "")[:10] if issue.get("updatedAt") else "—"
 
     lines = []
-    lines.append(f"#### [{identifier}] {title}")
+    lines.append(f"# [{identifier}] {title}")
+    lines.append("")
+    lines.append(f"*State: {state_name} ({state_type})*")
+    lines.append("")
+
+    # Metadata table
+    lines.append("## Metadata")
     lines.append("")
     lines.append("| Field | Value |")
     lines.append("|-------|-------|")
-    lines.append(f"| Assignee | {assignee} |")
-    lines.append(f"| Priority | {priority} |")
+    lines.append(f"| **Identifier** | {identifier} |")
+    lines.append(f"| **Title** | {title} |")
+    lines.append(f"| **State** | {state_name} |")
+    lines.append(f"| **Assignee** | {assignee} |")
+    lines.append(f"| **Priority** | {priority} |")
     if labels:
-        lines.append(f"| Labels | {labels} |")
+        lines.append(f"| **Labels** | {labels} |")
     if project:
-        lines.append(f"| Project | {project['name']} |")
+        lines.append(f"| **Project** | [{project['name']}]({project.get('url', '')}) |")
     if cycle:
-        lines.append(f"| Cycle | {cycle.get('name', '')} |")
+        lines.append(f"| **Cycle** | {cycle.get('name', '')} |")
     if parent:
-        lines.append(f"| Parent | {parent['identifier']} – {parent['title']} |")
+        lines.append(f"| **Parent** | [{parent['identifier']}]({parent.get('url', '')}) – {parent['title']} |")
     if issue.get("dueDate"):
-        lines.append(f"| Due | {issue['dueDate']} |")
-    if issue.get("snoozedUntilAt"):
-        lines.append(f"| Snoozed until | {issue['snoozedUntilAt'][:10]} |")
-    lines.append(f"| URL | {issue_url} |")
+        lines.append(f"| **Due Date** | {issue['dueDate']} |")
+    if issue.get("estimate"):
+        lines.append(f"| **Estimate** | {issue['estimate']} |")
+    lines.append(f"| **Created** | {created_at} |")
+    lines.append(f"| **Updated** | {updated_at} |")
+    lines.append(f"| **Linear URL** | {issue_url} |")
     lines.append("")
 
+    # Description
     body = (issue.get("description") or "").strip()
     if body:
+        lines.append("## Description")
+        lines.append("")
         lines.append(body)
         lines.append("")
 
     return "\n".join(lines)
 
 
-def render_all_issues(team_name: str, team_key: str, issues: list[dict],
-                      export_time: str) -> str:
-    """Render all issues grouped by workflow state."""
+def render_index_file(team_name: str, team_key: str, issues: list[dict],
+                      export_time: str, issues_dir: str) -> str:
+    """Render an index file linking to all issue files."""
     lines = []
 
     lines.append(f"# {team_name} ({team_key}) — All Issues")
@@ -374,28 +408,26 @@ def render_all_issues(team_name: str, team_key: str, issues: list[dict],
     lines.append("|-------|------:|")
     for st in STATE_TYPE_ORDER:
         if st in state_counts:
-            # Use the actual state name from the first issue in this type
             label = st.title()
             lines.append(f"| {label} | {state_counts[st]} |")
-    # Any state types not in our ordering
     for st, count in state_counts.items():
         if st not in STATE_TYPE_ORDER:
             lines.append(f"| {st.title()} | {count} |")
     lines.append("")
 
-    # Group issues by state type, then by state name within each type
+    # Group issues by state type
     by_state_type: dict[str, list[dict]] = {}
     for issue in issues:
         state_type = issue.get("state", {}).get("type", "other")
         by_state_type.setdefault(state_type, []).append(issue)
 
-    # Render each state group
+    # Render links for each state group
     for state_type in STATE_TYPE_ORDER:
         group = by_state_type.get(state_type)
         if not group:
             continue
 
-        # Sub-group by actual state name (e.g. "In Progress", "In Review" are both "started")
+        # Sub-group by actual state name
         by_state_name: dict[str, list[dict]] = {}
         for issue in group:
             state_name = issue.get("state", {}).get("name", state_type.title())
@@ -412,7 +444,18 @@ def render_all_issues(team_name: str, team_key: str, issues: list[dict],
             )
 
             for issue in sorted_issues:
-                lines.append(render_issue_row(issue))
+                identifier = issue.get("identifier", "")
+                title = issue.get("title", "Untitled")
+                assignee = (issue.get("assignee") or {}).get("name", "—")
+                priority = issue.get("priority", 0)
+                priority_label = PRIORITY_LABELS.get(priority, "—")
+
+                # Link to individual issue file
+                safe_id = sanitize_filename(identifier)
+                lines.append(f"- [[{issues_dir}/{safe_id}|{identifier}]] {title}")
+                lines.append(f"  - Assignee: {assignee} | Priority: {priority_label}")
+
+            lines.append("")
 
     # Any leftover state types
     for state_type, group in by_state_type.items():
@@ -422,9 +465,37 @@ def render_all_issues(team_name: str, team_key: str, issues: list[dict],
         lines.append(f"## {state_name} ({len(group)})")
         lines.append("")
         for issue in sorted(group, key=lambda i: (i.get("priority", 99) or 99, i.get("identifier", ""))):
-            lines.append(render_issue_row(issue))
+            identifier = issue.get("identifier", "")
+            title = issue.get("title", "Untitled")
+            safe_id = sanitize_filename(identifier)
+            lines.append(f"- [[{issues_dir}/{safe_id}|{identifier}]] {title}")
+        lines.append("")
 
     return "\n".join(lines)
+
+
+# -- File writing --------------------------------------------------------------
+
+def write_issue_files(issues: list[dict], out_dir: str, issues_subdir: str = "issues") -> int:
+    """Write each issue to its own file. Returns number of files written."""
+    issues_path = os.path.join(out_dir, issues_subdir)
+    os.makedirs(issues_path, exist_ok=True)
+
+    count = 0
+    for issue in issues:
+        identifier = issue.get("identifier", "")
+        if not identifier:
+            continue
+
+        safe_id = sanitize_filename(identifier)
+        file_path = os.path.join(issues_path, f"{safe_id}.md")
+
+        content = render_issue_file(issue)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        count += 1
+
+    return count
 
 
 # -- Main ----------------------------------------------------------------------
@@ -466,7 +537,6 @@ def main():
 
     out_dir = os.path.join(OUTPUT_BASE, workspace, f"{team_key}-issues")
     os.makedirs(out_dir, exist_ok=True)
-    out_file = os.path.join(out_dir, "all.md")
     rel_path = os.path.relpath(out_dir, PROJECT_ROOT)
     print(f"Output folder: {rel_path}")
 
@@ -480,10 +550,17 @@ def main():
     now = datetime.now(timezone.utc)
     export_time = now.strftime("%Y-%m-%d %H:%M UTC")
 
-    content = render_all_issues(team_name, team_key, issues, export_time)
+    # Write individual issue files
+    print("Writing individual issue files...")
+    files_written = write_issue_files(issues, out_dir)
+    print(f"  {files_written} issue files written to {rel_path}/issues/")
 
-    with open(out_file, "w", encoding="utf-8") as f:
-        f.write(content)
+    # Write index file
+    index_content = render_index_file(team_name, team_key, issues, export_time, "issues")
+    index_path = os.path.join(out_dir, "index.md")
+    with open(index_path, "w", encoding="utf-8") as f:
+        f.write(index_content)
+    print(f"  Index written to {rel_path}/index.md")
 
     # Build stats
     state_counts: dict[str, int] = {}
@@ -505,7 +582,9 @@ def main():
         stats=stats,
     )
 
-    print(f"\nDone! {len(issues)} issues exported to {rel_path}/all.md")
+    print(f"\nDone! {len(issues)} issues exported to {rel_path}/")
+    print(f"  - {files_written} individual files in issues/")
+    print(f"  - 1 index file (index.md)")
     for st in STATE_TYPE_ORDER:
         if st in state_counts:
             print(f"  {st.title()}: {state_counts[st]}")
