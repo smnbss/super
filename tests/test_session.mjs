@@ -59,6 +59,25 @@ test('sessionList items have required fields', () => {
   assert.ok(typeof s.isActive === 'boolean');
 });
 
+test('sessionList includes CLI, provider, and model metadata', () => {
+  // Create a session with metadata
+  const path = sessionNew('metadata-test', 'gemini', 'ollama', 'glm-5:cloud');
+  const sessions = sessionList();
+  const s = sessions.find(s => s.filepath === path);
+  assert.ok(s, 'Session should be found in list');
+  assert.strictEqual(s.cli, 'gemini');
+  assert.strictEqual(s.provider, 'ollama');
+  assert.strictEqual(s.model, 'glm-5:cloud');
+});
+
+test('sessionNew stores CLI, provider, model in file header', () => {
+  const path = sessionNew('header-test', 'claude', 'openai', 'gpt-4');
+  const content = readFileSync(path, 'utf8');
+  assert.ok(content.includes('**CLI:** claude'));
+  assert.ok(content.includes('**Provider:** openai'));
+  assert.ok(content.includes('**Model:** gpt-4'));
+});
+
 test('sessionAppendTurn writes user turn', () => {
   const path = sessionNew('turn-test');
   sessionAppendTurn('claude', 'user', 'Hello world');
