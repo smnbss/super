@@ -199,7 +199,6 @@ query GetTeamIssues($teamId: String!, $after: String) {
         id
         identifier
         title
-        description
         priority
         estimate
         dueDate
@@ -217,6 +216,33 @@ query GetTeamIssues($teamId: String!, $after: String) {
         cycle      { name number }
       }
     }
+  }
+}
+"""
+
+# Query to fetch full issue details (including complete description)
+ISSUE_DETAIL_QUERY = """
+query GetIssue($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    title
+    description
+    priority
+    estimate
+    dueDate
+    createdAt
+    updatedAt
+    url
+    triagedAt
+    snoozedUntilAt
+    state      { name type }
+    assignee   { name }
+    labels     { nodes { name } }
+    parent     { identifier title }
+    project    { name url }
+    projectMilestone { id name }
+    cycle      { name number }
   }
 }
 """
@@ -248,6 +274,36 @@ def fetch_all_team_issues(team_id: str, token: str) -> list[dict]:
             break
         cursor = info["endCursor"]
     return issues
+
+
+def fetch_issue_details(issue_id: str, token: str) -> dict:
+    """Fetch full details for a single issue including complete description."""
+    data = gql(ISSUE_DETAIL_QUERY, {"id": issue_id}, token)
+    return data.get("issue", {})
+
+
+def enrich_issues_with_full_descriptions(issues: list[dict], token: str) -> list[dict]:
+    """Fetch full descriptions for all issues (descriptions are truncated in bulk queries)."""
+    print("Fetching full descriptions for all issues...")
+    enriched = []
+    total = len(issues)
+    for i, issue in enumerate(issues, 1):
+        issue_id = issue.get("id")
+        if issue_id:
+            try:
+                full_issue = fetch_issue_details(issue_id, token)
+                if full_issue:
+                    # Merge full description into the issue
+                    issue["description"] = full_issue.get("description")
+            except Exception as e:
+                print(f"    Warning: Could not fetch details for {issue.get('identifier')}: {e}")
+        enriched.append(issue)
+        if i % 10 == 0 or i == total:
+            print(f"  {i}/{total} issues enriched", flush=True)
+        # Small delay to avoid rate limiting
+        if i % 50 == 0:
+            time.sleep(1)
+    return enriched
 
 
 # -- Markdown rendering --------------------------------------------------------
@@ -417,6 +473,9 @@ def main():
     print("Fetching all team issues (including triage)...")
     issues = fetch_all_team_issues(team_id, token)
     print(f"  Total: {len(issues)} issues")
+
+    # Fetch full descriptions for each issue (bulk queries truncate descriptions)
+    issues = enrich_issues_with_full_descriptions(issues, token)
 
     now = datetime.now(timezone.utc)
     export_time = now.strftime("%Y-%m-%d %H:%M UTC")
