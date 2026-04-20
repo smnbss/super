@@ -48,10 +48,10 @@ echo "Cloning '$BASE_MACHINE' to '$MACHINE'..."
 orb clone "$BASE_MACHINE" "$MACHINE"
 orb start "$MACHINE"
 
-orb -m "$MACHINE" bash -c 'mkdir -p ~/project'
-orb push -m "$MACHINE" "$ENV_LOCAL" project/.env.local
+orb -m "$MACHINE" bash -c 'mkdir -p ~/brain'
+orb push -m "$MACHINE" "$ENV_LOCAL" brain/.env.local
 if [ -f "$SOURCES_MD" ]; then
-  orb push -m "$MACHINE" "$SOURCES_MD" project/sources.md
+  orb push -m "$MACHINE" "$SOURCES_MD" brain/sources.md
 fi
 
 orb -m "$MACHINE" bash -lc '
@@ -63,7 +63,7 @@ orb -m "$MACHINE" bash -lc '
     echo "export PATH=\"$SUPER_HOME:\$PATH\"" >> "$HOME/.bashrc"
   fi
   export PATH="$HOME/.local/bin:$SUPER_HOME:$PATH"
-  cd "$HOME/project"
+  cd "$HOME/brain"
   super install --all
 '
 
