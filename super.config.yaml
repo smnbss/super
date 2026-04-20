@@ -42,10 +42,11 @@ system:
     name: googleworkspace-cli
     # Provides the `gws` binary used by brain-morning-start,
     # brain-pull-my-meeting-notes, brain-prepare-my-deep-dives,
-    # brain-prepare-my-one-on-one. Formula is macOS/Homebrew-only;
-    # skip on Linux (brain skills that use `gws` run from macOS only).
+    # brain-prepare-my-one-on-one. On macOS: brew formula builds from
+    # source (Rust). On Linux: fetch the prebuilt tarball that upstream
+    # publishes for each release and drop `gws` into ~/.local/bin.
     check: "command -v gws"
-    install: "sh -c '[ \"$(uname)\" = Darwin ] && brew install googleworkspace-cli || echo skip: macOS-only'"
+    install: "sh -c 'if [ \"$(uname)\" = Darwin ]; then brew install googleworkspace-cli; elif [ \"$(uname)\" = Linux ]; then arch=$(uname -m); case \"$arch\" in aarch64|arm64) target=aarch64-unknown-linux-gnu ;; x86_64|amd64) target=x86_64-unknown-linux-gnu ;; *) echo \"gws: unsupported arch $arch\" >&2; exit 1 ;; esac; mkdir -p \"$HOME/.local/bin\"; tmp=$(mktemp -d); curl -fsSL \"https://github.com/googleworkspace/cli/releases/latest/download/google-workspace-cli-$target.tar.gz\" | tar -xz -C \"$tmp\"; install -m 0755 \"$tmp/gws\" \"$HOME/.local/bin/gws\"; rm -rf \"$tmp\"; else echo \"gws: unsupported platform $(uname)\" >&2; exit 1; fi'"
     enabled: true
 
   gcloud-cli:
