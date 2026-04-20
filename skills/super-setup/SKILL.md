@@ -64,31 +64,17 @@ If `.super/brain.config.yml` doesn't exist, copy the sample to that path silentl
 
 `mkdir -p` the four brain dirs in the project root if missing: `agents`, `memory`, `outputs`, `src`. Report what was created.
 
-### Step 2 — Run `super install` (first pass)
+### Step 2 — Sanity-check the install
 
-Run install BEFORE asking questions so the brain has its full toolchain available regardless of which sources the user ends up enabling. `super install` is fully idempotent — MCP configuration will be re-run implicitly at Step 11 if the user populates new env vars during Q&A.
+Assume `super install` has already run (the user got here from the install banner, which is the normal path). Do a quick 3-check sanity pass — do NOT re-run `super install`:
 
-Before running, verify you're in the brain root (the path discovered in Step 0, not a subdirectory or `$HOME`). Then:
+- `<project>/.claude/skills/super-setup` exists (proves the built-in skill symlink tree landed)
+- `<project>/.super/super.config.yaml` exists (proves the catalog config was written)
+- One of `<project>/{AGENTS.md,CLAUDE.md,GEMINI.md}` exists (proves the context-file phase ran)
 
-```bash
-super install --all
-```
+If any of those is missing, tell the user: *"`super install` doesn't appear to have completed. Run `super install --all` from `<project>` and re-launch me."* and stop. Do not attempt to fix it from here.
 
-This installs (or refreshes) **everything** in one pass:
-
-1. **super itself + system prereqs** — `git pull --rebase --autostash` in `~/.super`, `uv`, `markitdown`, `ollama`, `gws`, `gcloud`
-2. **CLI binaries** — `claude`, `gemini`, `codex` (via each catalog entry's install command)
-3. **Hooks** — `.claude/settings.json`, `.gemini/settings.json`, `.codex/hooks.json`
-4. **Built-in super skills** — copied from `$SUPER_HOME/skills/` into `<project>/.agents/skills/` + symlinked into each CLI's project skill dir
-5. **Global super-skill symlinks** — `~/.<cli>/skills/<super-skill>` → `$SUPER_HOME/skills/<super-skill>` so skills invoked outside this project always use the latest shipped version
-6. **External catalog skills** — every entry under `skills:` in `<project>/.super/super.config.yaml` with `enabled: true`
-7. **Plugins** — Claude marketplaces, their discovered skills + commands
-8. **MCPs** — writes `<project>/.claude/settings.local.json`, `.gemini/settings.json`, `.codex/config.json`. Warns when `$env:VAR` references resolve to empty (because `.env.local` isn't filled yet) — expected on the first pass and not an error.
-9. **Context files** — `AGENTS.md` created, `CLAUDE.md` and `GEMINI.md` symlinked to it
-
-Stream the output so the user sees what ran. If `super install` fails, report the error and stop — the remaining steps assume a working install.
-
-> `super configure` still works as an alias for `super install` (older docs and muscle memory). Both commands do the same thing now.
+If all three are present, move on silently.
 
 ### Step 3 — Ensure `.env.local` exists
 
@@ -224,15 +210,15 @@ Ask: *"Generate a starter `sources.md` at `<project>/sources.md`?"* (Yes/No).
      - `<your-domain>` → ask for the Metabase hostname (skip if Metabase disabled)
   3. Write to `<project>/sources.md`
 
-### Step 11 — `super install` (second pass, only if new env vars landed)
+### Step 11 — Re-run `super install` if new env vars landed
 
-If the Q&A wrote new values to `<project>/.env.local` (gws / bq credentials, Linear token if the user pasted it, etc.), the MCP entries configured in Step 2 still have the old empty-string values. Re-run `super install` so MCPs pick up the new env vars:
+If the Q&A wrote new values to `<project>/.env.local` (gws / bq credentials, Linear token if the user pasted it, etc.), the MCP entries from the earlier `super install` still have empty-string values. Re-run `super install` so MCPs pick up the new env vars:
 
 ```bash
 super install --all
 ```
 
-Skip this step if nothing in `.env.local` changed since Step 2 (e.g. the user only toggled source flags but didn't paste any new secrets). When in doubt, run it — it's idempotent.
+Skip this step if nothing in `.env.local` changed during Q&A (e.g. the user only toggled source flags but didn't paste any new secrets). When in doubt, run it — it's idempotent.
 
 Also suggest at this point: substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders still in `.env.local` using the values already collected in Steps 4–7 where unambiguous, via targeted `Edit` calls. Leave placeholders alone when in doubt.
 
