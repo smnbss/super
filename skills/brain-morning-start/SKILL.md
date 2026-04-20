@@ -2,14 +2,14 @@
 name: brain-morning-start
 description: >
   Daily bootstrap: update tools, sync brain sources, rebuild memory and service docs,
-  harvest meeting notes, and prepare today's agendas for deep dives and 1:1s. Use when the user says
-  "morning start", "start my day", "daily bootstrap", "morning routine", or
+  harvest meeting notes since the last harvest, and prepare today's agendas for deep dives and 1:1s.
+  Use when the user says "morning start", "start my day", "daily bootstrap", "morning routine", or
   "prepare my day".
 ---
 
 # Morning Start
 
-Daily bootstrap: update tools (brew, npm, gstack, python), sync brain sources, rebuild memory and service docs, harvest yesterday's meeting notes, and prepare today's agendas for deep dives and 1:1s.
+Daily bootstrap: update tools (brew, npm, gstack, python), sync brain sources, rebuild memory and service docs, harvest every meeting since the last harvested day, and prepare today's agendas for deep dives and 1:1s.
 
 ## Part 1 — Update tools & sync
 
@@ -44,11 +44,34 @@ Rebuild the memory layers L2 (domain knowledge) and L1 (navigation MOCs) from th
 
 **Wait for:** Part 2b complete (needs `outputs/services/` updated with latest service docs).
 
-## Part 3 — Harvest yesterday's meeting notes (parallel with Part 2a)
+## Part 3 — Harvest meeting notes since last harvest (parallel with Part 2a)
 
-Run the `brain-pull-my-meeting-notes` skill for **yesterday** (the default range). This fetches calendar events, grabs Gemini notes and recording transcripts from Google Drive attachments, and produces a daily digest with decisions and action items.
+Run the `brain-pull-my-meeting-notes` skill covering **every day since the last harvested day** (inclusive re-run of that day, through yesterday). This backfills any days missed since the last morning start — useful after weekends, holidays, travel, or sick days.
 
-Output goes to `src/gws/gmeet/YYYY/WNN/MM-DD/`.
+### 3a. Detect the last harvested day
+
+Scan `src/gws/gmeet/YYYY/WNN/MM-DD/` to find the most recent `MM-DD` folder that contains a `MM-DD-digest.md` file. That day is `LAST_HARVESTED`.
+
+```bash
+# Find the latest MM-DD folder with a daily digest across all years/weeks
+ls -1d src/gws/gmeet/*/W*/??-?? 2>/dev/null \
+  | while read d; do
+      [ -f "$d/$(basename "$d")-digest.md" ] && echo "$d"
+    done \
+  | sort \
+  | tail -1
+```
+
+Parse the `YYYY/WNN/MM-DD` path to reconstruct the full `YYYY-MM-DD` date.
+
+### 3b. Decide the range
+
+- If `LAST_HARVESTED` exists and is **before yesterday** → invoke `brain-pull-my-meeting-notes --since LAST_HARVESTED`. The skill processes each day from `LAST_HARVESTED` through yesterday, idempotently rebuilding each day's folder (the skill deletes and recreates the day folder on each run, so re-running the last day is safe and picks up any late-arriving Gemini notes or transcripts).
+- If `LAST_HARVESTED` is **yesterday** → invoke with the default range (yesterday only).
+- If `LAST_HARVESTED` is **today or later** (unusual — means the skill already ran today) → still invoke with the default range (yesterday) as a safety re-run; it's idempotent.
+- If no prior harvest folder exists → invoke with the default range (yesterday only) and report that this is a first-time run.
+
+Output goes to `src/gws/gmeet/YYYY/WNN/MM-DD/` — one folder per day in the range, plus refreshed weekly/monthly/YTD digests.
 
 **Parallel:** This runs in parallel with Part 2a (pull-sources) — it reads from GWS/Calendar, not from brain memory.
 
@@ -135,7 +158,7 @@ Brain sync & rebuild:
   - Services: <N> docs refreshed
   - Memory: L2 <N> files, L1 <N> MOCs updated
 
-Yesterday's meetings harvested:
+Meetings harvested (<LAST_HARVESTED> → yesterday, <D> days):
   - <N> meetings processed → src/gws/gmeet/...
 
 Today's prep:
@@ -151,7 +174,7 @@ Today's prep:
 | `brain-pull-sources` | Export all external sources (ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase) | `src/<source>/` |
 | `brain-rebuild-services` | Generate deep `.AGENT.MD` service docs from GitHub repos | `outputs/services/` |
 | `brain-rebuild-memory` | Rebuild L2 domain knowledge and L1 navigation MOCs | `memory/L1/`, `memory/L2/` |
-| `brain-pull-my-meeting-notes` | Harvest yesterday's meeting notes and transcripts | `src/gws/gmeet/` |
+| `brain-pull-my-meeting-notes` | Harvest meeting notes and transcripts from the last harvested day through yesterday | `src/gws/gmeet/` |
 | `brain-prepare-my-deep-dives` | Prepare deep-dive agendas from Linear project data | `outputs/agents/my-deep-dives/` |
 | `brain-prepare-my-one-on-one` | Prepare 1:1 agendas from Linear and brain context | `outputs/agents/my-one-on-one/` |
 
@@ -176,7 +199,8 @@ Part 2a + Part 3 (parallel start)
   │       GitHub, Medium, Metabase → src/                │
   │                                                      ↓
   ├─ brain-pull-my-meeting-notes ────────────────────────┤
-       └─ Harvest yesterday's meetings → src/gws/gmeet/   │
+       └─ Harvest meetings since last harvested day →     │
+          src/gws/gmeet/                                  │
                                                          │
 Part 2b: brain-rebuild-services ────────────────────────→┤
   └─ Generate service docs from repos → outputs/services/│
