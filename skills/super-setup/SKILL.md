@@ -64,29 +64,58 @@ If `.super/brain.config.yml` doesn't exist, copy the sample to that path silentl
 
 `mkdir -p` the four brain dirs in the project root if missing: `agents`, `memory`, `outputs`, `src`. Report what was created.
 
-### Step 2 — Organization
+### Step 2 — Run `super configure` (first pass)
+
+Run install BEFORE asking questions so the brain has its full toolchain available regardless of which sources the user ends up enabling. `super configure` is idempotent — phase 4 (MCPs) will be re-run implicitly at Step 11 if the user populates new env vars during Q&A.
+
+Before running, verify you're in the brain root (the path discovered in Step 0, not a subdirectory or `$HOME`). Then:
+
+```bash
+super configure
+```
+
+This installs:
+
+1. **External catalog skills** — every entry under `skills:` in `<project>/.super/super.config.yaml` with `enabled: true`
+2. **Plugins** — Claude marketplaces, discovered skills and commands
+3. **Skill-dir sync** — creates `.claude/skills/` symlinks (plus `.codex/skills` symlink for Codex; Gemini reads `.agents/skills` directly)
+4. **MCPs** — writes `<project>/.claude/settings.local.json`, `.gemini/settings.json`, `.codex/config.json`. Phase 4 warns when `$env:VAR` references resolve to empty (because `.env.local` isn't filled yet) — this is expected on the first pass and isn't an error.
+5. **Context files** — `AGENTS.md` created, `CLAUDE.md` and `GEMINI.md` symlinked to it
+
+Stream the output so the user sees what ran. If `super configure` fails, report the error and stop — the remaining steps assume a working install.
+
+### Step 3 — Ensure `.env.local` exists
+
+`super install` scaffolds `<project>/.env.local` from `<SUPER_HOME>/references/env.example` when it's missing. Verify it's there now.
+
+- If `<project>/.env.local` is missing: run the scaffold (`cp ~/.super/references/env.example <project>/.env.local`) and tell the user you created it from the template.
+- If present: move on silently.
+
+You will not ask for token values here — secrets belong in the user's editor. The Q&A steps further down collect only non-secret config (org name, source toggles, etc.), plus the gws/bq OAuth client ID/secret pairs (which flow straight into targeted `Edit` calls without echoing to the transcript).
+
+### Step 4 — Organization
 
 Two questions:
 
 1. *"What's your organization called?"* → `organization.name` (free text, one line)
 2. *"What's your role?"* → `organization.role` (free text, e.g. "CTO of Acme"). Used in qmd `globalContext` and report templates.
 
-### Step 3 — Linear
+### Step 5 — Linear
 
 Ask: *"What's your Linear org slug?"* — the `<slug>` in `linear.app/<slug>/...`. Show the current value as default. Write to `linear.org`.
 
-### Step 4 — Medium
+### Step 6 — Medium
 
 Ask: *"Do you publish on Medium?"* (Yes/No).
 
 - Yes → *"What's your Medium handle?"* (without the `@`). Write to `medium.handle`. Set `sources.medium.enabled: true`.
 - No → Set `sources.medium.enabled: false`.
 
-### Step 5 — GitHub
+### Step 7 — GitHub
 
 Ask: *"Which GitHub orgs should be synced?"* — comma-separated. Write to `sources.github.orgs` as a YAML inline list (e.g. `[acme, acme-labs]`).
 
-### Step 6 — Source toggles
+### Step 8 — Source toggles
 
 For each source below, ask: *"Do you use `<source>`?"* (Yes/No). Set `sources.<name>.enabled`. For each `Yes`, ask the source-specific follow-ups.
 
@@ -97,8 +126,8 @@ For each source below, ask: *"Do you use `<source>`?"* (Yes/No). Set `sources.<n
 | `gdrive` | `exco_folder`, `projects_folder`, `one_pagers_folder` |
 | `gws` | Run the **gws auth block** below. |
 | `bigquery` | Run the **bq auth block** below. |
-| `linear` | none (covered by Step 3) |
-| `medium` | (covered by Step 4) |
+| `linear` | none (covered by Step 5) |
+| `medium` | (covered by Step 6) |
 | `metabase` | none |
 | `personio` | `roster_file` (default `staff-roster.tsv`). If the user doesn't use Personio, just disable it. |
 
@@ -106,9 +135,53 @@ For each follow-up, show the current value and ask "keep / change". Edit only if
 
 #### gws auth block (run when `sources.gws.enabled: true`)
 
-Delegate to the dedicated `/brain-gws-auth` skill — it owns the full OAuth client + login walkthrough (credentials in `.env.local`, Google Cloud API enablement, `gws auth login`, and a verify call). Invoke it via the Skill tool.
+Run this whenever the user enables `gws` in Step 8. It's idempotent — each step short-circuits when its condition is already satisfied, so a re-run on an already-configured machine is cheap.
 
-If the user declines to enable `sources.gws.enabled` now but will use Google Workspace later, tell them they can run `/brain-gws-auth` at any time to set it up.
+1. **Binary check.** Verify `gws` is on PATH (`command -v gws`). If missing, tell the user to re-run `super install` (the `googleworkspace-cli` system entry installs it via Homebrew on macOS and from the prebuilt tarball on Linux) and skip the rest of this block.
+
+2. **Credentials in `.env.local`.** Read `<project>/.env.local`. If both `GOOGLE_WORKSPACE_CLI_CLIENT_ID` and `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` are non-empty, say *"Credentials already in `.env.local`. Skipping to auth check."* and jump to step 4.
+
+   Otherwise ask: *"No OAuth credentials in `.env.local`. Walk you through creating an OAuth 2.0 Client ID in Google Cloud Console? — yes / have credentials already / skip."*
+
+   - **yes** → show the walkthrough below, then collect each value via a dedicated `AskUserQuestion`
+   - **have credentials already** → skip the walkthrough, collect the two values directly
+   - **skip** → tell the user to fill the keys in `.env.local` manually and jump to step 4 (which will fail the auth check and tell them to come back)
+
+   Walkthrough (show verbatim):
+
+   ```
+   1. Open https://console.cloud.google.com/apis/credentials
+   2. Select (or create) a project — any project works
+   3. Create credentials → OAuth client ID
+   4. If prompted to configure the consent screen:
+      - User Type: External
+      - App name: anything (e.g. "super-brain")
+      - User support email: your email
+      - Scopes: leave empty for now (gws asks at login time)
+      - Test users: add your own Google account
+   5. Back at "Create OAuth client ID":
+      - Application type: Desktop app
+      - Name: anything (e.g. "super-brain-desktop")
+   6. Click Create → copy the Client ID and Client Secret
+   ```
+
+   Collect each value with its own `AskUserQuestion` call (so nothing is echoed to the transcript), then `Edit` `<project>/.env.local` to replace the two empty `GOOGLE_WORKSPACE_CLI_CLIENT_ID=` / `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET=` lines. **Never print the secret back.**
+
+3. **Enable required Google APIs.** Before the first `gws auth login`, the OAuth project needs these APIs enabled or login fails with `PERMISSION_DENIED`. Tell the user once:
+
+   *"In the same Google Cloud project, open 'APIs & Services → Library' and enable: Gmail API, Google Calendar API, Google Drive API. Takes ~30 seconds. Say `done` when ready, or `skip` to try anyway."*
+
+4. **`gws auth login`.** Probe current state with a cheap call: `gws calendar calendarList list --params '{"maxResults": 1}'`. Exit 0 → already authenticated, jump to step 5. Otherwise tell the user:
+
+   *"Run `! gws auth login` in this session — the `!` executes it in your shell so the browser opens. Consent to the scopes Google shows (Gmail/Calendar/Drive). Reply `done` when the CLI says 'Login successful', or `skip` to defer."*
+
+   Do **not** run `gws auth login` yourself — it needs the user's shell for the browser, not a tool call.
+
+5. **Verify.** Re-run `gws calendar calendarList list --params '{"maxResults": 1}'`.
+
+   - Exit 0 → ✅ *"`gws` is authenticated. You're ready to run `/brain-morning-start`, `/brain-pull-my-meeting-notes`, `/brain-prepare-my-deep-dives`, `/brain-prepare-my-one-on-one`."*
+   - Exit 2 (auth error) → ❌ *"Auth looks broken. Re-run `! gws auth login`. If it fails citing a missing API, go back to step 3."*
+   - Other exit → print the stderr and tell the user what went wrong.
 
 #### bq auth block (run when `sources.bigquery.enabled: true`)
 
@@ -119,7 +192,7 @@ The `gcloud-cli` system entry (installed by `super install`) provides both `gclo
 3. Check ADC status with `gcloud auth application-default print-access-token` (exit 0 = authed). If not authed, prompt: *"Run `! gcloud auth application-default login` in this session — it opens a browser. Say 'done' when finished, or 'skip' to defer."*
 4. Verify with `bq ls --project_id=<value> --max_results=1`. Exit 0 → report ✅. Non-zero → report the stderr and suggest re-running the ADC login.
 
-### Step 7 — Teams
+### Step 9 — Teams
 
 The `teams[]` list is awkward to collect question-by-question. Offer three choices via `AskUserQuestion`:
 
@@ -129,7 +202,7 @@ The `teams[]` list is awkward to collect question-by-question. Offer three choic
 
 For option 2: read the existing `teams:` block span (from `^teams:` to either the next top-level key or EOF), then replace. Validate the pasted YAML parses as a list before writing.
 
-### Step 8 — sources.md
+### Step 10 — sources.md
 
 Ask: *"Generate a starter `sources.md` at `<project>/sources.md`?"* (Yes/No).
 
@@ -138,48 +211,26 @@ Ask: *"Generate a starter `sources.md` at `<project>/sources.md`?"* (Yes/No).
   1. Read `~/.super/skills/brain-pull-sources/references/sources.md`
   2. Substitute placeholders using the collected answers:
      - `<your-org>` → the Linear slug (or ask separately for the Confluence/Atlassian subdomain if different)
-     - `<org>` in github lines → the first GitHub org from Step 5
+     - `<org>` in github lines → the first GitHub org from Step 7
      - `<your-folder-id>` → ask the user for a top-level GDrive folder ID (skip the line if they don't have one)
      - `<SPACE_KEY>` → ask for the Confluence space key (skip the line if Confluence disabled)
      - `<TEAM_KEY>` → leave as-is (per-team; user fills in manually)
      - `<your-domain>` → ask for the Metabase hostname (skip if Metabase disabled)
   3. Write to `<project>/sources.md`
 
-### Step 9 — .env.local
+### Step 11 — `super configure` (second pass, only if new env vars landed)
 
-`super install` already scaffolds `<project>/.env.local` by copying `~/.super/references/env.example` when the file is missing (see `scaffoldEnvLocal()` in `lib/catalog.mjs`). This step only verifies and nudges.
-
-- If `<project>/.env.local` is missing: *"Run `super install` from the project root — it will copy the env template. Stopping here."*
-- If present: tell the user *".env.local ready at `<project>/.env.local`. Fill in secrets for the sources you enabled in Step 6 before running `/brain-pull-sources` or `/brain-rebuild-*`."*
-- Never print secrets to the transcript. Do not ask the user for token values here — that belongs in their own editor.
-
-Suggest at the end: substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders copied from the template using the values already collected in Steps 2–5 where unambiguous, via targeted `Edit` calls on `<project>/.env.local`. Leave placeholders alone when in doubt.
-
-### Step 10 — Run `super configure`
-
-`super install` only installs super itself, hooks, CLIs, and the skills shipped
-inside `$SUPER_HOME/skills/`. External catalog skills, plugins, MCPs, and the
-context files (`AGENTS.md` + `CLAUDE.md`/`GEMINI.md` symlinks) are installed
-here, **after** the user has filled in `.env.local`.
-
-Before proceeding, confirm the required tokens in `.env.local` are non-empty
-(at minimum the ones for the sources the user just enabled — `LINEAR_TOKEN`,
-`CLICKUP_TOKEN`, `CONFLUENCE_TOKEN`, `GOOGLE_WORKSPACE_CLI_CLIENT_ID` +
-`GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` (if `gws` enabled), `GCP_PROJECT_ID`
-(if `bigquery` enabled), etc.). If any required token is still blank, stop
-and ask the user to fill them in first.
-
-Then run:
+If the Q&A wrote new values to `<project>/.env.local` (gws / bq credentials, Linear token if the user pasted it, etc.), the MCP entries configured in Step 2 still have the old empty-string values. Re-run `super configure` so MCPs pick up the new env vars:
 
 ```bash
 super configure
 ```
 
-from the project root. It will install external skills/plugins/MCPs listed in
-`.super/super.config.yaml`, sync skills into each CLI's skill directory, and
-create `AGENTS.md` + `CLAUDE.md`/`GEMINI.md` symlinks.
+Skip this step if nothing in `.env.local` changed since Step 2 (e.g. the user only toggled source flags but didn't paste any new secrets). When in doubt, run it — it's idempotent.
 
-### Step 11 — Recap + next steps
+Also suggest at this point: substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders still in `.env.local` using the values already collected in Steps 4–7 where unambiguous, via targeted `Edit` calls. Leave placeholders alone when in doubt.
+
+### Step 12 — Recap + next steps
 
 Print a concise summary:
 
@@ -188,7 +239,7 @@ Print a concise summary:
 - Dirs scaffolded: <list>
 - Sources file: `<project>/sources.md` — created / skipped / existing
 - Env file: `<project>/.env.local` — created / skipped / existing
-- `super configure` — ran / skipped
+- `super configure` — ran (N times)
 
 Then suggest:
 
