@@ -116,8 +116,8 @@ For each source below, ask: *"Do you use `<source>`?"* (Yes/No). Set `sources.<n
 | `clickup` | `monkeys_wiki_path` (string — main wiki folder name, or leave default), `team_docs_prefix` (string — e.g. `"Docs "`) |
 | `confluence` | `intranet_path`, `wiki_path` |
 | `gdrive` | `exco_folder`, `projects_folder`, `one_pagers_folder` |
-| `gws` | Run the **gws auth block** below. |
-| `bigquery` | Run the **bq auth block** below. |
+| `gws` | Delegate auth to `super onboard` — see the block below. |
+| `bigquery` | Delegate auth to `super onboard` — see the block below. |
 | `linear` | none (covered by Step 5) |
 | `medium` | (covered by Step 6) |
 | `metabase` | none |
@@ -125,64 +125,17 @@ For each source below, ask: *"Do you use `<source>`?"* (Yes/No). Set `sources.<n
 
 For each follow-up, show the current value and ask "keep / change". Edit only if changed.
 
-#### gws auth block (run when `sources.gws.enabled: true`)
+#### gws / bq auth — delegated to `super onboard`
 
-Run this whenever the user enables `gws` in Step 8. It's idempotent — each step short-circuits when its condition is already satisfied, so a re-run on an already-configured machine is cheap.
+Browser-based auth flows (`gws auth login`, `gcloud auth application-default login`, the Google Cloud Console walkthrough) are handled by the `super onboard` shell command, not by this skill. If the user enables `gws` or `bigquery` here but isn't yet authenticated:
 
-1. **Binary check.** Verify `gws` is on PATH (`command -v gws`). If missing, tell the user to re-run `super install` (the `googleworkspace-cli` system entry installs it via Homebrew on macOS and from the prebuilt tarball on Linux) and skip the rest of this block.
+1. Probe auth state with the respective cheap call:
+   - gws: `gws calendar calendarList list --params '{"maxResults":1}'` (exit 0 = authed)
+   - bq: `gcloud auth application-default print-access-token` (exit 0 = authed)
+2. If authed → ✅ move on.
+3. If not authed → tell the user: *"This auth is handled by `super onboard`. Exit this CLI, run `super onboard` from the project shell, and it will walk you through it. Or run the auth command yourself (`gws auth login` / `gcloud auth application-default login`) and re-run me."* Then skip the source block and continue with the rest of the Q&A — don't try to drive the browser OAuth from inside the skill.
 
-2. **Credentials in `.env.local`.** Read `<project>/.env.local`. If both `GOOGLE_WORKSPACE_CLI_CLIENT_ID` and `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` are non-empty, say *"Credentials already in `.env.local`. Skipping to auth check."* and jump to step 4.
-
-   Otherwise ask: *"No OAuth credentials in `.env.local`. Walk you through creating an OAuth 2.0 Client ID in Google Cloud Console? — yes / have credentials already / skip."*
-
-   - **yes** → show the walkthrough below, then collect each value via a dedicated `AskUserQuestion`
-   - **have credentials already** → skip the walkthrough, collect the two values directly
-   - **skip** → tell the user to fill the keys in `.env.local` manually and jump to step 4 (which will fail the auth check and tell them to come back)
-
-   Walkthrough (show verbatim):
-
-   ```
-   1. Open https://console.cloud.google.com/apis/credentials
-   2. Select (or create) a project — any project works
-   3. Create credentials → OAuth client ID
-   4. If prompted to configure the consent screen:
-      - User Type: External
-      - App name: anything (e.g. "super-brain")
-      - User support email: your email
-      - Scopes: leave empty for now (gws asks at login time)
-      - Test users: add your own Google account
-   5. Back at "Create OAuth client ID":
-      - Application type: Desktop app
-      - Name: anything (e.g. "super-brain-desktop")
-   6. Click Create → copy the Client ID and Client Secret
-   ```
-
-   Collect each value with its own `AskUserQuestion` call (so nothing is echoed to the transcript), then `Edit` `<project>/.env.local` to replace the two empty `GOOGLE_WORKSPACE_CLI_CLIENT_ID=` / `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET=` lines. **Never print the secret back.**
-
-3. **Enable required Google APIs.** Before the first `gws auth login`, the OAuth project needs these APIs enabled or login fails with `PERMISSION_DENIED`. Tell the user once:
-
-   *"In the same Google Cloud project, open 'APIs & Services → Library' and enable: Gmail API, Google Calendar API, Google Drive API. Takes ~30 seconds. Say `done` when ready, or `skip` to try anyway."*
-
-4. **`gws auth login`.** Probe current state with a cheap call: `gws calendar calendarList list --params '{"maxResults": 1}'`. Exit 0 → already authenticated, jump to step 5. Otherwise tell the user:
-
-   *"Run `! gws auth login` in this session — the `!` executes it in your shell so the browser opens. Consent to the scopes Google shows (Gmail/Calendar/Drive). Reply `done` when the CLI says 'Login successful', or `skip` to defer."*
-
-   Do **not** run `gws auth login` yourself — it needs the user's shell for the browser, not a tool call.
-
-5. **Verify.** Re-run `gws calendar calendarList list --params '{"maxResults": 1}'`.
-
-   - Exit 0 → ✅ *"`gws` is authenticated. You're ready to run `/brain-morning-start`, `/brain-pull-my-meeting-notes`, `/brain-prepare-my-deep-dives`, `/brain-prepare-my-one-on-one`."*
-   - Exit 2 (auth error) → ❌ *"Auth looks broken. Re-run `! gws auth login`. If it fails citing a missing API, go back to step 3."*
-   - Other exit → print the stderr and tell the user what went wrong.
-
-#### bq auth block (run when `sources.bigquery.enabled: true`)
-
-The `gcloud-cli` system entry (installed by `super install`) provides both `gcloud` and `bq`. This block handles project selection and ADC login.
-
-1. Verify both binaries on PATH (`command -v gcloud && command -v bq`). If missing, tell the user to run `super install` again and skip the rest.
-2. Read `<project>/.env.local` and check `GCP_PROJECT_ID`. If it's empty or still `<your-gcp-project>`, ask: *"Which GCP project should `bq` default to?"* and `Edit` the value in `.env.local`.
-3. Check ADC status with `gcloud auth application-default print-access-token` (exit 0 = authed). If not authed, prompt: *"Run `! gcloud auth application-default login` in this session — it opens a browser. Say 'done' when finished, or 'skip' to defer."*
-4. Verify with `bq ls --project_id=<value> --max_results=1`. Exit 0 → report ✅. Non-zero → report the stderr and suggest re-running the ADC login.
+Rationale: auth needs a browser + the user's shell to catch the redirect. Keeping those flows in `super onboard` (bash) instead of here keeps the skill focused on non-interactive brain Q&A.
 
 ### Step 9 — Teams
 

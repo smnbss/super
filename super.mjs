@@ -470,14 +470,13 @@ async function cmdInstall(args) {
   ui.spacer();
   ui.box(
     'Next steps', '',
-    '1. Edit .env.local and fill in credentials',
-    '   (only the sources you actually use need values)', '',
-    '2. Launch a CLI: super launch <claude|codex|gemini>', '',
-    '3. Inside the CLI, run /super-setup — walks you through',
-    '   brain.config.yml (org, Linear, Medium, GitHub, sources,',
-    '   teams) and, if you enable gws, Google Workspace OAuth',
-    '   + `gws auth login`. Re-runs `super install` at the end',
-    '   so MCPs pick up anything you added to .env.local.',
+    'Run:  super onboard', '',
+    'It walks you through CLI logins (claude/gemini/codex),',
+    'service logins (gws/gcloud), and then launches Claude',
+    'with /super-setup for the brain Q&A — one command, one',
+    'linear flow instead of five context switches.', '',
+    'Want to drive manually? Edit .env.local, then',
+    'super launch claude "/super-setup".',
   );
 }
 
@@ -488,6 +487,129 @@ async function cmdInstall(args) {
 async function cmdConfigure(args) {
   ui.muted('`super configure` is now an alias for `super install`.');
   await cmdInstall(args);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ONBOARD — one-shot interactive post-install flow
+// ═══════════════════════════════════════════════════════════════════════════════
+// Bundles `super install` + every interactive auth (CLI logins, gws, gcloud)
+// behind one command. Pauses after each step for the user to run the browser
+// OAuth in their shell, then launches Claude with /super-setup prepopulated
+// so the brain Q&A picks up where auth leaves off.
+
+function cliLoginCommand(cli) {
+  return { claude: 'claude /login', gemini: 'gemini → /auth → Google', codex: 'codex login' }[cli];
+}
+
+function gwsAuthed() {
+  try { execSync('gws calendar calendarList list --params \'{"maxResults":1}\'', { stdio: 'ignore', timeout: 10000 }); return true; } catch { return false; }
+}
+
+function gcloudAuthed() {
+  try { execSync('gcloud auth application-default print-access-token', { stdio: 'ignore', timeout: 10000 }); return true; } catch { return false; }
+}
+
+async function cmdOnboard(args) {
+  const start = Date.now();
+  const root = config.findRoot();
+  const home = process.env.HOME;
+  if (home && root === home) {
+    die(`Refusing to onboard in $HOME (${home}).\n  cd into a brain project first.`);
+  }
+  if (root === SUPER_HOME) {
+    die(`Refusing to onboard in the super install dir itself (${SUPER_HOME}).`);
+  }
+
+  ui.banner(VERSION);
+  ui.section('Onboarding super');
+  ui.print(`  Brain root: ${ui.colors.bold(root)}`);
+  ui.spacer();
+  ui.print('  Five steps, four interactive. We\'ll pause for browser logins');
+  ui.print('  and pick up automatically once you say you\'re done.');
+  ui.spacer();
+
+  // Phase 1: super install
+  ui.brand('[1/4] Running super install...');
+  ui.spacer();
+  const firstInstall = !existsSync(join(root, '.super', 'super.config.yaml'));
+  if (firstInstall) {
+    await cmdInstall(['--all']);
+  } else {
+    const rerun = await interactive.confirm('super install has already run. Run it again to refresh skills/plugins/MCPs?', false);
+    if (rerun) await cmdInstall(['--all']);
+    else ui.muted('  Skipping install.');
+  }
+  ui.spacer();
+
+  // Phase 2: CLI logins
+  ui.brand('[2/4] CLI authentication...');
+  ui.spacer();
+  for (const cli of ['claude', 'gemini', 'codex']) {
+    if (!catalog.isInstalled(cli)) { ui.muted(`  ${CLI[cli].icon} ${CLI[cli].label} — not installed, skipping`); continue; }
+    ui.info(`  ${CLI[cli].icon} ${CLI[cli].label} login`);
+    ui.muted(`    Run in another terminal (or this one):`);
+    ui.print(`      ${ui.colors.bold(cliLoginCommand(cli))}`);
+    const done = await interactive.confirm(`  Finished logging in to ${CLI[cli].label}?`, true);
+    if (done) ui.success(`  ${CLI[cli].label} login confirmed`);
+    else ui.muted(`  ${CLI[cli].label} deferred — re-run \`${cliLoginCommand(cli)}\` later.`);
+    ui.spacer();
+  }
+
+  // Phase 3: Service auths (gws + gcloud)
+  ui.brand('[3/4] Service authentication...');
+  ui.spacer();
+
+  if (catalog.isInstalled('gws')) {
+    if (gwsAuthed()) {
+      ui.muted('  gws — already authenticated');
+    } else {
+      ui.info('  gws (Google Workspace) — gmail/calendar/drive');
+      ui.muted('    First make sure GOOGLE_WORKSPACE_CLI_CLIENT_ID and');
+      ui.muted('    GOOGLE_WORKSPACE_CLI_CLIENT_SECRET are set in:');
+      ui.print(`      ${ui.colors.bold(join(root, '.env.local'))}`);
+      ui.muted('    Then run:');
+      ui.print('      ' + ui.colors.bold('gws auth login'));
+      const done = await interactive.confirm('  Finished gws auth?', true);
+      if (done && gwsAuthed()) ui.success('  gws authenticated');
+      else if (done) ui.warn('  gws still reports unauthenticated — re-run `gws auth login`');
+      else ui.muted('  gws deferred');
+    }
+    ui.spacer();
+  }
+
+  if (catalog.isInstalled('gcloud')) {
+    if (gcloudAuthed()) {
+      ui.muted('  gcloud ADC — already authenticated');
+    } else {
+      ui.info('  gcloud ADC — needed for BigQuery and any GCP SDK');
+      ui.muted('    Run:');
+      ui.print('      ' + ui.colors.bold('gcloud auth application-default login'));
+      const done = await interactive.confirm('  Finished gcloud ADC auth?', true);
+      if (done && gcloudAuthed()) ui.success('  gcloud ADC authenticated');
+      else if (done) ui.warn('  gcloud ADC still not authenticated — re-run the command above');
+      else ui.muted('  gcloud deferred');
+    }
+    ui.spacer();
+  }
+
+  // Phase 4: launch claude with /super-setup prepopulated
+  ui.brand('[4/4] Brain configuration (/super-setup)...');
+  ui.spacer();
+  ui.print('  Launching Claude with `/super-setup` — it will walk you through');
+  ui.print('  the brain Q&A (org, Linear, Medium, sources, teams) and re-run');
+  ui.print('  `super install` at the end so MCPs pick up any new env vars.');
+  ui.spacer();
+  const launch = await interactive.confirm('Launch Claude now?', true);
+  ui.spacer();
+  ui.success(`Onboard steps complete (${ui.elapsed(start)})`);
+  ui.spacer();
+  if (launch) {
+    // Reuse cmdLaunch so session tracking + PATH normalization stays consistent.
+    cmdLaunch('claude', ['/super-setup']);
+  } else {
+    ui.info('When ready, run:');
+    ui.print('    ' + ui.colors.bold('super launch claude "/super-setup"'));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -917,6 +1039,7 @@ USAGE
 
 COMMANDS
   install [target]     Full install — hooks, CLIs, system prereqs, built-in + external skills, plugins, MCPs, context files (all|claude|gemini|codex)
+  onboard              One-shot post-install: runs install, walks CLI + service logins, launches /super-setup
   configure [target]   Alias for install (kept for backwards compat)
   claude|gemini|codex  Launch CLI with session tracking
   resume [session]     Resume a previous session
@@ -1019,6 +1142,7 @@ async function main() {
     case '!': await cmdQuickNew(); break;
     case '?': await cmdQuickSearch(); break;
     case 'install': case 'i': await cmdInstall(rest); break;
+    case 'onboard': case 'o': await cmdOnboard(rest); break;
     case 'configure': case 'setup': await cmdConfigure(rest); break;
     case 'launch': case 'l': case 'run': cmdLaunch(rest[0], rest.slice(1)); break;
     case 'resume': case 'r': await cmdResume(rest[0]); break;
