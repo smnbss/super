@@ -449,7 +449,10 @@ async function cmdInstall(args) {
     '2. Launch a CLI: super launch <claude|codex|gemini>', '',
     '3. Inside the CLI, run /super-setup to configure the brain',
     '   (writes brain.config.yml, then installs external skills,',
-    '   plugins, MCPs, and context files via `super configure`)',
+    '   plugins, MCPs, and context files via `super configure`)', '',
+    '4. If you use Google Workspace (gmail/calendar/drive), run',
+    '   /brain-gws-auth inside the CLI — it walks you through the',
+    '   OAuth client setup and `gws auth login` verification.',
   );
 }
 

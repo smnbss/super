@@ -106,13 +106,9 @@ For each follow-up, show the current value and ask "keep / change". Edit only if
 
 #### gws auth block (run when `sources.gws.enabled: true`)
 
-The `googleworkspace-cli` system entry (installed by `super install`) provides the `gws` binary. This block only handles OAuth setup.
+Delegate to the dedicated `/brain-gws-auth` skill — it owns the full OAuth client + login walkthrough (credentials in `.env.local`, Google Cloud API enablement, `gws auth login`, and a verify call). Invoke it via the Skill tool.
 
-1. Verify `gws` is on PATH (`command -v gws`). If missing, tell the user to run `super install` again and skip the rest of this block.
-2. Read `<project>/.env.local` and check `GOOGLE_WORKSPACE_CLI_CLIENT_ID` + `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET`. If both are non-empty, skip to step 4.
-3. Otherwise, tell the user: *"Create an OAuth 2.0 Client ID (Desktop app) in Google Cloud Console → APIs & Services → Credentials. Paste the client ID and secret now, or say 'skip' to fill them in manually later."* Use one `AskUserQuestion` per value. Write via targeted `Edit` on `<project>/.env.local`. Never print the secret back to the transcript.
-4. Prompt the user to run `gws auth login` themselves: *"Run `! gws auth login` in this session — it opens a browser for Google consent. Say 'done' when finished, or 'skip' to defer."*
-5. Verify with a cheap call: `gws calendar calendarList list --params '{"maxResults": 1}'`. Exit code 0 → report ✅. Exit code 2 (auth error) → report ❌ and suggest re-running `gws auth login`.
+If the user declines to enable `sources.gws.enabled` now but will use Google Workspace later, tell them they can run `/brain-gws-auth` at any time to set it up.
 
 #### bq auth block (run when `sources.bigquery.enabled: true`)
 
