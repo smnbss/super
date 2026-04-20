@@ -421,8 +421,7 @@ async function cmdInstall(args) {
   }
 
   // Core phase: bootstrap + built-in skills shipped in $SUPER_HOME/skills,
-  // CLI home symlinks, and skill-dir sync. Never pulls external skills,
-  // plugins, or MCPs — those live in `super configure`.
+  // CLI home symlinks, and skill-dir sync.
   if (config.findConfig()) {
     catalog.installPhaseInstall(selectedClis);
   }
@@ -437,6 +436,17 @@ async function cmdInstall(args) {
   ui.spacer();
   catalog.ensureGlobalSuperSkills(selectedClis);
   ui.spacer();
+
+  // Configure phase: external catalog skills, plugins, MCPs, and context
+  // files (AGENTS.md + CLAUDE.md/GEMINI.md symlinks). Merged into `super
+  // install` so a single command brings a fresh brain fully online. Re-run
+  // `super install` whenever .env.local changes — MCP settings are rebuilt
+  // each time and pick up new $env:VAR values idempotently.
+  if (config.findConfig()) {
+    catalog.installPhaseConfigure(selectedClis);
+    setupContextFiles();
+    ui.spacer();
+  }
 
   // Ensure SUPER_HOME is on PATH in shell profile (idempotent).
   const profile = process.platform === 'darwin'
@@ -463,43 +473,21 @@ async function cmdInstall(args) {
     '1. Edit .env.local and fill in credentials',
     '   (only the sources you actually use need values)', '',
     '2. Launch a CLI: super launch <claude|codex|gemini>', '',
-    '3. Inside the CLI, run /super-setup to configure the brain',
-    '   (writes brain.config.yml, installs external skills, plugins,',
-    '   MCPs, context files, and — if you enable gws — walks you',
-    '   through Google Workspace OAuth + `gws auth login`)',
+    '3. Inside the CLI, run /super-setup — walks you through',
+    '   brain.config.yml (org, Linear, Medium, GitHub, sources,',
+    '   teams) and, if you enable gws, Google Workspace OAuth',
+    '   + `gws auth login`. Re-runs `super install` at the end',
+    '   so MCPs pick up anything you added to .env.local.',
   );
 }
 
+// `super configure` used to run the external-skills/plugins/MCPs/context-files
+// phase separately from `super install`. That phase now happens inside
+// `super install` itself, so this is just an alias — call super install with
+// whatever args the user passed (including --all or a CLI target).
 async function cmdConfigure(args) {
-  const start = Date.now();
-  const root = config.findRoot();
-  const home = process.env.HOME;
-  if (home && root === home) {
-    die(`Refusing to configure in $HOME (${home}).\n  cwd: ${process.cwd()}\n  Run 'super install' from inside a project first.`);
-  }
-  if (root === SUPER_HOME) {
-    die(`Refusing to configure the super install dir itself (${SUPER_HOME}).`);
-  }
-
-  if (!config.findConfig()) {
-    die("No super.config.yaml found — run 'super install' first.");
-  }
-
-  // Scope to installed CLIs unless the caller narrows it.
-  const installed = catalog.installedClis();
-  let selectedClis = installed;
-  const target = args[0];
-  if (target && target !== '--all') {
-    if (!CLI[target]) die(`Unknown CLI: ${target}. Use: all|claude|gemini|codex`);
-    if (!installed.includes(target)) die(`${CLI[target].label} is not installed — run 'super install' first.`);
-    selectedClis = [target];
-  }
-
-  catalog.installPhaseConfigure(selectedClis);
-  setupContextFiles();
-  ui.spacer();
-  ui.success(`Configure complete (${ui.elapsed(start)})`);
-  ui.muted(`Run ${ui.colors.bold('super launch <cli>')} to start a session`);
+  ui.muted('`super configure` is now an alias for `super install`.');
+  await cmdInstall(args);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -928,8 +916,8 @@ USAGE
   super [command] [options]
 
 COMMANDS
-  install [target]     Install super, hooks, CLIs, and built-in skills (all|claude|gemini|codex)
-  configure [target]   Install external skills, plugins & MCPs + context files (called by /super-setup)
+  install [target]     Full install — hooks, CLIs, system prereqs, built-in + external skills, plugins, MCPs, context files (all|claude|gemini|codex)
+  configure [target]   Alias for `install` (kept for backwards compat)
   claude|gemini|codex  Launch CLI with session tracking
   resume [session]     Resume a previous session
   switch <cli>         Continue session in different CLI
