@@ -366,7 +366,7 @@ async function cmdInstall(args) {
       for (const fail of cliResults.failed) ui.muted(`    • ${fail.name}: ${fail.reason}`);
       ui.spacer();
       ui.info('To retry manually:');
-      const cfg = catalog.catalogClis().filter(c => cliResults.failed.some(f => f.name === c.name));
+      const cfg = config.catalogClis().filter(c => cliResults.failed.some(f => f.name === c.name));
       for (const cli of cfg) if (cli.install) ui.muted(`    ${cli.name}: ${cli.install}`);
     }
     ui.spacer();

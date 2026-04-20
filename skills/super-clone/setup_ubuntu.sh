@@ -18,7 +18,7 @@ if ! orb_exists "$BASE_MACHINE"; then
   orb create ubuntu "$BASE_MACHINE"
   orb -m "$BASE_MACHINE" bash -lc '
     set -euo pipefail
-    sudo apt-get update && sudo apt-get install -y git curl
+    sudo apt-get update && sudo apt-get install -y git curl zstd ca-certificates
     ARCH=$(uname -m)
     case "$ARCH" in
       x86_64) NODE_ARCH="linux-x64" ;;
@@ -28,6 +28,9 @@ if ! orb_exists "$BASE_MACHINE"; then
     NODE_VERSION="20.19.0"
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${NODE_ARCH}.tar.gz" | \
       sudo tar -xz -C /usr/local --strip-components=1
+    # Make the Node global prefix user-writable so `npm install -g` works
+    # without sudo for gemini/codex and any future global installs.
+    sudo chown -R "$(id -u):$(id -g)" /usr/local/lib/node_modules /usr/local/bin /usr/local/include /usr/local/share
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."

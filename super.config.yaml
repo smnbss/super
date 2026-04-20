@@ -34,27 +34,26 @@ system:
   ollama:
     name: ollama
     check: "command -v ollama"
-    install: "curl -fsSL https://ollama.com/install.sh | sh"
+    # ollama's installer uses zstd on Linux — install it first if missing
+    install: "sh -c 'if command -v apt-get >/dev/null 2>&1 && ! command -v zstd >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y zstd; fi; curl -fsSL https://ollama.com/install.sh | sh'"
     enabled: true
 
   googleworkspace-cli:
     name: googleworkspace-cli
     # Provides the `gws` binary used by brain-morning-start,
     # brain-pull-my-meeting-notes, brain-prepare-my-deep-dives,
-    # brain-prepare-my-one-on-one. The formula name is
-    # `googleworkspace-cli`, not `gws` — a different unrelated
-    # formula also installs a `gws` binary and will conflict.
+    # brain-prepare-my-one-on-one. Formula is macOS/Homebrew-only;
+    # skip on Linux (brain skills that use `gws` run from macOS only).
     check: "command -v gws"
-    install: "brew install googleworkspace-cli"
+    install: "sh -c '[ \"$(uname)\" = Darwin ] && brew install googleworkspace-cli || echo skip: macOS-only'"
     enabled: true
 
   gcloud-cli:
     name: gcloud-cli
-    # Provides `gcloud` and `bq`. `bq` is used by the BigQuery-backed
-    # data-analyst and dbt-modeling skills. After install, the user
-    # authenticates interactively via `/super-setup`.
+    # Provides `gcloud` and `bq`. On macOS: brew cask. On Linux: official
+    # Google Cloud apt repo. After install, authenticate via `/super-setup`.
     check: "command -v gcloud && command -v bq"
-    install: "brew install --cask gcloud-cli"
+    install: "sh -c 'if [ \"$(uname)\" = Darwin ]; then brew install --cask gcloud-cli; elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y apt-transport-https ca-certificates gnupg curl && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && echo \"deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main\" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null && sudo apt-get update -qq && sudo apt-get install -y google-cloud-cli; else echo skip: unsupported platform; fi'"
     enabled: true
 
 # ─── CLIs ────────────────────────────────────────────────────────────────────
@@ -67,11 +66,13 @@ clis:
     check: "command -v claude"
     enabled: true
   gemini:
-    install: "npm install -g @google/gemini-cli"
+    # Try unprivileged first (Mac with user-owned npm prefix), fall back
+    # to sudo on Linux where the system npm prefix is root-owned.
+    install: "sh -c 'npm install -g @google/gemini-cli 2>/dev/null || sudo -n npm install -g @google/gemini-cli'"
     check: "command -v gemini"
     enabled: true
   codex:
-    install: "npm install -g @openai/codex"
+    install: "sh -c 'npm install -g @openai/codex 2>/dev/null || sudo -n npm install -g @openai/codex'"
     check: "command -v codex"
     enabled: true
 
