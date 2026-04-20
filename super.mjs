@@ -917,7 +917,7 @@ USAGE
 
 COMMANDS
   install [target]     Full install — hooks, CLIs, system prereqs, built-in + external skills, plugins, MCPs, context files (all|claude|gemini|codex)
-  configure [target]   Alias for `install` (kept for backwards compat)
+  configure [target]   Alias for install (kept for backwards compat)
   claude|gemini|codex  Launch CLI with session tracking
   resume [session]     Resume a previous session
   switch <cli>         Continue session in different CLI
