@@ -22,6 +22,20 @@ process.env.SUPER_HOME = process.env.SUPER_HOME || __dirname;
 const SUPER_HOME = process.env.SUPER_HOME;
 const VERSION = config.superVersion();
 
+// Ensure standard user-install locations are on PATH so `command -v <cli>`
+// and execFileSync find CLIs installed there (e.g. ~/.local/bin/claude) even
+// when the parent shell's PATH is stale — common right after `super install`
+// writes the PATH export to ~/.profile mid-session.
+{
+  const home = process.env.HOME || '';
+  const pathParts = (process.env.PATH || '').split(':');
+  const extra = [home && join(home, '.local', 'bin'), SUPER_HOME].filter(Boolean);
+  for (const dir of extra) {
+    if (!pathParts.includes(dir)) pathParts.unshift(dir);
+  }
+  process.env.PATH = pathParts.join(':');
+}
+
 const CLI = {
   claude: { cmd: 'claude', icon: '🟠', label: 'Claude Code', ctx: 'CLAUDE.md' },
   gemini: { cmd: 'gemini', icon: '🔵', label: 'Gemini CLI', ctx: 'GEMINI.md' },
