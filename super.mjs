@@ -87,6 +87,11 @@ function autoUpdate() {
     } catch {}
   }
 
+  // Refresh global super-skill symlinks in each CLI's ~/.<cli>/skills dir.
+  // Cheap filesystem-only op; picks up any new skills that a just-pulled
+  // super release added without requiring another `super install` run.
+  try { catalog.ensureGlobalSuperSkills(null, { silent: true }); } catch {}
+
   markUpdateChecked();
   ui.muted(`Auto-update done (${ui.elapsed(start)})`);
 }
@@ -421,6 +426,17 @@ async function cmdInstall(args) {
   if (config.findConfig()) {
     catalog.installPhaseInstall(selectedClis);
   }
+
+  // Also keep super's built-in skills fresh in the CLI's GLOBAL skill dir
+  // (~/.claude/skills, ~/.codex/skills) so skills like /super-clone invoked
+  // outside a brain project use the latest shipped version. Symlinks point
+  // directly at $SUPER_HOME/skills so super's git-pull auto-update applies
+  // to these too without needing another `super install` pass.
+  ui.spacer();
+  ui.brand('Syncing super skills to global CLI dirs...');
+  ui.spacer();
+  catalog.ensureGlobalSuperSkills(selectedClis);
+  ui.spacer();
 
   // Ensure SUPER_HOME is on PATH in shell profile (idempotent).
   const profile = process.platform === 'darwin'
