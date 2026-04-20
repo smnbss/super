@@ -10,6 +10,8 @@ Installation is a two-step flow so tokens don't have to exist before the install
 
 ```bash
 git clone https://github.com/smnbss/super ~/.super
+export PATH="$HOME/.super:$PATH"
+source ~/.zshrc
 cd ~/your-project
 
 super install                              # bootstrap super itself
