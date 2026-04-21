@@ -36,9 +36,11 @@ if ! orb_exists "$BASE_MACHINE"; then
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${NODE_ARCH}.tar.gz" | \
       sudo tar -xz -C /usr/local --strip-components=1
     curl -fsSL https://ollama.com/install.sh | sh
-    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-      sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+    # Ubuntu 25.10 questing images do not ship /usr/bin/gpg, and sudo-rs
+    # drops it into PATH in ways that are painful to work around. Use
+    # [trusted=yes] on the apt source to skip signature verification
+    # entirely — acceptable for a single-user dev VM sealing a local image.
+    echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
     sudo apt-get update && sudo apt-get install -y google-cloud-cli
     # Make /usr/local user-writable LAST. ollama runs `install -o0 -g0
