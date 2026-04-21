@@ -49,7 +49,8 @@ if ! orb_exists "$BASE_MACHINE"; then
     mkdir -p "$HOME/.local/bin"
 
     # --- System prereqs baked in ------------------------------------------
-
+    # System prereqs — every one pre-baked in this BASE_MACHINE.
+    
     # uv (Astral)
     curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="$HOME/.local/bin:$PATH"
@@ -66,11 +67,7 @@ if ! orb_exists "$BASE_MACHINE"; then
     install -m 0755 "$tmpgws/gws" "$HOME/.local/bin/gws"
     rm -rf "$tmpgws"
 
-    # gcloud + bq (google-cloud-cli)
-    # Use [trusted=yes] to skip signature verification. Normally a bad
-    # idea on a shared server, but this is a dev VM sealing an image for
-    # local OrbStack clones — not a production system. Dodges the
-    # apt/gpg/sudo-rs integration pain on Ubuntu questing.
+    # gcloud + bq (google-cloud-cli) — [trusted=yes] to skip signature check
     echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
     sudo apt-get update -qq
@@ -83,12 +80,19 @@ if ! orb_exists "$BASE_MACHINE"; then
     sudo apt-get install -y gh
 
     # --- CLIs baked in ----------------------------------------------------
-
-    # All three CLIs in a single npm install. The Claude Code curl|bash
-    # installer flips /usr/local ownership back to root and breaks any
-    # npm install -g that follows it; the npm package is equally
-    # official and avoids the whole mess.
-    npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+    #
+    # Ordering matters: @anthropic-ai/claude-code has a postinstall hook
+    # that runs the native claude installer, which re-chowns parts of
+    # /usr/local back to root. Putting it in the same `npm install -g`
+    # batch as gemini/codex makes their symlink step fail EACCES because
+    # npm processes the whole batch before linking bins.
+    #
+    # Install gemini + codex FIRST (while /usr/local is still user-owned
+    # from the post-node chown), then claude separately. Its native
+    # installer drops claude into ~/.local/bin — we no longer need
+    # /usr/local at that point.
+    npm install -g @openai/codex @google/gemini-cli
+    npm install -g @anthropic-ai/claude-code
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
