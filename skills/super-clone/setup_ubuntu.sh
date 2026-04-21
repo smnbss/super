@@ -31,6 +31,7 @@ if ! orb_exists "$BASE_MACHINE"; then
     # Make the Node global prefix user-writable so `npm install -g` works
     # without sudo for gemini/codex and any future global installs.
     sudo chown -R "$(id -u):$(id -g)" /usr/local/lib/node_modules /usr/local/bin /usr/local/include /usr/local/share
+    curl -fsSL https://ollama.com/install.sh | sh
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
