@@ -11,6 +11,13 @@ description: >
 
 Daily bootstrap: update tools (brew, npm, gstack, python), sync brain sources, rebuild memory and service docs, harvest every meeting since the last harvested day, and prepare today's agendas for deep dives and 1:1s.
 
+## Part 0 — First-run bootstrap
+
+Before doing anything else, check whether `agents/morning-start-additional/SKILL.md` exists (relative to the brain repo root).
+
+- If it exists → skip this part and continue to Part 1.
+- If it does not exist → copy `resources/morning-start-additional.template.md` (relative to this skill's directory) to `agents/morning-start-additional/SKILL.md`, then continue to Part 1. This is a one-time seed so the user has a place to add extra per-morning agent runs without editing this skill.
+
 ## Part 1 — Update tools & sync
 
 1. **Brew update & upgrade** — run `brew update && brew upgrade` to update Homebrew and upgrade all installed formulae and casks.
@@ -39,10 +46,15 @@ Regenerate deep technical `.AGENT.MD` service documentation from cloned GitHub r
 
 **Wait for:** Part 2a complete (needs `src/github/` updated with latest repos).
 
+### 2b.5. Additional morning agents (`agents/morning-start-additional/SKILL.md`)
+If `agents/morning-start-additional/SKILL.md` exists, read it and execute any `run <path>` directives it contains, in order. Skip this step if the file does not exist.
+
+**Wait for:** Part 2b complete. Must finish before Part 2c so any outputs feed into the memory rebuild.
+
 ### 2c. Rebuild memory (`brain-rebuild-memory`)
 Rebuild the memory layers L2 (domain knowledge) and L1 (navigation MOCs) from the latest source exports and service docs. This creates team files, releases tracking, entity index, and navigation MOCs like `hub.md` and `teams.md`.
 
-**Wait for:** Part 2b complete (needs `outputs/services/` updated with latest service docs).
+**Wait for:** Part 2b.5 complete.
 
 ## Part 3 — Harvest meeting notes since last harvest (parallel with Part 2a)
 
@@ -204,6 +216,9 @@ Part 2a + Part 3 (parallel start)
                                                          │
 Part 2b: brain-rebuild-services ────────────────────────→┤
   └─ Generate service docs from repos → outputs/services/│
+                                                         ↓
+Part 2b.5: agents/morning-start-additional/SKILL.md (if present)
+  └─ Run any `run <path>` directives it lists
                                                          ↓
 Part 2c: brain-rebuild-memory ────────────────────────────┘
   └─ Rebuild L2 domain knowledge + L1 MOCs → memory/
