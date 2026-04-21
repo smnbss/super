@@ -57,7 +57,7 @@ super claude --model opus   # Launch Claude with Opus model (explicit)
 super claude --model haiku  # Launch Claude with Haiku model
 
 # Launch with Ollama provider
-super claude --provider ollama --model kimi-k2.5:cloud      # Use Kimi via Ollama
+super claude --provider ollama --model kimi-k2.6:cloud      # Use Kimi via Ollama
 super claude --provider ollama --model minimax-m2.5:cloud  # Use MiniMax via Ollama
 super claude --provider ollama --model glm-5:cloud         # Use GLM via Ollama
 super claude --provider ollama --model gemma4:31b-cloud    # Use Gemma 4 via Ollama

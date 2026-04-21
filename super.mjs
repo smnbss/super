@@ -928,14 +928,14 @@ async function cmdResume(input) {
           case 2: launchArgs.push('--model', 'haiku'); break;
           case 3: {
             const ollamaOptions = [
-              'Kimi K2.5 (kimi-k2.5:cloud)',
+              'Kimi K2.6 (kimi-k2.6:cloud)',
               'MiniMax M2.5 (minimax-m2.5:cloud)',
               'GLM 5 (glm-5:cloud)',
               'Gemma 4 31B (gemma4:31b-cloud)',
             ];
             const ollamaChoice = await interactive.selectSingle('Ollama model?', ollamaOptions, 0);
             if (ollamaChoice === null) { ui.info('Cancelled.'); return; }
-            const ollamaModels = ['kimi-k2.5:cloud', 'minimax-m2.5:cloud', 'glm-5:cloud', 'gemma4:31b-cloud'];
+            const ollamaModels = ['kimi-k2.6:cloud', 'minimax-m2.5:cloud', 'glm-5:cloud', 'gemma4:31b-cloud'];
             launchArgs.push('--provider', 'ollama', '--model', ollamaModels[ollamaChoice]);
             break;
           }
@@ -964,14 +964,14 @@ async function cmdResume(input) {
           case 2: launchArgs.push('--model', 'haiku'); break;
           case 3: {
             const ollamaOptions = [
-              'Kimi K2.5 (kimi-k2.5:cloud)',
+              'Kimi K2.6 (kimi-k2.6:cloud)',
               'MiniMax M2.5 (minimax-m2.5:cloud)',
               'GLM 5 (glm-5:cloud)',
               'Gemma 4 31B (gemma4:31b-cloud)',
             ];
             const ollamaChoice = await interactive.selectSingle('Ollama model?', ollamaOptions, 0);
             if (ollamaChoice === null) { ui.info('Cancelled.'); return; }
-            const ollamaModels = ['kimi-k2.5:cloud', 'minimax-m2.5:cloud', 'glm-5:cloud', 'gemma4:31b-cloud'];
+            const ollamaModels = ['kimi-k2.6:cloud', 'minimax-m2.5:cloud', 'glm-5:cloud', 'gemma4:31b-cloud'];
             launchArgs.push('--provider', 'ollama', '--model', ollamaModels[ollamaChoice]);
             break;
           }
