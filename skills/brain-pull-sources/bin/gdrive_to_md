@@ -14,12 +14,20 @@ if python3 -c "import markitdown" 2>/dev/null; then
 # 2. Check pipx venv python
 elif [ -x "$HOME/.local/pipx/venvs/markitdown/bin/python" ]; then
     PYTHON="$HOME/.local/pipx/venvs/markitdown/bin/python"
-# 3. Derive python from markitdown binary location
+# 3. Derive python from markitdown binary location (resolve symlinks so
+#    `~/.local/bin/markitdown -> ~/.local/share/uv/tools/markitdown/bin/markitdown`
+#    finds the venv python in the uv tool dir, not next to the symlink).
 elif command -v markitdown >/dev/null 2>&1; then
     MARKITDOWN_BIN="$(command -v markitdown)"
+    if command -v readlink >/dev/null 2>&1; then
+        RESOLVED="$(readlink -f "$MARKITDOWN_BIN" 2>/dev/null || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$MARKITDOWN_BIN")"
+        [ -n "$RESOLVED" ] && MARKITDOWN_BIN="$RESOLVED"
+    fi
     if [[ "$MARKITDOWN_BIN" == */bin/markitdown ]]; then
         VENV_PYTHON="${MARKITDOWN_BIN%/bin/markitdown}/bin/python"
-        if [ -x "$VENV_PYTHON" ] && "$VENV_PYTHON" -c "import markitdown" 2>/dev/null; then
+        # Require a converter dep too — a bare `markitdown` install without
+        # [all] extras imports cleanly but silently drops every conversion.
+        if [ -x "$VENV_PYTHON" ] && "$VENV_PYTHON" -c "import markitdown, mammoth" 2>/dev/null; then
             PYTHON="$VENV_PYTHON"
         fi
     fi
