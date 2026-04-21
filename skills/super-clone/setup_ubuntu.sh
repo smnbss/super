@@ -12,87 +12,39 @@ command -v orb &>/dev/null || { echo "Install OrbStack first" >&2; exit 1; }
 
 orb_exists() { orb list 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
 
-# Ensure base machine exists with pre-installed dependencies
+# Ensure base machine exists with pre-installed dependencies.
 #
-# Everything that lives in $SUPER_HOME/super.config.yaml's `system:` + `clis:`
-# sections (uv, markitdown, ollama, gws, gcloud, gh, claude, codex, gemini)
-# gets baked in here. `super install` on each clone then short-circuits every
-# `check:` and only runs the per-project work (hooks, skills, MCPs, context
-# files) — cutting per-clone time from ~5 min to under a minute.
-#
-# When you add a new static dep to super.config.yaml, add the same install
-# snippet here too and nuke ~/.orbstack/machines/super-base to rebuild.
+# We only bake in the stuff that was proven stable in v5.9.3 — the heavy
+# downloads (ollama, gcloud, node, three AI CLIs). Everything else (uv,
+# markitdown, gws, gh) is installed per-clone by `super install`. That's
+# ~5 min extra per clone but keeps the BASE_MACHINE bootstrap simple and
+# reliable; a previous attempt to pre-bake those extras ran into
+# unresolvable /usr/local ownership churn on Ubuntu 25.10 questing.
 if ! orb_exists "$BASE_MACHINE"; then
   echo "Base machine '$BASE_MACHINE' not found. Creating..."
   orb create ubuntu "$BASE_MACHINE"
   orb -m "$BASE_MACHINE" bash -lc '
     set -euo pipefail
-
-    # --- Bootstrap apt + node --------------------------------------------
-    sudo apt-get update
-    sudo apt-get install -y git curl wget zstd ca-certificates
-
+    sudo apt-get update && sudo apt-get install -y git curl zstd ca-certificates
     ARCH=$(uname -m)
     case "$ARCH" in
-      x86_64)        NODE_ARCH="linux-x64";        GWS_TARGET="x86_64-unknown-linux-gnu" ;;
-      aarch64|arm64) NODE_ARCH="linux-arm64";      GWS_TARGET="aarch64-unknown-linux-gnu" ;;
+      x86_64) NODE_ARCH="linux-x64" ;;
+      aarch64|arm64) NODE_ARCH="linux-arm64" ;;
       *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
     esac
-
     NODE_VERSION="20.19.0"
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${NODE_ARCH}.tar.gz" | \
       sudo tar -xz -C /usr/local --strip-components=1
     # Make the Node global prefix user-writable so `npm install -g` works
     # without sudo for gemini/codex and any future global installs.
     sudo chown -R "$(id -u):$(id -g)" /usr/local/lib/node_modules /usr/local/bin /usr/local/include /usr/local/share
-
-    mkdir -p "$HOME/.local/bin"
-
-    # --- System prereqs baked in ------------------------------------------
-    # System prereqs — every one pre-baked in this BASE_MACHINE.
-    
-    # uv (Astral)
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-
-    # markitdown[all] — docx/pdf/xlsx/pptx support via extras
-    uv tool install --force "markitdown[all]"
-
-    # ollama
     curl -fsSL https://ollama.com/install.sh | sh
-
-    # gws (Google Workspace CLI) — prebuilt Linux tarball
-    tmpgws=$(mktemp -d)
-    curl -fsSL "https://github.com/googleworkspace/cli/releases/latest/download/google-workspace-cli-${GWS_TARGET}.tar.gz" | tar -xz -C "$tmpgws"
-    install -m 0755 "$tmpgws/gws" "$HOME/.local/bin/gws"
-    rm -rf "$tmpgws"
-
-    # gcloud + bq (google-cloud-cli) — [trusted=yes] to skip signature check
-    echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" | \
-      sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
-    sudo apt-get update -qq
-    sudo apt-get install -y google-cloud-cli
-
-    # gh (GitHub CLI) — same [trusted=yes] shortcut
-    echo "deb [trusted=yes] https://cli.github.com/packages stable main" | \
-      sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-    sudo apt-get update -qq
-    sudo apt-get install -y gh
-
-    # --- CLIs baked in ----------------------------------------------------
-    #
-    # Ordering matters: @anthropic-ai/claude-code has a postinstall hook
-    # that runs the native claude installer, which re-chowns parts of
-    # /usr/local back to root. Putting it in the same `npm install -g`
-    # batch as gemini/codex makes their symlink step fail EACCES because
-    # npm processes the whole batch before linking bins.
-    #
-    # Install gemini + codex FIRST (while /usr/local is still user-owned
-    # from the post-node chown), then claude separately. Its native
-    # installer drops claude into ~/.local/bin — we no longer need
-    # /usr/local at that point.
-    npm install -g @openai/codex @google/gemini-cli
-    npm install -g @anthropic-ai/claude-code
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+      sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+      sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+    sudo apt-get update && sudo apt-get install -y google-cloud-cli
+    npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
