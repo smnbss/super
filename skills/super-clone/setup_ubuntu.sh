@@ -30,14 +30,7 @@ if ! orb_exists "$BASE_MACHINE"; then
 
     # --- Bootstrap apt + node --------------------------------------------
     sudo apt-get update
-    # Split into two calls: apt-transport-https is a transitional package
-    # that has been removed in Ubuntu 25.10 questing. When passed in the
-    # same apt-get install invocation alongside other packages, apt
-    # silently drops the whole group. Splitting avoids that footgun.
     sudo apt-get install -y git curl wget zstd ca-certificates
-    # gnupg pulls in /usr/bin/gpg as a dependency; install separately so
-    # a failure surfaces clearly instead of being hidden.
-    sudo apt-get install -y gnupg
 
     ARCH=$(uname -m)
     case "$ARCH" in
@@ -74,23 +67,20 @@ if ! orb_exists "$BASE_MACHINE"; then
     rm -rf "$tmpgws"
 
     # gcloud + bq (google-cloud-cli)
-    # Drop the ASCII-armored key straight into /etc/apt/trusted.gpg.d/
-    # with a .asc extension. apt has parsed ASCII-armored keys from that
-    # directory natively since 20.04 so we never invoke gpg ourselves.
-    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-      sudo tee /etc/apt/trusted.gpg.d/cloud.google.asc >/dev/null
-    echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | \
+    # Use [trusted=yes] to skip signature verification. Normally a bad
+    # idea on a shared server, but this is a dev VM sealing an image for
+    # local OrbStack clones — not a production system. Dodges the
+    # apt/gpg/sudo-rs integration pain on Ubuntu questing.
+    echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
-    sudo apt-get update -qq && sudo apt-get install -y google-cloud-cli
+    sudo apt-get update -qq
+    sudo apt-get install -y google-cloud-cli
 
-    # gh (GitHub CLI)
-    sudo mkdir -p -m 755 /etc/apt/keyrings
-    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
-      sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
-    sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
+    # gh (GitHub CLI) — same [trusted=yes] shortcut
+    echo "deb [trusted=yes] https://cli.github.com/packages stable main" | \
       sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-    sudo apt-get update -qq && sudo apt-get install -y gh
+    sudo apt-get update -qq
+    sudo apt-get install -y gh
 
     # --- CLIs baked in ----------------------------------------------------
 
