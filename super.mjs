@@ -588,35 +588,51 @@ async function cmdOnboard(args) {
       ui.spacer();
       ui.muted('  🟠 Claude Code — already authenticated');
     } else {
-      await runInteractiveLogin({
-        label: '🟠 Claude Code',
-        cmd: 'claude',
-        args: ['auth', 'login'],
-        probe: claudeAuthed,
-        manualHint: 'Run `claude auth login` manually and pick the URL it prints.',
-      });
+      ui.spacer();
+      const go = await interactive.confirm('  🟠 Authenticate Claude Code now?', true);
+      if (go) {
+        await runInteractiveLogin({
+          label: '🟠 Claude Code',
+          cmd: 'claude',
+          args: ['auth', 'login'],
+          probe: claudeAuthed,
+          manualHint: 'Run `claude auth login` manually and pick the URL it prints.',
+        });
+      } else {
+        ui.muted('  Claude login skipped.');
+      }
     }
   }
 
   if (catalog.isInstalled('codex')) {
-    // codex doesn't ship a status probe, so pass no probe — the command
-    // itself is idempotent (short-circuits when already authed).
-    await runInteractiveLogin({
-      label: '🟢 Codex CLI',
-      cmd: 'codex',
-      args: ['login'],
-    });
+    ui.spacer();
+    // codex doesn't ship a status probe, so we always offer the choice.
+    const go = await interactive.confirm('  🟢 Authenticate Codex CLI now?', true);
+    if (go) {
+      await runInteractiveLogin({
+        label: '🟢 Codex CLI',
+        cmd: 'codex',
+        args: ['login'],
+      });
+    } else {
+      ui.muted('  Codex login skipped.');
+    }
   }
 
   if (catalog.isInstalled('gemini')) {
     ui.spacer();
-    ui.info('  🔵 Gemini CLI login');
-    ui.muted('    Gemini has no shell login subcommand — auth lives in a');
-    ui.muted('    slash command inside the CLI. Run this in another shell:');
-    ui.print('      ' + ui.colors.bold('gemini') + '  (then type `/auth`, pick Google)');
-    const done = await interactive.confirm('  Done with gemini login?', true);
-    if (!done) ui.muted('  Gemini login deferred.');
-    else ui.success('  Gemini login marked done (no probe — trust the user)');
+    const go = await interactive.confirm('  🔵 Authenticate Gemini CLI now?', true);
+    if (!go) {
+      ui.muted('  Gemini login skipped.');
+    } else {
+      ui.info('  🔵 Gemini CLI login');
+      ui.muted('    Gemini has no shell login subcommand — auth lives in a');
+      ui.muted('    slash command inside the CLI. Run this in another shell:');
+      ui.print('      ' + ui.colors.bold('gemini') + '  (then type `/auth`, pick Google)');
+      const done = await interactive.confirm('  Done with gemini login?', true);
+      if (!done) ui.muted('  Gemini login deferred.');
+      else ui.success('  Gemini login marked done (no probe — trust the user)');
+    }
   }
 
   ui.spacer();
@@ -629,23 +645,28 @@ async function cmdOnboard(args) {
       ui.spacer();
       ui.muted('  gws — already authenticated');
     } else {
-      // gws needs OAuth client ID/secret in .env.local before login can run.
-      const env = existsSync(join(root, '.env.local')) ? readFileSync(join(root, '.env.local'), 'utf8') : '';
-      const cid = /^GOOGLE_WORKSPACE_CLI_CLIENT_ID=(.+)$/m.exec(env)?.[1]?.trim();
-      const csec = /^GOOGLE_WORKSPACE_CLI_CLIENT_SECRET=(.+)$/m.exec(env)?.[1]?.trim();
-      if (!cid || !csec) {
-        ui.spacer();
-        ui.warn('  gws needs GOOGLE_WORKSPACE_CLI_CLIENT_ID and _SECRET in');
-        ui.print(`    ${join(root, '.env.local')}`);
-        ui.muted('  See `/super-setup` (or paste them manually) and re-run `super onboard`.');
+      ui.spacer();
+      const go = await interactive.confirm('  Authenticate gws (Google Workspace) now?', true);
+      if (!go) {
+        ui.muted('  gws login skipped.');
       } else {
-        await runInteractiveLogin({
-          label: 'gws (Google Workspace)',
-          cmd: 'gws',
-          args: ['auth', 'login'],
-          probe: gwsAuthed,
-          manualHint: 'If login fails with PERMISSION_DENIED, enable Gmail/Calendar/Drive APIs in the same GCP project, then re-run.',
-        });
+        // gws needs OAuth client ID/secret in .env.local before login can run.
+        const env = existsSync(join(root, '.env.local')) ? readFileSync(join(root, '.env.local'), 'utf8') : '';
+        const cid = /^GOOGLE_WORKSPACE_CLI_CLIENT_ID=(.+)$/m.exec(env)?.[1]?.trim();
+        const csec = /^GOOGLE_WORKSPACE_CLI_CLIENT_SECRET=(.+)$/m.exec(env)?.[1]?.trim();
+        if (!cid || !csec) {
+          ui.warn('  gws needs GOOGLE_WORKSPACE_CLI_CLIENT_ID and _SECRET in');
+          ui.print(`    ${join(root, '.env.local')}`);
+          ui.muted('  See `/super-setup` (or paste them manually) and re-run `super onboard`.');
+        } else {
+          await runInteractiveLogin({
+            label: 'gws (Google Workspace)',
+            cmd: 'gws',
+            args: ['auth', 'login'],
+            probe: gwsAuthed,
+            manualHint: 'If login fails with PERMISSION_DENIED, enable Gmail/Calendar/Drive APIs in the same GCP project, then re-run.',
+          });
+        }
       }
     }
   }
@@ -655,13 +676,19 @@ async function cmdOnboard(args) {
       ui.spacer();
       ui.muted('  gcloud ADC — already authenticated');
     } else {
-      await runInteractiveLogin({
-        label: 'gcloud ADC',
-        cmd: 'gcloud',
-        args: ['auth', 'application-default', 'login'],
-        probe: gcloudAuthed,
-        manualHint: 'Retry: `gcloud auth application-default login`',
-      });
+      ui.spacer();
+      const go = await interactive.confirm('  Authenticate gcloud ADC now?', true);
+      if (!go) {
+        ui.muted('  gcloud ADC login skipped.');
+      } else {
+        await runInteractiveLogin({
+          label: 'gcloud ADC',
+          cmd: 'gcloud',
+          args: ['auth', 'application-default', 'login'],
+          probe: gcloudAuthed,
+          manualHint: 'Retry: `gcloud auth application-default login`',
+        });
+      }
     }
   }
 
