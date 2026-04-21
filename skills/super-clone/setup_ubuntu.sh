@@ -30,7 +30,10 @@ if ! orb_exists "$BASE_MACHINE"; then
 
     # --- Bootstrap apt + node --------------------------------------------
     sudo apt-get update
-    sudo apt-get install -y git curl wget zstd ca-certificates gnupg apt-transport-https
+    # Install gpg explicitly (not just gnupg metapackage): OrbStack
+    # sudo-rs resets PATH and fails to find gpg by name alone. We also
+    # invoke gpg via full path below to dodge the same PATH issue.
+    sudo apt-get install -y git curl wget zstd ca-certificates gnupg gpg apt-transport-https
 
     ARCH=$(uname -m)
     case "$ARCH" in
@@ -67,8 +70,13 @@ if ! orb_exists "$BASE_MACHINE"; then
     rm -rf "$tmpgws"
 
     # gcloud + bq (google-cloud-cli)
-    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-      sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+    # Pipe-to-gpg fails under OrbStack sudo-rs (PATH reset); write key
+    # to tmp first and invoke /usr/bin/gpg with an explicit path.
+    tmpkey=$(mktemp)
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o "$tmpkey"
+    sudo install -d -m 0755 /usr/share/keyrings
+    sudo /usr/bin/gpg --batch --no-tty --dearmor -o /usr/share/keyrings/cloud.google.gpg "$tmpkey"
+    rm -f "$tmpkey"
     echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
     sudo apt-get update -qq && sudo apt-get install -y google-cloud-cli
