@@ -35,22 +35,19 @@ if ! orb_exists "$BASE_MACHINE"; then
     NODE_VERSION="20.19.0"
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${NODE_ARCH}.tar.gz" | \
       sudo tar -xz -C /usr/local --strip-components=1
-    # Make the Node global prefix user-writable so `npm install -g` works
-    # without sudo for gemini/codex and any future global installs.
-    sudo chown -R "$(id -u):$(id -g)" /usr/local/lib/node_modules /usr/local/bin /usr/local/include /usr/local/share
     curl -fsSL https://ollama.com/install.sh | sh
     curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
       sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
     echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
     sudo apt-get update && sudo apt-get install -y google-cloud-cli
-    # Install gemini+codex first. @anthropic-ai/claude-code ships a
-    # postinstall that runs the native installer (curl|bash) which
-    # chowns parts of /usr/local back to root; in a single npm batch
-    # that breaks gemini/codex symlinks. Doing claude alone afterwards
-    # means no other bin symlinks are pending.
-    npm install -g @openai/codex @google/gemini-cli
-    npm install -g @anthropic-ai/claude-code
+    # Make /usr/local user-writable LAST. ollama runs `install -o0 -g0
+    # -m755 -d /usr/local/bin` which re-chowns the directory to root.
+    # We only need user ownership for the following npm -g step, so
+    # doing the chown after ollama (and before npm) is both sufficient
+    # and avoids any of the apt or curl installers re-flipping it back.
+    sudo chown -R "$(id -u):$(id -g)" /usr/local/lib/node_modules /usr/local/bin /usr/local/include /usr/local/share
+    npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
