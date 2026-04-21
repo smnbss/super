@@ -84,19 +84,15 @@ if ! orb_exists "$BASE_MACHINE"; then
 
     # --- CLIs baked in ----------------------------------------------------
 
-    # Claude Code (official installer → ~/.local/bin/claude)
-    curl -fsSL https://claude.ai/install.sh | bash
+    # Gemini + Codex FIRST — npm install -g needs /usr/local still
+    # user-writable from the post-node chown. The Claude Code installer
+    # further down flips some of /usr/local back to root ownership,
+    # which breaks subsequent npm -g invocations.
+    npm install -g @google/gemini-cli @openai/codex
 
-    # Gemini + Codex via npm. Pass --prefix explicitly on the CLI —
-    # `npm config set prefix` was being overridden by the globalconfig
-    # at /usr/local/etc/npmrc (created by the node tarball), so the
-    # install kept symlinking into /usr/local/bin and failing EACCES.
-    # --prefix on the command line beats every other config source.
-    mkdir -p "$HOME/.npm-global/bin"
-    export PATH="$HOME/.npm-global/bin:$PATH"
-    grep -q ".npm-global/bin" "$HOME/.bashrc" 2>/dev/null || \
-      echo "export PATH=\"\$HOME/.npm-global/bin:\$PATH\"" >> "$HOME/.bashrc"
-    npm install -g --prefix="$HOME/.npm-global" @google/gemini-cli @openai/codex
+    # Claude Code (official installer → ~/.local/bin/claude).
+    # Run last so its side-effects do not interfere with anything.
+    curl -fsSL https://claude.ai/install.sh | bash
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
