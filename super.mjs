@@ -29,7 +29,11 @@ const VERSION = config.superVersion();
 {
   const home = process.env.HOME || '';
   const pathParts = (process.env.PATH || '').split(':');
-  const extra = [home && join(home, '.local', 'bin'), SUPER_HOME].filter(Boolean);
+  const extra = [
+    home && join(home, '.local', 'bin'),
+    home && join(home, '.npm-global', 'bin'),
+    SUPER_HOME,
+  ].filter(Boolean);
   for (const dir of extra) {
     if (!pathParts.includes(dir)) pathParts.unshift(dir);
   }

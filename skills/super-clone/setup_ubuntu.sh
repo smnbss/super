@@ -87,12 +87,17 @@ if ! orb_exists "$BASE_MACHINE"; then
     # Claude Code (official installer → ~/.local/bin/claude)
     curl -fsSL https://claude.ai/install.sh | bash
 
-    # Gemini + Codex via npm. Use sudo for the global install so we
-    # don't have to fight OrbStack's Ubuntu questing /usr/local
-    # ownership (ollama and apt-installed packages keep flipping parts
-    # of it back to root). --unsafe-perm keeps install scripts from
-    # dropping to nobody mid-install.
-    sudo --preserve-env=PATH npm install -g --unsafe-perm @google/gemini-cli @openai/codex
+    # Gemini + Codex via npm. Bypass /usr/local entirely by pointing
+    # npm prefix at $HOME/.npm-global — OrbStack Ubuntu questing has
+    # stubborn ownership issues on /usr/local that even sudo npm fails
+    # to defeat. Add the bin dir to PATH via ~/.bashrc so future shells
+    # pick it up without needing to re-source.
+    mkdir -p "$HOME/.npm-global/bin"
+    npm config set prefix "$HOME/.npm-global"
+    export PATH="$HOME/.npm-global/bin:$PATH"
+    grep -q ".npm-global/bin" "$HOME/.bashrc" 2>/dev/null || \
+      echo "export PATH=\"\$HOME/.npm-global/bin:\$PATH\"" >> "$HOME/.bashrc"
+    npm install -g @google/gemini-cli @openai/codex
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
