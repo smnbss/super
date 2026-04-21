@@ -28,7 +28,7 @@ super launch claude                        # or: super claude
 - installs system prereqs and CLI binaries (claude, gemini, codex) per catalog
 - installs hooks into each CLI's native config
 - copies built-in skills shipped in `$SUPER_HOME/skills/` into each CLI
-- creates CLI-home debug symlinks and syncs skill directories
+- creates CLI-home debug symlinks where needed and syncs skill directories
 - scaffolds `<project>/.env.local` from `$SUPER_HOME/references/env.example` (never overwrites)
 - adds `SUPER_HOME` to your shell profile
 - prints a next-steps banner pointing at `.env.local` and `/super-setup`

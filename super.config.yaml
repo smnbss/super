@@ -7,7 +7,7 @@ version: "3.0"
 # whether it's enabled. `super install` reads this and uses each CLI's
 # native mechanism to install (correct paths, formats, and tools).
 #
-# Skills:  cloned to .agents/skills/ (Claude) or ~/.<cli>/skills/ (others)
+# Skills:  installed into the shared project skill root at .agents/skills/
 # Plugins: installed via `claude plugins install` (Claude only)
 # MCPs:    configured in each CLI's native settings file
 
@@ -107,8 +107,7 @@ session:
 
 # ─── Skills ──────────────────────────────────────────────────────────────────
 # source: owner/repo or owner/repo/subpath (GitHub)
-# Claude: cloned to .agents/skills/<name>/ (project-level)
-# Gemini/Codex: cloned to ~/.<cli>/skills/<name>/
+# All CLIs: installed to .agents/skills/<name>/ (project-level shared root)
 #
 # Options:
 #   - discover: <subpath>/  Auto-discover multiple skills from a subfolder within the repo.

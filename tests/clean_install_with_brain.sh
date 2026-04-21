@@ -150,7 +150,6 @@ done
 # ---------------------------------------------------------------------------
 log "Checking installed skills..."
 SKILL_DIRS=(
-    "${BRAIN_DIR}/.codex/skills"
     "${BRAIN_DIR}/.claude/skills"
     "${BRAIN_DIR}/.gemini/skills"
     "${BRAIN_DIR}/.agents/skills"
