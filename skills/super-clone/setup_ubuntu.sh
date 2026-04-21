@@ -30,10 +30,14 @@ if ! orb_exists "$BASE_MACHINE"; then
 
     # --- Bootstrap apt + node --------------------------------------------
     sudo apt-get update
-    # Install gpg explicitly (not just gnupg metapackage): OrbStack
-    # sudo-rs resets PATH and fails to find gpg by name alone. We also
-    # invoke gpg via full path below to dodge the same PATH issue.
-    sudo apt-get install -y git curl wget zstd ca-certificates gnupg gpg apt-transport-https
+    # Split into two calls: apt-transport-https is a transitional package
+    # that has been removed in Ubuntu 25.10 questing. When passed in the
+    # same apt-get install invocation alongside other packages, apt
+    # silently drops the whole group. Splitting avoids that footgun.
+    sudo apt-get install -y git curl wget zstd ca-certificates
+    # gnupg pulls in /usr/bin/gpg as a dependency; install separately so
+    # a failure surfaces clearly instead of being hidden.
+    sudo apt-get install -y gnupg
 
     ARCH=$(uname -m)
     case "$ARCH" in
@@ -70,14 +74,12 @@ if ! orb_exists "$BASE_MACHINE"; then
     rm -rf "$tmpgws"
 
     # gcloud + bq (google-cloud-cli)
-    # Pipe-to-gpg fails under OrbStack sudo-rs (PATH reset); write key
-    # to tmp first and invoke /usr/bin/gpg with an explicit path.
-    tmpkey=$(mktemp)
-    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o "$tmpkey"
-    sudo install -d -m 0755 /usr/share/keyrings
-    sudo /usr/bin/gpg --batch --no-tty --dearmor -o /usr/share/keyrings/cloud.google.gpg "$tmpkey"
-    rm -f "$tmpkey"
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+    # Drop the ASCII-armored key straight into /etc/apt/trusted.gpg.d/
+    # with a .asc extension. apt has parsed ASCII-armored keys from that
+    # directory natively since 20.04 so we never invoke gpg ourselves.
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+      sudo tee /etc/apt/trusted.gpg.d/cloud.google.asc >/dev/null
+    echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
     sudo apt-get update -qq && sudo apt-get install -y google-cloud-cli
 
