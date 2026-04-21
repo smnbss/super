@@ -84,15 +84,11 @@ if ! orb_exists "$BASE_MACHINE"; then
 
     # --- CLIs baked in ----------------------------------------------------
 
-    # Gemini + Codex FIRST — npm install -g needs /usr/local still
-    # user-writable from the post-node chown. The Claude Code installer
-    # further down flips some of /usr/local back to root ownership,
-    # which breaks subsequent npm -g invocations.
-    npm install -g @google/gemini-cli @openai/codex
-
-    # Claude Code (official installer → ~/.local/bin/claude).
-    # Run last so its side-effects do not interfere with anything.
-    curl -fsSL https://claude.ai/install.sh | bash
+    # All three CLIs in a single npm install. The Claude Code curl|bash
+    # installer flips /usr/local ownership back to root and breaks any
+    # npm install -g that follows it; the npm package is equally
+    # official and avoids the whole mess.
+    npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
