@@ -87,6 +87,11 @@ if ! orb_exists "$BASE_MACHINE"; then
     # Claude Code (official installer → ~/.local/bin/claude)
     curl -fsSL https://claude.ai/install.sh | bash
 
+    # Re-chown /usr/local after the upstream installers (ollama, claude)
+    # may have reset ownership on some of the subtrees. Without this the
+    # next npm -g install fails with EACCES on /usr/local/bin/<name>.
+    sudo chown -R "$(id -u):$(id -g)" /usr/local/lib/node_modules /usr/local/bin /usr/local/include /usr/local/share
+
     # Gemini + Codex via npm (global prefix is now user-writable)
     npm install -g @google/gemini-cli @openai/codex
   '
