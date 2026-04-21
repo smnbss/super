@@ -18,15 +18,20 @@ jobs:
         run: |
           mkdir -p dist
           VERSION=${GITHUB_REF_NAME#v}
-          # Single tarball — bash is portable
           tar czf "dist/super-${VERSION}.tar.gz" \
             super \
+            super.mjs \
             lib/ \
             hooks/ \
+            skills/ \
+            references/ \
+            tests/ \
             README.md \
             install.sh \
             VERSION \
-            super.config.yaml
+            super.config.yaml \
+            package.json \
+            package-lock.json
           
           # Checksum for verification
           cd dist && sha256sum *.tar.gz > checksums.txt

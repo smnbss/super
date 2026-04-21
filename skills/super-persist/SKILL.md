@@ -1,6 +1,8 @@
 ---
 name: super-persist
-description: Summarize the current conversation and persist the full context as a markdown entry in the current super session file.
+description: >-
+  Summarize the current conversation and persist the full context as a markdown
+  entry in the current super session file.
 ---
 
 # /super-persist

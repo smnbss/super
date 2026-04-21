@@ -1,6 +1,8 @@
 ---
 name: brain-personio-staff-sync
-description: Open Chrome, prompt user to login to Personio, scrape staff roster, and save to TSV.
+description: >-
+  Open Chrome, prompt user to login to Personio, scrape staff roster, and save
+  to TSV.
 ---
 
 # Personio Staff Sync

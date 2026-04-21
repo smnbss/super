@@ -1,6 +1,8 @@
 ---
 name: super-resume
-description: Read the current super session file and produce a max 1000 character description of what the session is about.
+description: >-
+  Read the current super session file and produce a max 1000 character
+  description of what the session is about.
 ---
 
 # /super-resume

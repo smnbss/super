@@ -1,6 +1,9 @@
 ---
 name: brain-git-sync
-description: Sync the local brain repo with git — stage all changes, commit, push, and save a recap. Use after any session that modified brain files, or as a quick end-of-session save.
+description: >-
+  Sync the local brain repo with git — stage all changes, commit, push, and
+  save a recap. Use after any session that modified brain files, or as a quick
+  end-of-session save.
 ---
 
 # /git-sync

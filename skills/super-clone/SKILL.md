@@ -1,6 +1,8 @@
 ---
 name: super-clone
-description: Create an OrbStack Ubuntu machine pre-configured for the current project, copying .env.local and sources.md.
+description: >-
+  Create an OrbStack Ubuntu machine pre-configured for the current project,
+  copying `.env.local` and `sources.md`.
 ---
 
 # /super-clone

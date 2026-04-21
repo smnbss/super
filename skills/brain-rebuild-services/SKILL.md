@@ -1,6 +1,8 @@
 ---
 name: brain-rebuild-services
-description: Generate deep technical .AGENT.MD service documentation from cloned GitHub repos. Use when service architecture docs need to be created or updated.
+description: >-
+  Generate deep technical `.AGENT.MD` service documentation from cloned GitHub
+  repos. Use when service architecture docs need to be created or updated.
 ---
 
 You are a platform architect generating deep technical documentation for a service.

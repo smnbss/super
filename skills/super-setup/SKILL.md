@@ -1,6 +1,12 @@
 ---
 name: super-setup
-description: Interactive project-scoped setup wizard for super + brain skills. Run from inside the project you want to use as your brain. Writes <project>/.super/brain.config.yml and creates agents/memory/outputs/src in that project. Use when the user says "super setup", "setup super", "configure brain", "configure super", "run setup", or right after first-time super install.
+description: >-
+  Interactive project-scoped setup wizard for super + brain skills. Run from
+  inside the project you want to use as your brain. Writes
+  `<project>/.super/brain.config.yml` and creates `agents/memory/outputs/src`
+  in that project. Use when the user says "super setup", "setup super",
+  "configure brain", "configure super", "run setup", or right after first-time
+  super install.
 ---
 
 # /super-setup

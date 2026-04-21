@@ -1,6 +1,10 @@
 ---
 name: brain-reindex
-description: Rebuild the qmd hybrid search index (BM25 + vector) over the brain — agents, memory, outputs, src. Use when the user says "reindex", "rebuild qmd", "update the index", "brain-reindex", or "brain-index", or after a large sync that added new files.
+description: >-
+  Rebuild the qmd hybrid search index (BM25 + vector) over the brain — agents,
+  memory, outputs, src. Use when the user says "reindex", "rebuild qmd",
+  "update the index", "brain-reindex", or "brain-index", or after a large sync
+  that added new files.
 ---
 
 # /brain-reindex
