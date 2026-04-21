@@ -1256,7 +1256,7 @@ function cliDefaultArgs(cli) {
     const yoloFlag = {
       claude: '--dangerously-skip-permissions',
       gemini: '--yolo',
-      codex:  '--full-auto',
+      codex:  '--yolo',
     }[cli];
     if (yoloFlag) args.push(yoloFlag);
   }
