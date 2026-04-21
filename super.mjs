@@ -497,8 +497,11 @@ async function cmdConfigure(args) {
 // OAuth in their shell, then launches Claude with /super-setup prepopulated
 // so the brain Q&A picks up where auth leaves off.
 
-function cliLoginCommand(cli) {
-  return { claude: 'claude /login', gemini: 'gemini → /auth → Google', codex: 'codex login' }[cli];
+function claudeAuthed() {
+  try {
+    const out = execSync('claude auth status 2>&1', { encoding: 'utf8', timeout: 10000 });
+    return /"loggedIn"\s*:\s*true/.test(out);
+  } catch { return false; }
 }
 
 function gwsAuthed() {
@@ -507,6 +510,37 @@ function gwsAuthed() {
 
 function gcloudAuthed() {
   try { execSync('gcloud auth application-default print-access-token', { stdio: 'ignore', timeout: 10000 }); return true; } catch { return false; }
+}
+
+// Spawn an interactive login command with the user's TTY attached so they
+// can see the URL, complete the browser flow, and the CLI callback lands
+// in the right process. Returns true when the probe confirms auth after
+// the command exits; false when it still fails; null when the command
+// could not run at all.
+async function runInteractiveLogin({ label, cmd, args = [], probe, manualHint }) {
+  ui.spacer();
+  ui.info(`  ${label}`);
+  ui.muted(`    Running:  ${ui.colors.bold(`${cmd} ${args.join(' ')}`.trim())}`);
+  ui.muted(`    Click the URL it prints when it appears, then return here.`);
+  ui.spacer();
+  try {
+    execFileSync(cmd, args, { stdio: 'inherit' });
+  } catch (err) {
+    // Non-zero exit — could be Ctrl+C, could be real failure.
+    // We always re-probe below, so it's fine either way.
+    ui.muted(`    (${cmd} exited with code ${err.status || '?'})`);
+  }
+  ui.spacer();
+  if (!probe) {
+    ui.muted(`    ${label}: no probe available — assuming success.`);
+    return null;
+  }
+  if (probe()) { ui.success(`  ${label} authenticated`); return true; }
+  ui.warn(`  ${label} still reports unauthenticated.`);
+  if (manualHint) ui.muted(`    ${manualHint}`);
+  const retry = await interactive.confirm(`  Try again?`, false);
+  if (retry) return runInteractiveLogin({ label, cmd, args, probe, manualHint });
+  return false;
 }
 
 async function cmdOnboard(args) {
@@ -542,55 +576,96 @@ async function cmdOnboard(args) {
   ui.spacer();
 
   // Phase 2: CLI logins
+  //
+  // claude + codex have shell login subcommands we can spawn directly.
+  // gemini does not — its only auth path is the /auth slash command inside
+  // the interactive CLI, so we can't orchestrate it from here. Print a
+  // clear hand-off for gemini instead.
   ui.brand('[2/4] CLI authentication...');
-  ui.spacer();
-  for (const cli of ['claude', 'gemini', 'codex']) {
-    if (!catalog.isInstalled(cli)) { ui.muted(`  ${CLI[cli].icon} ${CLI[cli].label} — not installed, skipping`); continue; }
-    ui.info(`  ${CLI[cli].icon} ${CLI[cli].label} login`);
-    ui.muted(`    Run in another terminal (or this one):`);
-    ui.print(`      ${ui.colors.bold(cliLoginCommand(cli))}`);
-    const done = await interactive.confirm(`  Finished logging in to ${CLI[cli].label}?`, true);
-    if (done) ui.success(`  ${CLI[cli].label} login confirmed`);
-    else ui.muted(`  ${CLI[cli].label} deferred — re-run \`${cliLoginCommand(cli)}\` later.`);
-    ui.spacer();
+
+  if (catalog.isInstalled('claude')) {
+    if (claudeAuthed()) {
+      ui.spacer();
+      ui.muted('  🟠 Claude Code — already authenticated');
+    } else {
+      await runInteractiveLogin({
+        label: '🟠 Claude Code',
+        cmd: 'claude',
+        args: ['auth', 'login'],
+        probe: claudeAuthed,
+        manualHint: 'Run `claude auth login` manually and pick the URL it prints.',
+      });
+    }
   }
+
+  if (catalog.isInstalled('codex')) {
+    // codex doesn't ship a status probe, so pass no probe — the command
+    // itself is idempotent (short-circuits when already authed).
+    await runInteractiveLogin({
+      label: '🟢 Codex CLI',
+      cmd: 'codex',
+      args: ['login'],
+    });
+  }
+
+  if (catalog.isInstalled('gemini')) {
+    ui.spacer();
+    ui.info('  🔵 Gemini CLI login');
+    ui.muted('    Gemini has no shell login subcommand — auth lives in a');
+    ui.muted('    slash command inside the CLI. Run this in another shell:');
+    ui.print('      ' + ui.colors.bold('gemini') + '  (then type `/auth`, pick Google)');
+    const done = await interactive.confirm('  Done with gemini login?', true);
+    if (!done) ui.muted('  Gemini login deferred.');
+    else ui.success('  Gemini login marked done (no probe — trust the user)');
+  }
+
+  ui.spacer();
 
   // Phase 3: Service auths (gws + gcloud)
   ui.brand('[3/4] Service authentication...');
-  ui.spacer();
 
   if (catalog.isInstalled('gws')) {
     if (gwsAuthed()) {
+      ui.spacer();
       ui.muted('  gws — already authenticated');
     } else {
-      ui.info('  gws (Google Workspace) — gmail/calendar/drive');
-      ui.muted('    First make sure GOOGLE_WORKSPACE_CLI_CLIENT_ID and');
-      ui.muted('    GOOGLE_WORKSPACE_CLI_CLIENT_SECRET are set in:');
-      ui.print(`      ${ui.colors.bold(join(root, '.env.local'))}`);
-      ui.muted('    Then run:');
-      ui.print('      ' + ui.colors.bold('gws auth login'));
-      const done = await interactive.confirm('  Finished gws auth?', true);
-      if (done && gwsAuthed()) ui.success('  gws authenticated');
-      else if (done) ui.warn('  gws still reports unauthenticated — re-run `gws auth login`');
-      else ui.muted('  gws deferred');
+      // gws needs OAuth client ID/secret in .env.local before login can run.
+      const env = existsSync(join(root, '.env.local')) ? readFileSync(join(root, '.env.local'), 'utf8') : '';
+      const cid = /^GOOGLE_WORKSPACE_CLI_CLIENT_ID=(.+)$/m.exec(env)?.[1]?.trim();
+      const csec = /^GOOGLE_WORKSPACE_CLI_CLIENT_SECRET=(.+)$/m.exec(env)?.[1]?.trim();
+      if (!cid || !csec) {
+        ui.spacer();
+        ui.warn('  gws needs GOOGLE_WORKSPACE_CLI_CLIENT_ID and _SECRET in');
+        ui.print(`    ${join(root, '.env.local')}`);
+        ui.muted('  See `/super-setup` (or paste them manually) and re-run `super onboard`.');
+      } else {
+        await runInteractiveLogin({
+          label: 'gws (Google Workspace)',
+          cmd: 'gws',
+          args: ['auth', 'login'],
+          probe: gwsAuthed,
+          manualHint: 'If login fails with PERMISSION_DENIED, enable Gmail/Calendar/Drive APIs in the same GCP project, then re-run.',
+        });
+      }
     }
-    ui.spacer();
   }
 
   if (catalog.isInstalled('gcloud')) {
     if (gcloudAuthed()) {
+      ui.spacer();
       ui.muted('  gcloud ADC — already authenticated');
     } else {
-      ui.info('  gcloud ADC — needed for BigQuery and any GCP SDK');
-      ui.muted('    Run:');
-      ui.print('      ' + ui.colors.bold('gcloud auth application-default login'));
-      const done = await interactive.confirm('  Finished gcloud ADC auth?', true);
-      if (done && gcloudAuthed()) ui.success('  gcloud ADC authenticated');
-      else if (done) ui.warn('  gcloud ADC still not authenticated — re-run the command above');
-      else ui.muted('  gcloud deferred');
+      await runInteractiveLogin({
+        label: 'gcloud ADC',
+        cmd: 'gcloud',
+        args: ['auth', 'application-default', 'login'],
+        probe: gcloudAuthed,
+        manualHint: 'Retry: `gcloud auth application-default login`',
+      });
     }
-    ui.spacer();
   }
+
+  ui.spacer();
 
   // Phase 4: launch claude with /super-setup prepopulated
   ui.brand('[4/4] Brain configuration (/super-setup)...');
