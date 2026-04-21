@@ -512,6 +512,11 @@ function gcloudAuthed() {
   try { execSync('gcloud auth application-default print-access-token', { stdio: 'ignore', timeout: 10000 }); return true; } catch { return false; }
 }
 
+function ghAuthed() {
+  // `gh auth status` prints to stderr and exits non-zero when not logged in.
+  try { execSync('gh auth status', { stdio: 'ignore', timeout: 10000 }); return true; } catch { return false; }
+}
+
 // Spawn an interactive login command with the user's TTY attached so they
 // can see the URL, complete the browser flow, and the CLI callback lands
 // in the right process. Returns true when the probe confirms auth after
@@ -687,6 +692,30 @@ async function cmdOnboard(args) {
           args: ['auth', 'application-default', 'login'],
           probe: gcloudAuthed,
           manualHint: 'Retry: `gcloud auth application-default login`',
+        });
+      }
+    }
+  }
+
+  if (catalog.isInstalled('gh')) {
+    if (ghAuthed()) {
+      ui.spacer();
+      ui.muted('  GitHub (gh) — already authenticated');
+    } else {
+      ui.spacer();
+      const go = await interactive.confirm('  Authenticate GitHub (gh) now?', true);
+      if (!go) {
+        ui.muted('  GitHub login skipped.');
+      } else {
+        // `gh auth login -w` forces the browser/device-flow path (instead of
+        // interactive picker) so the spawned process prints a URL + one-time
+        // code and exits when the user completes the callback.
+        await runInteractiveLogin({
+          label: 'GitHub (gh)',
+          cmd: 'gh',
+          args: ['auth', 'login', '-h', 'github.com', '-p', 'https', '-w'],
+          probe: ghAuthed,
+          manualHint: 'Retry: `gh auth login -w`',
         });
       }
     }

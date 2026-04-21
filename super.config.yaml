@@ -57,6 +57,15 @@ system:
     install: "sh -c 'if [ \"$(uname)\" = Darwin ]; then brew install --cask gcloud-cli; elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y apt-transport-https ca-certificates gnupg curl && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && echo \"deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main\" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null && sudo apt-get update -qq && sudo apt-get install -y google-cloud-cli; else echo skip: unsupported platform; fi'"
     enabled: true
 
+  gh-cli:
+    name: gh-cli
+    # GitHub CLI. Used by catalog.mjs to clone private repos via `gh repo
+    # clone` (with git clone as the fallback when `gh` isn't installed).
+    # Authenticate via `super onboard` or `gh auth login` manually.
+    check: "command -v gh"
+    install: "sh -c 'if [ \"$(uname)\" = Darwin ]; then brew install gh; elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y curl ca-certificates && (type -p wget >/dev/null || sudo apt-get install -y wget) && sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null && sudo apt-get update -qq && sudo apt-get install -y gh; else echo skip: unsupported platform; fi'"
+    enabled: true
+
 # ─── CLIs ────────────────────────────────────────────────────────────────────
 # Install commands for each supported CLI. `super install` will run these
 # automatically if the CLI is not already on PATH.
