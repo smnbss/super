@@ -78,8 +78,18 @@ orb -m "$MACHINE" bash -lc '
   SUPER_HOME="$HOME/.super"
   rm -rf "$SUPER_HOME"
   git clone https://github.com/smnbss/super "$SUPER_HOME"
+  # Interactive shells land here every time the user does `orb -m super`.
+  # Default shell cwd is $HOME, but super refuses to install into $HOME
+  # (and every brain skill expects to run from inside the brain dir).
+  # Auto-cd to ~/brain and put super on PATH.
   if ! grep -q "$SUPER_HOME" "$HOME/.bashrc" 2>/dev/null; then
-    echo "export PATH=\"$SUPER_HOME:\$PATH\"" >> "$HOME/.bashrc"
+    {
+      echo ""
+      echo "# super"
+      echo "export PATH=\"$SUPER_HOME:\$PATH\""
+      echo "# Land interactive shells in the brain project, not \$HOME"
+      echo "case \$- in *i*) [ -d \"\$HOME/brain\" ] && cd \"\$HOME/brain\" ;; esac"
+    } >> "$HOME/.bashrc"
   fi
   export PATH="$HOME/.local/bin:$SUPER_HOME:$PATH"
   cd "$HOME/brain"
