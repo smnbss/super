@@ -32,6 +32,12 @@ if ! orb_exists "$BASE_MACHINE"; then
     # without sudo for gemini/codex and any future global installs.
     sudo chown -R "$(id -u):$(id -g)" /usr/local/lib/node_modules /usr/local/bin /usr/local/include /usr/local/share
     curl -fsSL https://ollama.com/install.sh | sh
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+      sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+      sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+    sudo apt-get update && sudo apt-get install -y google-cloud-cli
+    npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
