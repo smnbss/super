@@ -44,7 +44,13 @@ if ! orb_exists "$BASE_MACHINE"; then
     echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
     sudo apt-get update && sudo apt-get install -y google-cloud-cli
-    npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+    # Install gemini+codex first. @anthropic-ai/claude-code ships a
+    # postinstall that runs the native installer (curl|bash) which
+    # chowns parts of /usr/local back to root; in a single npm batch
+    # that breaks gemini/codex symlinks. Doing claude alone afterwards
+    # means no other bin symlinks are pending.
+    npm install -g @openai/codex @google/gemini-cli
+    npm install -g @anthropic-ai/claude-code
   '
   orb stop "$BASE_MACHINE"
   echo "Base machine '$BASE_MACHINE' created."
