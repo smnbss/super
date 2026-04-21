@@ -1118,7 +1118,7 @@ async function cmdMenu() {
 // ─── Launch wizard (interactive CLI + model/provider picker) ────────────────
 
 const OLLAMA_MODELS = [
-  { label: 'Kimi K2.5',    model: 'kimi-k2.5:cloud' },
+  { label: 'Kimi K2.6',    model: 'kimi-k2.6:cloud' },
   { label: 'MiniMax M2.5', model: 'minimax-m2.5:cloud' },
   { label: 'GLM 5',        model: 'glm-5:cloud' },
   { label: 'Gemma 4 31B',  model: 'gemma4:31b-cloud' },
