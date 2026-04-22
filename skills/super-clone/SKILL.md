@@ -25,11 +25,12 @@ Create a cloned OrbStack Ubuntu machine for the current project.
    ```
    For a machine with XFCE desktop and XRDP:
    ```bash
-   <skill-dir>/super-clone/setup_ubuntu.sh --desktop "$(pwd)"
+   <skill-dir>/super-clone/setup_ubuntu.sh "$(pwd)" --desktop
    ```
-   To copy a specific sources file (e.g. `sources.dev.super.md`) instead of the default `sources.md`:
+   To copy a specific sources file (e.g. `sources.dev.super.md`) instead of the default `sources.md`, pass it positionally or via `--source`:
    ```bash
    <skill-dir>/super-clone/setup_ubuntu.sh sources.dev.super.md
+   <skill-dir>/super-clone/setup_ubuntu.sh --source sources.dev.super.md
    ```
    Combine both:
    ```bash
@@ -38,11 +39,11 @@ Create a cloned OrbStack Ubuntu machine for the current project.
 3. Report the machine name created or any errors.
 
 The script will:
-- Ensure a `super-base` OrbStack machine exists with `git`, `nodejs`, and `npm` pre-installed
+- Ensure a `super-base` OrbStack machine exists, pre-baked with: `git`, `curl`, `zstd`, Node.js 20.19.0, Ollama, Chromium, the Google Cloud CLI, and the `@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli` npm globals
 - Clone it to a new machine named `super-<username>-<MMDD-HHMMSS>`
 - Copy `.env.local` from the project into `~/brain/` on the new machine
 - Copy `sources.md` (or an explicit `.md` file you pass) into `~/brain/sources.md` on the new machine
-- Install `super` and run `super install --all` inside the machine
+- Install `super` (git clone into `~/.super`) and run `super install --all` inside the machine
 - With `--desktop`: additionally install XFCE4 and XRDP, then print the RDP connection address
 
 ## Environment Variables

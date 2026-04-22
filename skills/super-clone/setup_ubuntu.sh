@@ -12,7 +12,7 @@ while [[ $# -gt 0 ]]; do
       DESKTOP=true
       shift
       ;;
-    --source|--sources)
+    --source)
       EXPLICIT_SOURCES="${2:-}"
       shift 2
       ;;

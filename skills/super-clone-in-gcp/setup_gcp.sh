@@ -12,9 +12,10 @@ STARTUP_MARKER="/var/lib/super-clone-in-gcp/startup.done"
 
 usage() {
   cat <<'EOF'
-Usage: setup_gcp.sh [project-dir] [options]
+Usage: setup_gcp.sh [project-dir] [sources.md] [options]
 
 Options:
+  --source <file>         Use <file> instead of sources.md
   --project <id>          Override the GCP project ID
   --zone <zone>           Override the Compute Engine zone
   --machine-type <type>   Machine type (default: e2-standard-4)
@@ -92,12 +93,8 @@ gcloud_scp() {
   gcloud --project="$PROJECT_ID" compute scp --zone="$ZONE" "$@"
 }
 
-PROJECT_DIR="$(pwd)"
-if [[ "${1:-}" != "" && "${1:-}" != --* ]]; then
-  PROJECT_DIR="$1"
-  shift
-fi
-
+PROJECT_DIR=""
+EXPLICIT_SOURCES=""
 PROJECT_ID=""
 ZONE=""
 MACHINE_TYPE="$DEFAULT_MACHINE_TYPE"
@@ -111,6 +108,10 @@ DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --source)
+      EXPLICIT_SOURCES="${2:-}"
+      shift 2
+      ;;
     --project)
       PROJECT_ID="${2:-}"
       shift 2
@@ -156,15 +157,25 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      die "Unknown argument: $1"
+      if [[ -f "$1" && "$1" == *.md ]]; then
+        EXPLICIT_SOURCES="$1"
+      elif [[ -d "$1" ]]; then
+        PROJECT_DIR="$1"
+      elif [[ -f "$(pwd)/$1" && "$1" == *.md ]]; then
+        EXPLICIT_SOURCES="$(pwd)/$1"
+      else
+        die "Unknown argument: $1"
+      fi
+      shift
       ;;
   esac
 done
 
+PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 [[ -d "$PROJECT_DIR" ]] || die "Project directory not found: $PROJECT_DIR"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 ENV_LOCAL="$PROJECT_DIR/.env.local"
-SOURCES_MD="$PROJECT_DIR/sources.md"
+SOURCES_MD="${EXPLICIT_SOURCES:-$PROJECT_DIR/sources.md}"
 
 [[ -f "$ENV_LOCAL" ]] || die "Missing $ENV_LOCAL"
 require_cmd gcloud
@@ -203,57 +214,52 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cat >"$STARTUP_SCRIPT" <<EOF
+# Header: injects values that must be resolved locally (paths, versions).
+# Everything after runs on the VM, so use a quoted heredoc below to avoid
+# local expansion of remote-side variables.
+cat >"$STARTUP_SCRIPT" <<HEAD
 #!/usr/bin/env bash
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 exec > >(tee -a /var/log/super-clone-in-gcp.log) 2>&1
+STARTUP_MARKER="$STARTUP_MARKER"
+NODE_VERSION="$NODE_VERSION"
+HEAD
+cat >>"$STARTUP_SCRIPT" <<'EOF'
 mkdir -p "$(dirname "$STARTUP_MARKER")"
 apt-get update
 apt-get install -y git curl zstd ca-certificates
-ARCH="\$(uname -m)"
-case "\$ARCH" in
-  x86_64) NODE_ARCH="linux-x64" ;;
-  aarch64|arm64) NODE_ARCH="linux-arm64" ;;
-  *) echo "Unsupported architecture: \$ARCH" >&2; exit 1 ;;
-esac
-curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-\${NODE_ARCH}.tar.gz" | \
+curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" | \
   tar -xz -C /usr/local --strip-components=1
 curl -fsSL https://ollama.com/install.sh | sh
+apt-get install -y chromium-browser
 echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" \
   >/etc/apt/sources.list.d/google-cloud-sdk.list
 apt-get update
 apt-get install -y google-cloud-cli
 npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
 
-DESKTOP_ENABLED="$(curl -fsSL \"http://metadata.google.internal/computeMetadata/v1/instance/attributes/enable-desktop\" -H \"Metadata-Flavor: Google\" 2>/dev/null || true)"
+DESKTOP_ENABLED="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/enable-desktop" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
 if [[ "$DESKTOP_ENABLED" == "true" ]]; then
-  # Install XFCE desktop and XRDP
   apt-get install -y xfce4 xfce4-goodies xrdp
   systemctl enable xrdp
   systemctl start xrdp
 
-  # Configure XRDP to use XFCE
   sed -i 's/^test -x \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
   sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
   echo 'startxfce4' >> /etc/xrdp/startwm.sh
 
-  # Allow any user to start an XRDP session
   sed -i 's/TerminalServerUsers=tsusers/TerminalServerUsers=sudo/' /etc/xrdp/sesman.ini || true
   sed -i 's/TerminalServerAdmins=tsadmins/TerminalServerAdmins=sudo/' /etc/xrdp/sesman.ini || true
 
-  # Set XFCE as default for new users
   echo 'xfce4-session' > /etc/skel/.xsession
 fi
 
-# Create local user if specified in metadata
-CLONE_USER="$(curl -fsSL \"http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username\" -H \"Metadata-Flavor: Google\" 2>/dev/null || true)"
-CLONE_PASS="$(curl -fsSL \"http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-password\" -H \"Metadata-Flavor: Google\" 2>/dev/null || true)"
-if [[ -n "$CLONE_USER" && -n "$CLONE_PASS" ]]; then
+CLONE_USER="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
+if [[ -n "$CLONE_USER" ]]; then
   if ! id "$CLONE_USER" &>/dev/null; then
     useradd -m -s /bin/bash "$CLONE_USER"
   fi
-  echo "$CLONE_USER:$CLONE_PASS" | chpasswd
   usermod -aG sudo "$CLONE_USER"
   mkdir -p "/home/$CLONE_USER/brain"
   if [[ "$DESKTOP_ENABLED" == "true" ]]; then
@@ -273,7 +279,7 @@ mkdir -p "$HOME/brain"
 SUPER_HOME="$HOME/.super"
 rm -rf "$SUPER_HOME"
 git clone https://github.com/smnbss/super "$SUPER_HOME"
-if ! grep -q 'export PATH="$SUPER_HOME:$PATH"' "$HOME/.bashrc" 2>/dev/null; then
+if ! grep -qF "$SUPER_HOME:" "$HOME/.bashrc" 2>/dev/null; then
   {
     echo ""
     echo "# super"
@@ -292,7 +298,7 @@ if [ -f /etc/xrdp/startwm.sh ]; then
 fi
 
 # Also configure for the cloned user if it exists
-CLONE_USER="$(curl -fsSL \"http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username\" -H \"Metadata-Flavor: Google\" 2>/dev/null || true)"
+CLONE_USER="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
 if [[ -n "$CLONE_USER" && -d "/home/$CLONE_USER" ]]; then
   sudo -u "$CLONE_USER" bash -c 'mkdir -p "$HOME/brain" && echo "xfce4-session" > "$HOME/.xsession"'
 fi
@@ -300,6 +306,22 @@ fi
 rm -f "$HOME/.super-bootstrap.sh"
 EOF
 chmod +x "$REMOTE_BOOTSTRAP"
+
+METADATA_ITEMS=()
+
+if [[ -n "$BRAIN_CLONE_USERNAME" ]]; then
+  METADATA_ITEMS+=("brain-clone-username=$BRAIN_CLONE_USERNAME")
+fi
+
+if [[ "$DESKTOP" == true ]]; then
+  METADATA_ITEMS+=("enable-desktop=true")
+fi
+
+if [[ "$SSH_MODE" == "oslogin" ]]; then
+  METADATA_ITEMS+=("enable-oslogin=TRUE")
+else
+  METADATA_ITEMS+=("enable-oslogin=FALSE")
+fi
 
 CREATE_ARGS=(
   gcloud --project="$PROJECT_ID" compute instances create "$INSTANCE_NAME"
@@ -312,17 +334,14 @@ CREATE_ARGS=(
   --tags="xrdp"
 )
 
-if [[ -n "$BRAIN_CLONE_USERNAME" ]]; then
-  CREATE_ARGS+=(--metadata=brain-clone-username="$BRAIN_CLONE_USERNAME")
+if [[ ${#METADATA_ITEMS[@]} -gt 0 ]]; then
+  METADATA_STRING=$(IFS=,; echo "${METADATA_ITEMS[*]}")
+  CREATE_ARGS+=(--metadata="$METADATA_STRING")
 fi
 
-if [[ -n "$BRAIN_CLONE_PASSWORD" ]]; then
-  CREATE_ARGS+=(--metadata=brain-clone-password="$BRAIN_CLONE_PASSWORD")
-fi
-
-if [[ "$DESKTOP" == true ]]; then
-  CREATE_ARGS+=(--metadata=enable-desktop=true)
-fi
+# BRAIN_CLONE_PASSWORD is deliberately NOT stored as instance metadata — it
+# would be readable by anyone with compute.instances.get on the project.
+# It's applied post-boot via SSH + chpasswd below.
 
 if [[ -n "$NETWORK" ]]; then
   CREATE_ARGS+=(--network="$NETWORK")
@@ -332,14 +351,12 @@ if [[ -n "$SUBNET" ]]; then
   CREATE_ARGS+=(--subnet="$SUBNET")
 fi
 
-if [[ "$SSH_MODE" == "oslogin" ]]; then
-  CREATE_ARGS+=(--metadata=enable-oslogin=TRUE)
-else
+if [[ "$SSH_MODE" == "metadata" ]]; then
   PUBKEY_PATH="$(find_public_key || true)"
   [[ -n "$PUBKEY_PATH" ]] || die "No SSH public key found for metadata mode"
   SSH_KEYS_FILE="$TMP_DIR/ssh-keys"
   printf '%s:%s\n' "${USER:-$(id -un)}" "$(cat "$PUBKEY_PATH")" >"$SSH_KEYS_FILE"
-  CREATE_ARGS+=(--metadata=enable-oslogin=FALSE --metadata-from-file="ssh-keys=$SSH_KEYS_FILE")
+  CREATE_ARGS+=(--metadata-from-file="ssh-keys=$SSH_KEYS_FILE")
 fi
 
 SSH_COMMAND="gcloud --project=$PROJECT_ID compute ssh $INSTANCE_NAME --zone=$ZONE"
@@ -419,6 +436,12 @@ gcloud_scp "$REMOTE_BOOTSTRAP" "$INSTANCE_NAME:~/.super-bootstrap.sh"
 
 log "Bootstrapping super on the VM..."
 gcloud_ssh --command "chmod +x ~/.super-bootstrap.sh && ~/.super-bootstrap.sh"
+
+if [[ -n "$BRAIN_CLONE_USERNAME" && -n "$BRAIN_CLONE_PASSWORD" ]]; then
+  log "Setting password for '$BRAIN_CLONE_USERNAME' via SSH..."
+  printf '%s:%s\n' "$BRAIN_CLONE_USERNAME" "$BRAIN_CLONE_PASSWORD" | \
+    gcloud_ssh --command "sudo chpasswd" >/dev/null
+fi
 
 RDP_COMMAND="gcloud --project=$PROJECT_ID compute instances list --filter=name=$INSTANCE_NAME --format='value(EXTERNAL_IP)'"
 EXTERNAL_IP="$(gcloud --project="$PROJECT_ID" compute instances list --filter="name=$INSTANCE_NAME" --format="value(EXTERNAL_IP)" --zone="$ZONE" 2>/dev/null || true)"

@@ -31,14 +31,27 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --network weroad-vpc-1-development --subnet weroad-eu-subnet-1-development
    ```
+   To copy a specific sources file (e.g. `sources.dev.super.md`) instead of the default `sources.md`, pass it positionally or via `--source`:
+   ```bash
+   <skill-dir>/super-clone-in-gcp/setup_gcp.sh sources.dev.super.md
+   <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --source sources.dev.super.md
+   ```
+   Combine both:
+   ```bash
+   <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" sources.dev.super.md --desktop
+   ```
+   For the full flag list (`--project`, `--zone`, `--machine-type`, `--disk-size-gb`, `--ssh-mode`, `--name`, `--dry-run`), run:
+   ```bash
+   <skill-dir>/super-clone-in-gcp/setup_gcp.sh --help
+   ```
 3. Report the machine name created or any errors.
 
 The script will:
 - Resolve the target project from `BRAIN_CLONE_GCP`, then `gcloud config get-value project`, then `GCP_PROJECT_ID`
-- Create a stock Ubuntu Compute Engine VM named `super-<username>-<MMDD-HHMMSS>`
-- Run a startup script that installs core dependencies
+- Create a stock Ubuntu 24.04 Compute Engine VM named `super-<username>-<MMDD-HHMMSS>` (default `e2-standard-4`, 80 GB disk, `europe-west1-b`)
+- Run a startup script that installs: `git`, `curl`, `zstd`, Node.js 20.19.0, Ollama, Chromium, the Google Cloud CLI, and the `@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli` npm globals
 - With `--desktop`: additionally install XFCE4 and XRDP, create the `allow-xrdp` firewall rule, and print the RDP connection address
-- Wait for SSH readiness, copy `.env.local` and optional `sources.md`, then bootstrap `super`
+- Wait for SSH readiness, copy `.env.local` and optional `sources.md`, then bootstrap `super` (git clone into `~/.super` + `super install --all`)
 - Print the SSH command plus manual start/stop/delete commands for the workstation
 
 ## Environment Variables
@@ -49,7 +62,7 @@ Set these in your project's `.env.local`:
 - `BRAIN_CLONE_USERNAME` — Local username for XRDP login (optional)
 - `BRAIN_CLONE_PASSWORD` — Password for the local XRDP user (optional)
 
-If `BRAIN_CLONE_USERNAME` and `BRAIN_CLONE_PASSWORD` are provided, the startup script creates the user with sudo access and configures XRDP automatically.
+If `BRAIN_CLONE_USERNAME` is provided, the VM's startup script creates the user with sudo access and configures XRDP automatically. If `BRAIN_CLONE_PASSWORD` is also provided, it is applied over SSH via `chpasswd` after boot — the password is **never** stored as instance metadata, so it isn't readable by anyone with `compute.instances.get`.
 
 ## RDP Access
 
