@@ -22,7 +22,7 @@ All paths below are relative to the repo root (`git rev-parse --show-toplevel`).
 | Reference templates | `references/` (relative to this skill) |
 | Source manifest | `sources.md` (repo root) |
 | Secrets | `.env.local` (repo root, gitignored) |
-| Export output | `src/clickup/`, `src/confluence/`, `src/gdrive/`, `src/github/`, `src/linear/`, `src/medium/` |
+| Export output | `src/clickup/`, `src/confluence/`, `src/gdrive/`, `src/gdrive_index/`, `src/github/`, `src/linear/`, `src/medium/` |
 | Last export manifest | `src/.last_export.json` |
 
 **Resolving the skill path at runtime:**
@@ -60,6 +60,7 @@ Source commands in `sources.md`:
 - `clickup_prj_to_md <url>` — export ClickUp project/folder roadmap lists
 - `confluence_space_to_md <url>` — export Confluence spaces
 - `gdrive_to_md <url>` — export Google Drive folders (converts Office formats via markitdown)
+- `gdrive_to_md_index <url>` — build a lightweight INDEX.md for a Google Drive folder (title + link + type + metadata per file; no downloads, no conversion). Use for large/low-signal folders where full export is overkill but an LLM-browsable catalog is still useful. Output: `src/gdrive_index/<Drive Name>/<sub/path>/INDEX.md` (mirrors `gdrive_to_md`'s path layout) plus a `.raw-listing.json` sidecar. Registry lives at `src/gdrive_index/.registry.json`. Supports `--list` to review previously indexed folders.
 - `github_clone <url>` — full-clone or update a GitHub repo into `src/github/<owner>/<repo>/`
 - `medium_to_md <url>` — export Medium feed
 - `linear_to_md <url>` — export Linear projects

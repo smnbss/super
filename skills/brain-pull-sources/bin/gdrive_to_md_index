@@ -1,0 +1,9 @@
+#!/bin/bash
+# Google Drive folder -> INDEX.md builder (no downloads).
+# Usage: gdrive_to_md_index <google_drive_folder_url>
+#        gdrive_to_md_index --list
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+exec python3 "$PROJECT_ROOT/utils/gdrive_to_md_index.py" "$@"

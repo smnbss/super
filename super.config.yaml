@@ -153,10 +153,6 @@ plugins:
     source: claude-plugins-official/skill-creator
     description: Create and manage custom skills
     enabled: true
-  discord:
-    source: claude-plugins-official/discord
-    description: Discord bot integration
-    enabled: true
   telegram:
     source: claude-plugins-official/telegram
     description: Telegram bot integration

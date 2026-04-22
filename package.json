@@ -1,6 +1,6 @@
 {
   "name": "super-cli",
-  "version": "5.9.24",
+  "version": "5.9.25",
   "description": "Cross-CLI session bridge for Claude Code, Gemini CLI, Codex CLI",
   "type": "module",
   "bin": {
