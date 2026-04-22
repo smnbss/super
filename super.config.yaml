@@ -142,7 +142,7 @@ plugins:
     description: WeRoad AI — dbt-modeling, presentations, devops, data-analyst, codex
     enabled: true
   marketing-skills:
-    source: marketingskills/marketing-skills
+    source: coreyhaines31/marketingskills
     description: Marketing skills — copy, SEO, ads, CRO, email, social
     enabled: true
   frontend-design:
