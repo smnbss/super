@@ -36,6 +36,11 @@ Create a cloned OrbStack Ubuntu machine for the current project.
    ```bash
    <skill-dir>/super-clone/setup_ubuntu.sh sources.dev.super.md --desktop
    ```
+   To reuse (and upgrade) an existing machine instead of creating a new timestamped one, pass `--name`:
+   ```bash
+   <skill-dir>/super-clone/setup_ubuntu.sh --name super-dev
+   ```
+   If `super-dev` exists, it will be started (if stopped) and `super install --all` will run inside it to refresh tooling. If it doesn't exist, a new machine is created with that name.
 3. Report the machine name created or any errors.
 
 The script will:

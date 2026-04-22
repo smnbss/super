@@ -40,6 +40,11 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" sources.dev.super.md --desktop
    ```
+   To reuse (and upgrade) an existing instance instead of creating a new timestamped one, pass `--name`:
+   ```bash
+   <skill-dir>/super-clone-in-gcp/setup_gcp.sh --name super-dev
+   ```
+   If the instance exists, it will be started (if TERMINATED) and `super install --all` will run over SSH to refresh tooling. If it doesn't exist, a new instance is created with that name.
    For the full flag list (`--project`, `--zone`, `--machine-type`, `--disk-size-gb`, `--ssh-mode`, `--name`, `--dry-run`), run:
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh --help

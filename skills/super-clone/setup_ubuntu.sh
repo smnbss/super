@@ -3,6 +3,7 @@ set -euo pipefail
 
 PROJECT_DIR=""
 EXPLICIT_SOURCES=""
+EXPLICIT_NAME=""
 DESKTOP=false
 
 # Parse arguments
@@ -14,6 +15,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --source)
       EXPLICIT_SOURCES="${2:-}"
+      shift 2
+      ;;
+    --name)
+      EXPLICIT_NAME="${2:-}"
       shift 2
       ;;
     *)
@@ -47,6 +52,7 @@ if [ -f "$ENV_LOCAL" ]; then
 fi
 
 orb_exists() { orb list 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
+orb_running() { orb list 2>/dev/null | awk -v m="$1" '$1==m && $2=="running"{f=1} END{exit !f}'; }
 
 # Ensure base machine exists with pre-installed dependencies.
 #
@@ -72,8 +78,17 @@ if ! orb_exists "$BASE_MACHINE"; then
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${NODE_ARCH}.tar.gz" | \
       sudo tar -xz -C /usr/local --strip-components=1
     curl -fsSL https://ollama.com/install.sh | sh
-    # Install Chromium browser (works on all architectures including ARM64)
-    sudo apt-get install -y chromium-browser
+    # Install Chromium via snap. On Ubuntu 25.10 questing the
+    # `chromium-browser` apt package is a transitional stub that
+    # Pre-Depends on snapd and just redirects to the chromium snap —
+    # installing it without snapd produces a 50KB empty shell with no
+    # browser binary. Bootstrap snapd first, wait for seed, then install
+    # the real chromium snap. Covers both GUI (XRDP desktop entry) and
+    # headless (--remote-debugging-port) use cases on ARM64 and x86_64.
+    sudo apt-get install -y snapd
+    sudo systemctl enable --now snapd.socket snapd.service
+    sudo snap wait system seed.loaded
+    sudo snap install chromium
     # Ubuntu 25.10 questing images do not ship /usr/bin/gpg, and sudo-rs
     # drops it into PATH in ways that are painful to work around. Use
     # [trusted=yes] on the apt source to skip signature verification
@@ -95,11 +110,38 @@ fi
 
 USER_NAME="$(whoami)"
 USER_SLUG="$(printf '%s' "$USER_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
-MACHINE="${BASE}-${USER_SLUG}-$(date +%m%d-%H%M%S)"
-if orb_exists "$MACHINE"; then
-  i=2
-  while orb_exists "$MACHINE-$i"; do ((i++)); done
-  MACHINE="$MACHINE-$i"
+
+# --name <instance-name>: if the machine exists, reuse it — start it if
+# stopped, then re-run `super install --all` to pull the latest tooling.
+# This gives you a fast "upgrade my existing clone" path without throwing
+# away your work. If --name is given but no such machine exists, we fall
+# through and create a new one with that name.
+if [ -n "$EXPLICIT_NAME" ] && orb_exists "$EXPLICIT_NAME"; then
+  MACHINE="$EXPLICIT_NAME"
+  if ! orb_running "$MACHINE"; then
+    echo "Machine '$MACHINE' is stopped. Starting..."
+    orb start "$MACHINE"
+  fi
+  echo "Machine '$MACHINE' already exists. Upgrading super + tools..."
+  orb -m "$MACHINE" bash -lc '
+    set -euo pipefail
+    export PATH="$HOME/.local/bin:$HOME/.super:$PATH"
+    cd "$HOME/brain" 2>/dev/null || cd "$HOME"
+    super install --all
+  '
+  echo "Done. Machine: $MACHINE (upgraded)"
+  exit 0
+fi
+
+if [ -n "$EXPLICIT_NAME" ]; then
+  MACHINE="$EXPLICIT_NAME"
+else
+  MACHINE="${BASE}-${USER_SLUG}-$(date +%m%d-%H%M%S)"
+  if orb_exists "$MACHINE"; then
+    i=2
+    while orb_exists "$MACHINE-$i"; do ((i++)); done
+    MACHINE="$MACHINE-$i"
+  fi
 fi
 
 echo "Cloning '$BASE_MACHINE' to '$MACHINE'..."
@@ -124,6 +166,26 @@ if [ -f "$SOURCES_MD" ]; then
   orb push -m "$MACHINE" "$SOURCES_MD" brain/sources.md
 fi
 
+# OrbStack symlinks /etc/resolv.conf -> /opt/orbstack-guest/etc/resolv.conf
+# on a read-only overlay, with a reserved 0.x.x.x nameserver that
+# OrbStack proxies at the VM networking layer. This breaks two things:
+#   1. Snap confinement (chromium, etc.) cannot bind-mount resolv.conf
+#      into its mount namespace, so confined apps see no DNS config.
+#   2. Chromium's built-in async resolver rejects 0.x.x.x as
+#      non-routable before sending a packet, producing
+#      DNS_PROBE_FINISHED_BAD_CONFIG in the browser even though curl
+#      from the same shell resolves fine via glibc+kernel routing.
+# Replace the symlink with a real file using public resolvers. The
+# trade-off is losing in-VM resolution of *.orb.local — acceptable
+# since the user is already inside the VM.
+orb -m "$MACHINE" bash -lc '
+  if [ -L /etc/resolv.conf ]; then
+    sudo rm -f /etc/resolv.conf
+    printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\noptions edns0\n" | \
+      sudo tee /etc/resolv.conf >/dev/null
+  fi
+'
+
 if [ "$DESKTOP" = true ]; then
   echo "Installing XFCE desktop and XRDP..."
   orb -m "$MACHINE" bash -lc '
@@ -137,6 +199,15 @@ if [ "$DESKTOP" = true ]; then
     # Ensure xrdp uses the local session manager
     sudo sed -i "s/^test -x \/etc\/X11\/Xsession/# test -x \/etc\/X11\/Xsession/" /etc/xrdp/startwm.sh || true
     sudo sed -i "s/^exec \/bin\/sh \/etc\/X11\/Xsession/# exec \/bin\/sh \/etc\/X11\/Xsession/" /etc/xrdp/startwm.sh || true
+    # XRDP does not export XAUTHORITY into the user session by default;
+    # children of xfce4-session (notably terminals that then launch
+    # confined snap apps like chromium) can see DISPLAY but fail with
+    # "Authorization required, but no authorization protocol specified"
+    # because they cannot find the X cookie. Export it before startxfce4
+    # so every process in the desktop session inherits it.
+    if ! grep -q "XAUTHORITY=" /etc/xrdp/startwm.sh; then
+      echo "export XAUTHORITY=\"\$HOME/.Xauthority\"" | sudo tee -a /etc/xrdp/startwm.sh
+    fi
     # Append XFCE start command if not present
     if ! grep -q "xfce4-session" /etc/xrdp/startwm.sh; then
       echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh

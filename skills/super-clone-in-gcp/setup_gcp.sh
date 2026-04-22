@@ -227,26 +227,56 @@ NODE_VERSION="$NODE_VERSION"
 HEAD
 cat >>"$STARTUP_SCRIPT" <<'EOF'
 mkdir -p "$(dirname "$STARTUP_MARKER")"
-apt-get update
-apt-get install -y git curl zstd ca-certificates
+
+# Ubuntu cloud images run unattended-upgrades on first boot and hold the dpkg
+# lock for several minutes. Stop the daily timers and wait for any in-flight
+# upgrade to release the lock before we start installing.
+systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades 2>/dev/null || true
+for _ in $(seq 1 120); do
+  fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1 || break
+  sleep 5
+done
+
+# Belt-and-suspenders: every apt-get also waits up to 10 min for the lock.
+APT="apt-get -o DPkg::Lock::Timeout=600"
+$APT update
+$APT install -y git curl zstd ca-certificates
 curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" | \
   tar -xz -C /usr/local --strip-components=1
 curl -fsSL https://ollama.com/install.sh | sh
-apt-get install -y chromium-browser
+# On Ubuntu 24.04 LTS `chromium-browser` is a transitional package
+# that Pre-Depends on snapd and redirects to the chromium snap —
+# installing it without snapd produces a 50KB empty stub with no
+# browser binary. Bootstrap snapd, wait for the seed, install the
+# real chromium snap. Covers both GUI (XRDP desktop entry) and
+# headless (--remote-debugging-port) use cases.
+$APT install -y snapd
+systemctl enable --now snapd.socket snapd.service
+snap wait system seed.loaded
+snap install chromium
 echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" \
   >/etc/apt/sources.list.d/google-cloud-sdk.list
-apt-get update
-apt-get install -y google-cloud-cli
+$APT update
+$APT install -y google-cloud-cli
 npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
 
 DESKTOP_ENABLED="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/enable-desktop" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
 if [[ "$DESKTOP_ENABLED" == "true" ]]; then
-  apt-get install -y xfce4 xfce4-goodies xrdp
+  $APT install -y xfce4 xfce4-goodies xrdp
   systemctl enable xrdp
   systemctl start xrdp
 
   sed -i 's/^test -x \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
   sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
+  # XRDP does not export XAUTHORITY into the user session by default;
+  # children of xfce4-session (notably terminals that then launch
+  # confined snap apps like chromium) can see DISPLAY but fail with
+  # "Authorization required, but no authorization protocol specified"
+  # because they can't find the X cookie. Export it before startxfce4
+  # so every process in the desktop session inherits it.
+  if ! grep -q 'XAUTHORITY=' /etc/xrdp/startwm.sh; then
+    echo 'export XAUTHORITY="$HOME/.Xauthority"' >> /etc/xrdp/startwm.sh
+  fi
   echo 'startxfce4' >> /etc/xrdp/startwm.sh
 
   sed -i 's/TerminalServerUsers=tsusers/TerminalServerUsers=sudo/' /etc/xrdp/sesman.ini || true
@@ -387,6 +417,40 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   log "Start command:"
   log "  $START_COMMAND"
   log "Delete command:"
+  log "  $DELETE_COMMAND"
+  exit 0
+fi
+
+# --name <instance-name>: if the instance already exists, reuse it —
+# start it if TERMINATED, then re-run `super install --all` to pull the
+# latest tooling. Fast "upgrade my existing clone" path without throwing
+# away disk state. If the name doesn't exist, fall through and create.
+EXISTING_STATUS="$(gcloud --project="$PROJECT_ID" compute instances describe "$INSTANCE_NAME" --zone="$ZONE" --format="value(status)" 2>/dev/null || true)"
+if [[ -n "$EXISTING_STATUS" ]]; then
+  log "Instance '$INSTANCE_NAME' already exists (status: $EXISTING_STATUS). Upgrading super + tools..."
+  if [[ "$EXISTING_STATUS" != "RUNNING" ]]; then
+    log "Starting instance..."
+    gcloud --project="$PROJECT_ID" compute instances start "$INSTANCE_NAME" --zone="$ZONE"
+    # Wait for SSH to come up after start.
+    for _ in $(seq 1 30); do
+      if gcloud_ssh --command "true" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 5
+    done
+  fi
+  gcloud_ssh --command 'set -euo pipefail; export PATH="$HOME/.local/bin:$HOME/.super:$PATH"; cd "$HOME/brain" 2>/dev/null || cd "$HOME"; super install --all'
+  EXTERNAL_IP="$(gcloud --project="$PROJECT_ID" compute instances list --filter="name=$INSTANCE_NAME" --format="value(EXTERNAL_IP)" --zone="$ZONE" 2>/dev/null || true)"
+  log ""
+  log "Done. Machine: $INSTANCE_NAME (upgraded)"
+  log "SSH:"
+  log "  $SSH_COMMAND"
+  if [[ -n "$EXTERNAL_IP" ]]; then
+    log "External IP: $EXTERNAL_IP"
+  fi
+  log "Stop:"
+  log "  $STOP_COMMAND"
+  log "Delete:"
   log "  $DELETE_COMMAND"
   exit 0
 fi
