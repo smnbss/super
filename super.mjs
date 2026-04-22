@@ -365,7 +365,6 @@ async function cmdInstall(args) {
 
   // Write the project config template so the catalog has something to read.
   if (isFirstTime) { installConfigTemplate(); ui.spacer(); }
-  if (catalog.migrateObsoleteConfigSources()) config.invalidateCache();
   config.invalidateCache();
 
   // System prereqs + CLI binaries come from the catalog, not super-setup.

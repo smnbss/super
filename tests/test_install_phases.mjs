@@ -15,7 +15,12 @@ const tmp = join(tmpdir(), `super-install-phases-${process.pid}-${Date.now()}`);
 mkdirSync(join(tmp, '.super'), { recursive: true });
 process.env.SUPER_PROJECT_DIR = tmp;
 
-const { installPhaseInstall, installPhaseConfigure, scaffoldEnvLocal, migrateObsoleteConfigSources } = await import('../lib/catalog.mjs');
+const home = join(tmp, 'home');
+mkdirSync(join(home, '.super'), { recursive: true });
+process.env.HOME = home;
+
+const { installPhaseInstall, installPhaseConfigure, scaffoldEnvLocal } = await import('../lib/catalog.mjs');
+const { catalogPlugins, invalidateCache } = await import('../lib/config.mjs');
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -72,19 +77,28 @@ test('installPhaseConfigure no-ops cleanly on an empty catalog', () => {
   installPhaseConfigure([]);
 });
 
-test('migrateObsoleteConfigSources rewrites stale plugin sources in project config', () => {
-  writeFileSync(cfgPath, [
+test('project config only overrides enabled flags for shipped plugin metadata', () => {
+  writeFileSync(join(home, '.super', 'super.config.yaml'), [
     'plugins:',
     '  marketing-skills:',
-    '    source: marketingskills/marketing-skills',
+    '    source: coreyhaines31/marketingskills',
     '    enabled: true',
     '',
   ].join('\n'));
 
-  assert.strictEqual(migrateObsoleteConfigSources(), true);
-  const content = readFileSync(cfgPath, 'utf8');
-  assert.ok(content.includes('source: coreyhaines31/marketingskills'));
-  assert.ok(!content.includes('marketingskills/marketing-skills'));
+  writeFileSync(cfgPath, [
+    'plugins:',
+    '  marketing-skills:',
+    '    source: marketingskills/marketing-skills',
+    '    enabled: false',
+    '',
+  ].join('\n'));
+
+  invalidateCache();
+  const plugin = catalogPlugins().find(p => p.name === 'marketing-skills');
+  assert.ok(plugin);
+  assert.strictEqual(plugin.source, 'coreyhaines31/marketingskills');
+  assert.strictEqual(plugin.enabled, false);
 });
 
 // Cleanup.
