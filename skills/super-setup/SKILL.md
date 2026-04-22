@@ -26,7 +26,7 @@ The current directory (or an ancestor **strictly between cwd and `$HOME`**) must
 
 > ⚠️ `$HOME/.super` is the **global super install**, not a project. Never treat `$HOME` as a brain root, even though `ls -ld $HOME/.super` reports a real directory. Stop the walk-up **before** reaching `$HOME`, and additionally skip any `.super/` whose realpath equals `$HOME/.super`.
 >
-> ⚠️ super install creates four debug-only symlinks inside each CLI's project dir:
+> ⚠️ `super install --debug` creates four debug-only symlinks inside each CLI's project dir:
 >
 > - `<project>/.claude/.claude → ~/.claude`
 > - `<project>/.codex/.codex → ~/.codex`

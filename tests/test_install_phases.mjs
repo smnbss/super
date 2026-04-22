@@ -1,5 +1,6 @@
-// tests/test_install_phases.mjs — Verifies the install/configure split:
-//   - installPhaseInstall: built-in skills, no MCPs, no external skills.
+// tests/test_install_phases.mjs — Verifies the install phases used by
+// `super install`:
+//   - installPhaseInstall: built-in skills + debug-link sync path.
 //   - installPhaseConfigure: no-ops safely when super.config.yaml is empty
 //     of externals.
 
@@ -56,7 +57,14 @@ test('scaffoldEnvLocal never overwrites an existing .env.local', () => {
 test('installPhaseInstall runs without touching the external catalog', () => {
   // Should not throw. With an empty selectedClis + no CLIs installed, the
   // built-in skill copy is a no-op, but the function must still return cleanly.
-  installPhaseInstall([]);
+  installPhaseInstall([], { debugMode: false });
+});
+
+test('installPhaseInstall creates debug symlinks only when requested', () => {
+  installPhaseInstall([], { debugMode: true });
+  assert.ok(existsSync(join(tmp, '.super', '.super')), '.super/.super symlink should exist in debug mode');
+  installPhaseInstall([], { debugMode: false });
+  assert.ok(!existsSync(join(tmp, '.super', '.super')), '.super/.super symlink should be removed without debug mode');
 });
 
 test('installPhaseConfigure no-ops cleanly on an empty catalog', () => {

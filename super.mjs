@@ -328,6 +328,10 @@ function installConfigTemplate() {
 
 async function cmdInstall(args) {
   const installStart = Date.now();
+  // --debug may appear anywhere (e.g. `super install --debug`). Strip it before other arg handling so
+  // `target = args[0]` isn't polluted.
+  const debugMode = args.includes('--debug');
+  args = args.filter(a => a !== '--debug');
   const target = args[0];
   const root = config.findRoot();
 
@@ -427,7 +431,7 @@ async function cmdInstall(args) {
   // Core phase: bootstrap + built-in skills shipped in $SUPER_HOME/skills,
   // CLI home symlinks, and skill-dir sync.
   if (config.findConfig()) {
-    catalog.installPhaseInstall(selectedClis);
+    catalog.installPhaseInstall(selectedClis, { debugMode });
   }
 
   // Also keep super's built-in skills fresh in Claude's GLOBAL skill dir
@@ -482,15 +486,6 @@ async function cmdInstall(args) {
     'Want to drive manually? Edit .env.local, then',
     'super launch claude "/super-setup".',
   );
-}
-
-// `super configure` used to run the external-skills/plugins/MCPs/context-files
-// phase separately from `super install`. That phase now happens inside
-// `super install` itself, so this is just an alias — call super install with
-// whatever args the user passed (including --all or a CLI target).
-async function cmdConfigure(args) {
-  ui.muted('`super configure` is now an alias for `super install`.');
-  await cmdInstall(args);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1175,7 +1170,6 @@ USAGE
 COMMANDS
   install [target]     Full install — hooks, CLIs, system prereqs, built-in + external skills, plugins, MCPs, context files (all|claude|gemini|codex)
   onboard              One-shot post-install: runs install, walks CLI + service logins, launches /super-setup
-  configure [target]   Alias for install (kept for backwards compat)
   claude|gemini|codex  Launch CLI with session tracking
   resume [session]     Resume a previous session
   switch <cli>         Continue session in different CLI
@@ -1203,6 +1197,7 @@ OPTIONS (launch)
   --provider, -P <name>  Model provider (ollama|openai|lmstudio|groq|together)
 
 EXAMPLES
+  super install --debug           # Also create .CLI/.CLI → ~/.CLI debug symlinks
   super claude                    # New Claude session
   super claude --model opus       # Explicit model
   super claude --resume           # Resume with picker
@@ -1278,7 +1273,6 @@ async function main() {
     case '?': await cmdQuickSearch(); break;
     case 'install': case 'i': await cmdInstall(rest); break;
     case 'onboard': case 'o': await cmdOnboard(rest); break;
-    case 'configure': case 'setup': await cmdConfigure(rest); break;
     case 'launch': case 'l': case 'run': cmdLaunch(rest[0], rest.slice(1)); break;
     case 'resume': case 'r': await cmdResume(rest[0]); break;
     case 'sessions': case 'ls': case 'list': cmdSessions(); break;
