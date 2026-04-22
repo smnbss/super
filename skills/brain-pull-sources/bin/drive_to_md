@@ -1,22 +1,19 @@
 #!/bin/bash
-# Google Drive to Markdown exporter wrapper
-# Usage: gdrive_to_md <google_drive_folder_url>
+# Google Drive -> Markdown + per-folder INDEX.md (unified).
+# Usage: drive_to_md <google_drive_folder_url> [--mode full|index]
+#        drive_to_md --list
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Find a Python interpreter that has markitdown installed
+# Find a Python interpreter that has markitdown installed. Needed for --mode full;
+# --mode index works with any Python 3 but we use the same picker for consistency.
 PYTHON="python3"
 
-# 1. Check if python3 can import markitdown
 if python3 -c "import markitdown" 2>/dev/null; then
     PYTHON="python3"
-# 2. Check pipx venv python
 elif [ -x "$HOME/.local/pipx/venvs/markitdown/bin/python" ]; then
     PYTHON="$HOME/.local/pipx/venvs/markitdown/bin/python"
-# 3. Derive python from markitdown binary location (resolve symlinks so
-#    `~/.local/bin/markitdown -> ~/.local/share/uv/tools/markitdown/bin/markitdown`
-#    finds the venv python in the uv tool dir, not next to the symlink).
 elif command -v markitdown >/dev/null 2>&1; then
     MARKITDOWN_BIN="$(command -v markitdown)"
     if command -v readlink >/dev/null 2>&1; then
@@ -25,12 +22,10 @@ elif command -v markitdown >/dev/null 2>&1; then
     fi
     if [[ "$MARKITDOWN_BIN" == */bin/markitdown ]]; then
         VENV_PYTHON="${MARKITDOWN_BIN%/bin/markitdown}/bin/python"
-        # Require a converter dep too — a bare `markitdown` install without
-        # [all] extras imports cleanly but silently drops every conversion.
         if [ -x "$VENV_PYTHON" ] && "$VENV_PYTHON" -c "import markitdown, mammoth" 2>/dev/null; then
             PYTHON="$VENV_PYTHON"
         fi
     fi
 fi
 
-exec "$PYTHON" "$PROJECT_ROOT/utils/gdrive_to_md.py" "$@"
+exec "$PYTHON" "$PROJECT_ROOT/utils/drive_to_md.py" "$@"

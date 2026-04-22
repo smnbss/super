@@ -413,6 +413,7 @@ Phase 1   (inventory src + outputs/services)
 - **Outputs are read-only**: Never modify service doc files — they are inputs, not outputs.
 - **Skip, don't fabricate**: If a source doesn't provide data for a section, use `<!-- TODO: source not available -->`.
 - **Timestamp everything**: `<!-- verified: YYYY-MM-DD | source: ... -->` on every fact block.
+- **Cite gdrive files by their Drive URL, not the local path**: any `.md` file under `src/gdrive/` is a converted-from-Drive export carrying YAML frontmatter with `gdrive_url`. When a fact derives from such a file, the `source:` field must be the `gdrive_url` value — not `src/gdrive/<path>.md`. The local path is an implementation detail; the Drive URL is what lets a human click through. For non-gdrive sources, continue to use the local path as before. When the input is a per-folder `INDEX.md` (index-only mode), cite the folder's Drive URL (the `Drive link:` line inside the INDEX) rather than the INDEX itself.
 - **Preserve `<!-- superseded: -->` markers**: Keep them even in a rebuild.
 - **Conservative on entities**: 2+ source appearances required for `entities.md`.
 - **Use `qmd query`** for semantic searches across the brain. Use Grep only for exact string/regex matches.
