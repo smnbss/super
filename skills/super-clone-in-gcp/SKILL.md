@@ -45,7 +45,12 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh --name super-dev
    ```
    If the instance exists, it will be started (if TERMINATED) and `super install --all` will run over SSH to refresh tooling. If it doesn't exist, a new instance is created with that name.
-   For the full flag list (`--project`, `--zone`, `--machine-type`, `--disk-size-gb`, `--ssh-mode`, `--name`, `--dry-run`), run:
+   To restrict SSH/XRDP to a specific IP or CIDR (instead of the auto-detected public IP), pass `--source-ip`:
+   ```bash
+   <skill-dir>/super-clone-in-gcp/setup_gcp.sh --name super-dev --source-ip 203.0.113.4/32
+   ```
+   Multiple IPs/CIDRs can be passed comma-separated (e.g. `--source-ip 1.2.3.4/32,5.6.7.0/24`).
+   For the full flag list (`--project`, `--zone`, `--machine-type`, `--disk-size-gb`, `--ssh-mode`, `--network`, `--subnet`, `--source-ip`, `--name`, `--dry-run`), run:
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh --help
    ```
@@ -56,6 +61,7 @@ The script will:
 - Create a stock Ubuntu 24.04 Compute Engine VM named `super-<username>-<MMDD-HHMMSS>` (default `e2-standard-4`, 80 GB disk, `europe-west1-b`)
 - Run a startup script that installs: `git`, `curl`, `zstd`, Node.js 20.19.0, Ollama, Chromium, the Google Cloud CLI, and the `@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli` npm globals
 - With `--desktop`: additionally install XFCE4 and XRDP, create the `allow-xrdp` firewall rule, and print the RDP connection address
+- Create/update the `allow-ssh` (and, with `--desktop`, `allow-xrdp`) firewall rules so they only permit traffic from the caller's current public IPv4 (auto-detected via `curl -4 https://api.ipify.org` with fallbacks). Override with `--source-ip`. The IP is refreshed on every run — including `--name` reuse — so the lockdown tracks your current IP if it changes. If detection fails and no `--source-ip` is given, the script aborts rather than falling back to `0.0.0.0/0`.
 - Wait for SSH readiness, copy `.env.local` and optional `sources.md`, then bootstrap `super` (git clone into `~/.super` + `super install --all`)
 - Print the SSH command plus manual start/stop/delete commands for the workstation
 
@@ -72,7 +78,7 @@ If `BRAIN_CLONE_USERNAME` is provided, the VM's startup script creates the user 
 ## RDP Access
 
 After the VM is ready (only when `--desktop` is used):
-1. The `allow-xrdp` firewall rule is created automatically in your GCP project (port 3389). The VM is tagged with `xrdp` for this purpose.
+1. The `allow-xrdp` firewall rule is created automatically in your GCP project (port 3389), scoped to your detected public IP (or the `--source-ip` override). The VM is tagged with `xrdp` for this purpose.
 2. If you did not set `BRAIN_CLONE_USERNAME`/`BRAIN_CLONE_PASSWORD`, create a local user manually:
    ```bash
    sudo adduser <username>

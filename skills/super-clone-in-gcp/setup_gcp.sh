@@ -23,6 +23,9 @@ Options:
   --ssh-mode <mode>       SSH mode: oslogin or metadata (default: oslogin)
   --network <network>       VPC network name (default: default)
   --subnet <subnet>         Subnet name
+  --source-ip <cidr>      Restrict SSH/XRDP to this IP or CIDR (default: auto-detect
+                          your public IPv4 and lock down to /32). Accepts a comma-
+                          separated list of IPs/CIDRs.
   --desktop               Install XFCE desktop and XRDP
   --name <instance-name>  Explicit VM name
   --dry-run               Print the resolved configuration and commands only
@@ -59,6 +62,18 @@ dotenv_value() {
   if [[ -n "$line" ]]; then
     printf '%s' "${line#*=}"
   fi
+}
+
+detect_public_ip() {
+  local ip svc
+  for svc in https://api.ipify.org https://ifconfig.me https://icanhazip.com; do
+    ip="$(curl -4 -fsSL --max-time 5 "$svc" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf '%s' "$ip"
+      return 0
+    fi
+  done
+  return 1
 }
 
 find_public_key() {
@@ -105,6 +120,7 @@ SUBNET=""
 INSTANCE_NAME=""
 DESKTOP=false
 DRY_RUN=0
+SOURCE_IP=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -138,6 +154,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --subnet)
       SUBNET="${2:-}"
+      shift 2
+      ;;
+    --source-ip)
+      SOURCE_IP="${2:-}"
       shift 2
       ;;
     --desktop)
@@ -195,6 +215,33 @@ ZONE="${ZONE:-${CURRENT_GCLOUD_ZONE:-$DEFAULT_ZONE}}"
 [[ -n "$PROJECT_ID" ]] || die "Set BRAIN_CLONE_GCP, GCP_PROJECT_ID, or pass --project"
 [[ "$SSH_MODE" == "oslogin" || "$SSH_MODE" == "metadata" ]] || die "--ssh-mode must be oslogin or metadata"
 [[ "$DISK_SIZE_GB" =~ ^[0-9]+$ ]] || die "--disk-size-gb must be numeric"
+
+if [[ -z "$SOURCE_IP" ]]; then
+  DETECTED_IP="$(detect_public_ip || true)"
+  [[ -n "$DETECTED_IP" ]] || die "Could not auto-detect public IP. Pass --source-ip <ip-or-cidr> explicitly."
+  SOURCE_IP="${DETECTED_IP}/32"
+  log "Locking down SSH/XRDP to detected public IP: $SOURCE_IP"
+elif [[ "$SOURCE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  SOURCE_IP="${SOURCE_IP}/32"
+fi
+
+ensure_firewall_rule() {
+  local name="$1"
+  local port="$2"
+  local desc="$3"
+  if gcloud --project="$PROJECT_ID" compute firewall-rules describe "$name" --format="value(name)" >/dev/null 2>&1; then
+    log "Updating firewall rule '$name' → source-ranges=$SOURCE_IP"
+    gcloud --project="$PROJECT_ID" compute firewall-rules update "$name" \
+      --source-ranges="$SOURCE_IP" >/dev/null || log "Firewall rule update failed for '$name'."
+  else
+    log "Creating firewall rule '$name' (tcp:$port, source=$SOURCE_IP)..."
+    gcloud --project="$PROJECT_ID" compute firewall-rules create "$name" \
+      --allow="tcp:$port" \
+      --source-ranges="$SOURCE_IP" \
+      --target-tags="xrdp" \
+      --description="$desc" || log "Firewall rule creation failed for '$name'."
+  fi
+}
 
 USER_NAME="$(whoami)"
 USER_SLUG="$(slugify "$USER_NAME")"
@@ -451,6 +498,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   log "  SSH mode:     $SSH_MODE"
   log "  Instance:     $INSTANCE_NAME"
   log "  Project dir:  $PROJECT_DIR"
+  log "  Source IP:    $SOURCE_IP"
   log ""
   log "Create command:"
   printf '  '
@@ -488,6 +536,11 @@ if [[ -n "$EXISTING_STATUS" ]]; then
     done
   fi
   gcloud_ssh --command 'set -euo pipefail; export PATH="$HOME/.local/bin:$HOME/.super:$PATH"; cd "$HOME/brain" 2>/dev/null || cd "$HOME"; super install --all'
+  # Refresh firewall rules so the IP lockdown tracks the caller's current IP.
+  ensure_firewall_rule "allow-ssh" "22" "Allow SSH connections"
+  if gcloud --project="$PROJECT_ID" compute firewall-rules describe "allow-xrdp" --format="value(name)" >/dev/null 2>&1; then
+    ensure_firewall_rule "allow-xrdp" "3389" "Allow XRDP connections"
+  fi
   EXTERNAL_IP="$(gcloud --project="$PROJECT_ID" compute instances list --filter="name=$INSTANCE_NAME" --format="value(EXTERNAL_IP)" --zone="$ZONE" 2>/dev/null || true)"
   log ""
   log "Done. Machine: $INSTANCE_NAME (upgraded)"
@@ -506,25 +559,10 @@ fi
 log "Creating '$INSTANCE_NAME' in project '$PROJECT_ID' ($ZONE)..."
 "${CREATE_ARGS[@]}"
 
-# Ensure firewall rules exist
-if ! gcloud --project="$PROJECT_ID" compute firewall-rules list --filter="name=allow-ssh" --format="value(name)" | grep -q "allow-ssh"; then
-  log "Creating firewall rule 'allow-ssh' (TCP 22)..."
-  gcloud --project="$PROJECT_ID" compute firewall-rules create "allow-ssh" \
-    --allow=tcp:22 \
-    --source-ranges="0.0.0.0/0" \
-    --target-tags="xrdp" \
-    --description="Allow SSH connections" || log "Firewall rule creation failed (may already exist or insufficient permissions)."
-fi
-
+# Ensure firewall rules exist and are scoped to $SOURCE_IP.
+ensure_firewall_rule "allow-ssh" "22" "Allow SSH connections"
 if [[ "$DESKTOP" == true ]]; then
-  if ! gcloud --project="$PROJECT_ID" compute firewall-rules list --filter="name=allow-xrdp" --format="value(name)" | grep -q "allow-xrdp"; then
-    log "Creating firewall rule 'allow-xrdp' (TCP 3389)..."
-    gcloud --project="$PROJECT_ID" compute firewall-rules create "allow-xrdp" \
-      --allow=tcp:3389 \
-      --source-ranges="0.0.0.0/0" \
-      --target-tags="xrdp" \
-      --description="Allow XRDP connections" || log "Firewall rule creation failed (may already exist or insufficient permissions)."
-  fi
+  ensure_firewall_rule "allow-xrdp" "3389" "Allow XRDP connections"
 fi
 
 log "Waiting for startup to finish..."
