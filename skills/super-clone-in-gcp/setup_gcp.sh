@@ -327,10 +327,38 @@ if [ -f /etc/xrdp/startwm.sh ]; then
   echo "xfce4-session" > "$HOME/.xsession"
 fi
 
-# Also configure for the cloned user if it exists
+# Also bootstrap super + XRDP session for the local clone user (XRDP login target)
 CLONE_USER="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
 if [[ -n "$CLONE_USER" && -d "/home/$CLONE_USER" ]]; then
-  sudo -u "$CLONE_USER" bash -c 'mkdir -p "$HOME/brain" && echo "xfce4-session" > "$HOME/.xsession"'
+  # Seed the clone user's ~/brain with the same .env.local and sources.md
+  sudo mkdir -p "/home/$CLONE_USER/brain"
+  for f in .env.local sources.md; do
+    if [[ -f "$HOME/brain/$f" ]]; then
+      sudo cp "$HOME/brain/$f" "/home/$CLONE_USER/brain/$f"
+    fi
+  done
+  sudo chown -R "$CLONE_USER:$CLONE_USER" "/home/$CLONE_USER/brain"
+
+  # Run the super bootstrap as the clone user so `super` is on their PATH in RDP terminals
+  sudo -u "$CLONE_USER" -H bash -s <<'CLONE_EOF'
+set -euo pipefail
+SUPER_HOME="$HOME/.super"
+rm -rf "$SUPER_HOME"
+git clone https://github.com/smnbss/super "$SUPER_HOME"
+if ! grep -qF "$SUPER_HOME:" "$HOME/.bashrc" 2>/dev/null; then
+  {
+    echo ""
+    echo "# super"
+    echo "export PATH=\"\$HOME/.local/bin:$SUPER_HOME:\$PATH\""
+    echo "case \$- in *i*) [ -d \"\$HOME/brain\" ] && cd \"\$HOME/brain\" ;; esac"
+  } >>"$HOME/.bashrc"
+fi
+export PATH="$HOME/.local/bin:$SUPER_HOME:$PATH"
+mkdir -p "$HOME/brain"
+cd "$HOME/brain"
+super install --all
+echo "xfce4-session" > "$HOME/.xsession"
+CLONE_EOF
 fi
 
 rm -f "$HOME/.super-bootstrap.sh"

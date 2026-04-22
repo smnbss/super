@@ -116,6 +116,26 @@ USER_SLUG="$(printf '%s' "$USER_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z
 # This gives you a fast "upgrade my existing clone" path without throwing
 # away your work. If --name is given but no such machine exists, we fall
 # through and create a new one with that name.
+# Ensure Chromium is installed via snap on a machine. Idempotent: no-op if
+# snap list already shows chromium. Installed here (not only on base image
+# creation) so old super-base images that predate the snap fix self-heal
+# on every clone/reuse instead of requiring a base rebuild.
+ensure_chromium() {
+  local machine="$1"
+  orb -m "$machine" bash -lc '
+    set -euo pipefail
+    if snap list chromium &>/dev/null; then
+      exit 0
+    fi
+    echo "Installing Chromium via snap..."
+    sudo apt-get update
+    sudo apt-get install -y snapd
+    sudo systemctl enable --now snapd.socket snapd.service
+    sudo snap wait system seed.loaded
+    sudo snap install chromium
+  '
+}
+
 if [ -n "$EXPLICIT_NAME" ] && orb_exists "$EXPLICIT_NAME"; then
   MACHINE="$EXPLICIT_NAME"
   if ! orb_running "$MACHINE"; then
@@ -123,6 +143,7 @@ if [ -n "$EXPLICIT_NAME" ] && orb_exists "$EXPLICIT_NAME"; then
     orb start "$MACHINE"
   fi
   echo "Machine '$MACHINE' already exists. Upgrading super + tools..."
+  ensure_chromium "$MACHINE"
   orb -m "$MACHINE" bash -lc '
     set -euo pipefail
     export PATH="$HOME/.local/bin:$HOME/.super:$PATH"
@@ -185,6 +206,8 @@ orb -m "$MACHINE" bash -lc '
       sudo tee /etc/resolv.conf >/dev/null
   fi
 '
+
+ensure_chromium "$MACHINE"
 
 if [ "$DESKTOP" = true ]; then
   echo "Installing XFCE desktop and XRDP..."
