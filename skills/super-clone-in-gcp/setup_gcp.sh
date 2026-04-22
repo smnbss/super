@@ -243,6 +243,23 @@ ensure_firewall_rule() {
   fi
 }
 
+apply_clone_password() {
+  if [[ -z "$BRAIN_CLONE_USERNAME" || -z "$BRAIN_CLONE_PASSWORD" ]]; then
+    return 0
+  fi
+  log "Setting password for '$BRAIN_CLONE_USERNAME' via SSH..."
+  printf '%s:%s\n' "$BRAIN_CLONE_USERNAME" "$BRAIN_CLONE_PASSWORD" | \
+    gcloud_ssh --command "sudo chpasswd" >/dev/null || log "chpasswd failed for '$BRAIN_CLONE_USERNAME'."
+}
+
+repair_xrdp_ssl_cert() {
+  # On existing VMs (or VMs provisioned before this fix shipped) the xrdp
+  # user may not be in ssl-cert, which breaks TLS handshake. Idempotent;
+  # no-op if xrdp isn't installed.
+  gcloud_ssh --command 'if id xrdp >/dev/null 2>&1; then sudo usermod -aG ssl-cert xrdp && sudo systemctl restart xrdp; fi' >/dev/null 2>&1 \
+    || log "xrdp ssl-cert repair skipped or failed."
+}
+
 USER_NAME="$(whoami)"
 USER_SLUG="$(slugify "$USER_NAME")"
 if [[ -z "$INSTANCE_NAME" ]]; then
@@ -330,8 +347,15 @@ npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
 DESKTOP_ENABLED="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/enable-desktop" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
 if [[ "$DESKTOP_ENABLED" == "true" ]]; then
   $APT install -y xfce4 xfce4-goodies xrdp
+  # Ubuntu 24.04's xrdp ships /etc/xrdp/{cert,key}.pem as symlinks to
+  # /etc/ssl/private/ssl-cert-snakeoil.key (root:ssl-cert, mode 0640), but
+  # the package postinst does not add the xrdp service user to ssl-cert.
+  # Without this, TLS handshake fails with "Cannot read private key file:
+  # Permission denied" and the client never sees a login prompt.
+  usermod -aG ssl-cert xrdp
   systemctl enable xrdp
-  systemctl start xrdp
+  # Use restart (not start) so the running daemon picks up the new group.
+  systemctl restart xrdp
 
   sed -i 's/^test -x \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
   sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
@@ -541,6 +565,11 @@ if [[ -n "$EXISTING_STATUS" ]]; then
   if gcloud --project="$PROJECT_ID" compute firewall-rules describe "allow-xrdp" --format="value(name)" >/dev/null 2>&1; then
     ensure_firewall_rule "allow-xrdp" "3389" "Allow XRDP connections"
   fi
+  # Repair ssl-cert group on VMs provisioned before that fix shipped, and
+  # (re)apply the clone user's password. Both are idempotent — running
+  # --name <existing> effectively doubles as a repair tool.
+  repair_xrdp_ssl_cert
+  apply_clone_password
   EXTERNAL_IP="$(gcloud --project="$PROJECT_ID" compute instances list --filter="name=$INSTANCE_NAME" --format="value(EXTERNAL_IP)" --zone="$ZONE" 2>/dev/null || true)"
   log ""
   log "Done. Machine: $INSTANCE_NAME (upgraded)"
@@ -587,11 +616,7 @@ gcloud_scp "$REMOTE_BOOTSTRAP" "$INSTANCE_NAME:~/.super-bootstrap.sh"
 log "Bootstrapping super on the VM..."
 gcloud_ssh --command "chmod +x ~/.super-bootstrap.sh && ~/.super-bootstrap.sh"
 
-if [[ -n "$BRAIN_CLONE_USERNAME" && -n "$BRAIN_CLONE_PASSWORD" ]]; then
-  log "Setting password for '$BRAIN_CLONE_USERNAME' via SSH..."
-  printf '%s:%s\n' "$BRAIN_CLONE_USERNAME" "$BRAIN_CLONE_PASSWORD" | \
-    gcloud_ssh --command "sudo chpasswd" >/dev/null
-fi
+apply_clone_password
 
 RDP_COMMAND="gcloud --project=$PROJECT_ID compute instances list --filter=name=$INSTANCE_NAME --format='value(EXTERNAL_IP)'"
 EXTERNAL_IP="$(gcloud --project="$PROJECT_ID" compute instances list --filter="name=$INSTANCE_NAME" --format="value(EXTERNAL_IP)" --zone="$ZONE" 2>/dev/null || true)"
