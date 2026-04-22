@@ -254,6 +254,26 @@ $APT install -y snapd
 systemctl enable --now snapd.socket snapd.service
 snap wait system seed.loaded
 snap install chromium
+# Set chromium as the default browser system-wide. The snap postinst does
+# not register update-alternatives, so anything calling xdg-open, BROWSER,
+# or x-www-browser falls back to whatever is first in PATH. Register it
+# and seed the XDG mimeapps defaults so XFCE and headless tooling both
+# route to chromium_chromium.desktop.
+update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
+update-alternatives --set x-www-browser /snap/bin/chromium
+update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /snap/bin/chromium 200
+update-alternatives --set gnome-www-browser /snap/bin/chromium
+mkdir -p /etc/xdg
+cat >/etc/xdg/mimeapps.list <<'MIME'
+[Default Applications]
+text/html=chromium_chromium.desktop
+x-scheme-handler/http=chromium_chromium.desktop
+x-scheme-handler/https=chromium_chromium.desktop
+x-scheme-handler/about=chromium_chromium.desktop
+x-scheme-handler/unknown=chromium_chromium.desktop
+MIME
+echo 'export BROWSER=/snap/bin/chromium' >/etc/profile.d/chromium-default.sh
+chmod +x /etc/profile.d/chromium-default.sh
 echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" \
   >/etc/apt/sources.list.d/google-cloud-sdk.list
 $APT update

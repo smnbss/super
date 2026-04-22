@@ -89,6 +89,26 @@ if ! orb_exists "$BASE_MACHINE"; then
     sudo systemctl enable --now snapd.socket snapd.service
     sudo snap wait system seed.loaded
     sudo snap install chromium
+    # Set chromium as the default browser system-wide. The snap postinst
+    # does not register update-alternatives, so anything calling xdg-open,
+    # BROWSER, or x-www-browser falls back to whatever is first in PATH.
+    # Register it and seed the XDG mimeapps defaults so XFCE and headless
+    # tooling both route to chromium_chromium.desktop.
+    sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
+    sudo update-alternatives --set x-www-browser /snap/bin/chromium
+    sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /snap/bin/chromium 200
+    sudo update-alternatives --set gnome-www-browser /snap/bin/chromium
+    sudo mkdir -p /etc/xdg
+    sudo tee /etc/xdg/mimeapps.list >/dev/null <<"MIME"
+[Default Applications]
+text/html=chromium_chromium.desktop
+x-scheme-handler/http=chromium_chromium.desktop
+x-scheme-handler/https=chromium_chromium.desktop
+x-scheme-handler/about=chromium_chromium.desktop
+x-scheme-handler/unknown=chromium_chromium.desktop
+MIME
+    echo "export BROWSER=/snap/bin/chromium" | sudo tee /etc/profile.d/chromium-default.sh >/dev/null
+    sudo chmod +x /etc/profile.d/chromium-default.sh
     # Ubuntu 25.10 questing images do not ship /usr/bin/gpg, and sudo-rs
     # drops it into PATH in ways that are painful to work around. Use
     # [trusted=yes] on the apt source to skip signature verification
@@ -133,6 +153,21 @@ ensure_chromium() {
     sudo systemctl enable --now snapd.socket snapd.service
     sudo snap wait system seed.loaded
     sudo snap install chromium
+    sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
+    sudo update-alternatives --set x-www-browser /snap/bin/chromium
+    sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /snap/bin/chromium 200
+    sudo update-alternatives --set gnome-www-browser /snap/bin/chromium
+    sudo mkdir -p /etc/xdg
+    sudo tee /etc/xdg/mimeapps.list >/dev/null <<"MIME"
+[Default Applications]
+text/html=chromium_chromium.desktop
+x-scheme-handler/http=chromium_chromium.desktop
+x-scheme-handler/https=chromium_chromium.desktop
+x-scheme-handler/about=chromium_chromium.desktop
+x-scheme-handler/unknown=chromium_chromium.desktop
+MIME
+    echo "export BROWSER=/snap/bin/chromium" | sudo tee /etc/profile.d/chromium-default.sh >/dev/null
+    sudo chmod +x /etc/profile.d/chromium-default.sh
   '
 }
 
