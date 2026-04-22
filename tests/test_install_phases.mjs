@@ -15,7 +15,7 @@ const tmp = join(tmpdir(), `super-install-phases-${process.pid}-${Date.now()}`);
 mkdirSync(join(tmp, '.super'), { recursive: true });
 process.env.SUPER_PROJECT_DIR = tmp;
 
-const { installPhaseInstall, installPhaseConfigure, scaffoldEnvLocal } = await import('../lib/catalog.mjs');
+const { installPhaseInstall, installPhaseConfigure, scaffoldEnvLocal, migrateObsoleteConfigSources } = await import('../lib/catalog.mjs');
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -70,6 +70,21 @@ test('installPhaseInstall creates debug symlinks only when requested', () => {
 test('installPhaseConfigure no-ops cleanly on an empty catalog', () => {
   // No external skills/plugins/mcps → all phase iterations loop 0 times.
   installPhaseConfigure([]);
+});
+
+test('migrateObsoleteConfigSources rewrites stale plugin sources in project config', () => {
+  writeFileSync(cfgPath, [
+    'plugins:',
+    '  marketing-skills:',
+    '    source: marketingskills/marketing-skills',
+    '    enabled: true',
+    '',
+  ].join('\n'));
+
+  assert.strictEqual(migrateObsoleteConfigSources(), true);
+  const content = readFileSync(cfgPath, 'utf8');
+  assert.ok(content.includes('source: coreyhaines31/marketingskills'));
+  assert.ok(!content.includes('marketingskills/marketing-skills'));
 });
 
 // Cleanup.
