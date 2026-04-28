@@ -64,7 +64,7 @@ orb_running() { orb list 2>/dev/null | awk -v m="$1" '$1==m && $2=="running"{f=1
 # unresolvable /usr/local ownership churn on Ubuntu 25.10 questing.
 if ! orb_exists "$BASE_MACHINE"; then
   echo "Base machine '$BASE_MACHINE' not found. Creating..."
-  orb create ubuntu:26.04 "$BASE_MACHINE"
+  orb create ubuntu:24.04 "$BASE_MACHINE"
   orb -m "$BASE_MACHINE" bash -lc '
     set -euo pipefail
     sudo apt-get update && sudo apt-get install -y git curl zstd ca-certificates

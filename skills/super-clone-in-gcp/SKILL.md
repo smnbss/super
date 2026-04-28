@@ -2,7 +2,7 @@
 name: super-clone-in-gcp
 description: >-
   Create a persistent GCP Ubuntu machine pre-configured for the current project,
-  copying `.env.local` and `sources.md`. Optional XFCE desktop via XRDP.
+  copying `.env.local` and `sources.md`. Optional GNOME desktop via XRDP.
 ---
 
 # /super-clone-in-gcp
@@ -12,7 +12,7 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
 ## When to use
 - When the user says "super clone in gcp", "remote clone", "setup gcp workstation", or asks to provision a remote Ubuntu environment
 - When setting up a long-lived Ubuntu machine with project files copied over
-- When a GUI desktop (XFCE) with RDP access is desired on the remote machine
+- When a GUI desktop (GNOME) with RDP access is desired on the remote machine
 
 ## Steps
 
@@ -23,7 +23,7 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)"
    ```
-   For a machine with XFCE desktop and XRDP:
+   For a machine with GNOME desktop and XRDP:
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --desktop
    ```
@@ -58,9 +58,9 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
 
 The script will:
 - Resolve the target project from `BRAIN_CLONE_GCP`, then `gcloud config get-value project`, then `GCP_PROJECT_ID`
-- Create a stock Ubuntu 24.04 Compute Engine VM named `super-<username>-<MMDD-HHMMSS>` (default `e2-standard-4`, 80 GB disk, `europe-west1-b`)
+- Create a stock Ubuntu 24.04 LTS Compute Engine VM named `super-<username>-<MMDD-HHMMSS>` (default `e2-standard-4`, 80 GB disk, `europe-west1-b`)
 - Run a startup script that installs: `git`, `curl`, `zstd`, Node.js 20.19.0, Ollama, Chromium, the Google Cloud CLI, and the `@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli` npm globals
-- With `--desktop`: additionally install XFCE4 and XRDP, create the `allow-xrdp` firewall rule, and print the RDP connection address
+- With `--desktop`: additionally install GNOME (`ubuntu-desktop-minimal`) and XRDP, force the GNOME-on-Xorg session for xrdp, create the `allow-xrdp` firewall rule, and print the RDP connection address
 - Create/update the `allow-ssh` (and, with `--desktop`, `allow-xrdp`) firewall rules so they only permit traffic from the caller's current public IPv4 (auto-detected via `curl -4 https://api.ipify.org` with fallbacks). Override with `--source-ip`. The IP is refreshed on every run — including `--name` reuse — so the lockdown tracks your current IP if it changes. If detection fails and no `--source-ip` is given, the script aborts rather than falling back to `0.0.0.0/0`.
 - Wait for SSH readiness, copy `.env.local` and optional `sources.md`, then bootstrap `super` (git clone into `~/.super` + `super install --all`)
 - Print the SSH command plus manual start/stop/delete commands for the workstation
@@ -83,4 +83,4 @@ After the VM is ready (only when `--desktop` is used):
    ```bash
    sudo adduser <username>
    ```
-3. Connect via RDP to the VM's external IP on port 3389. The XRDP session will launch XFCE automatically.
+3. Connect via RDP to the VM's external IP on port 3389. The XRDP session will launch GNOME (Ubuntu, on Xorg) automatically.

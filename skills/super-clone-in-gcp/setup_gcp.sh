@@ -3,7 +3,7 @@ set -euo pipefail
 
 DEFAULT_MACHINE_TYPE="e2-standard-4"
 DEFAULT_DISK_SIZE_GB="80"
-DEFAULT_IMAGE_FAMILY="ubuntu-2604-lts-amd64"
+DEFAULT_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_SSH_MODE="oslogin"
 DEFAULT_ZONE="europe-west1-b"

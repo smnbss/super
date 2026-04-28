@@ -2,7 +2,7 @@
 name: super-clone
 description: >-
   Create an OrbStack Ubuntu machine pre-configured for the current project,
-  copying `.env.local` and `sources.md`. Optional XFCE desktop via XRDP.
+  copying `.env.local` and `sources.md`. Optional GNOME desktop via XRDP.
 ---
 
 # /super-clone
@@ -23,7 +23,7 @@ Create a cloned OrbStack Ubuntu machine for the current project.
    ```bash
    <skill-dir>/super-clone/setup_ubuntu.sh "$(pwd)"
    ```
-   For a machine with XFCE desktop and XRDP:
+   For a machine with GNOME desktop and XRDP:
    ```bash
    <skill-dir>/super-clone/setup_ubuntu.sh "$(pwd)" --desktop
    ```
@@ -49,7 +49,7 @@ The script will:
 - Copy `.env.local` from the project into `~/brain/` on the new machine
 - Copy `sources.md` (or an explicit `.md` file you pass) into `~/brain/sources.md` on the new machine
 - Install `super` (git clone into `~/.super`) and run `super install --all` inside the machine
-- With `--desktop`: additionally install XFCE4 and XRDP, then print the RDP connection address
+- With `--desktop`: additionally install GNOME (`ubuntu-desktop-minimal`) and XRDP, force the GNOME-on-Xorg session for xrdp, and print the RDP connection address. The base `super-base` machine is built once on Ubuntu 24.04 LTS — to rebuild it on a newer Ubuntu, `orb delete super-base` and rerun.
 
 ## Environment Variables
 
