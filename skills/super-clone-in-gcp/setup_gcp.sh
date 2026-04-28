@@ -261,21 +261,35 @@ repair_xrdp_ssl_cert() {
 }
 
 repair_xrdp_session() {
-  # On existing VMs provisioned before the dbus-run-session fix shipped the
-  # desktop session exits ~1s after login (xrdp logs "Window manager exited
-  # quickly") because gnome-session/xfce4-session has no per-session bus.
-  # Symptom client-side: connect succeeds, password accepted, then immediate
-  # disconnect that looks like a TLS abort. Fix: install dbus-x11 and
-  # rewrite the exec line in /etc/xrdp/startwm.sh to wrap the WM in
-  # dbus-run-session. Idempotent; no-op if xrdp isn't installed.
-  gcloud_ssh --command '
+  # On existing VMs provisioned before the GNOME-session fix shipped the
+  # desktop session exits ~0s after login (xrdp logs "Window manager exited
+  # quickly with non-zero exit code 134") because gnome-session can't reach
+  # `org.freedesktop.systemd1` on the user bus to start
+  # gnome-session@ubuntu.target. Symptom client-side: connect succeeds,
+  # password accepted, then immediate disconnect that looks like a TLS
+  # abort.
+  #
+  # Two pieces:
+  #   1. Enable lingering on the clone user so `systemd --user` is always
+  #      running and exposes org.freedesktop.systemd1 on the user bus.
+  #   2. Undo any earlier `dbus-run-session -- gnome-session` wrap (which
+  #      was correct for XFCE but creates an isolated bus that breaks
+  #      systemd-user-managed GNOME 4x).
+  # Idempotent; no-op if xrdp isn't installed.
+  local user_arg=""
+  if [[ -n "$CLONE_USER" ]]; then
+    user_arg="$CLONE_USER"
+  fi
+  gcloud_ssh --command "
 if id xrdp >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y dbus-x11 >/dev/null 2>&1 || true
-  if [ -f /etc/xrdp/startwm.sh ] && ! grep -q "dbus-run-session" /etc/xrdp/startwm.sh; then
-    sudo sed -i "s|^exec gnome-session\$|exec dbus-run-session -- gnome-session|" /etc/xrdp/startwm.sh
-    sudo sed -i "s|^exec startxfce4\$|exec dbus-run-session -- xfce4-session|" /etc/xrdp/startwm.sh
+  if [ -f /etc/xrdp/startwm.sh ]; then
+    sudo sed -i 's|^exec dbus-run-session -- gnome-session\$|exec gnome-session|' /etc/xrdp/startwm.sh
   fi
-fi' >/dev/null 2>&1 \
+  if [ -n '$user_arg' ] && id '$user_arg' >/dev/null 2>&1; then
+    sudo loginctl enable-linger '$user_arg' 2>/dev/null || true
+  fi
+fi" >/dev/null 2>&1 \
     || log "xrdp session repair skipped or failed."
 }
 
@@ -401,13 +415,16 @@ export XDG_CURRENT_DESKTOP=ubuntu:GNOME
 export XDG_DATA_DIRS=/usr/share/ubuntu:/usr/local/share:/usr/share:/var/lib/snapd/desktop
 export XDG_CONFIG_DIRS=/etc/xdg/xdg-ubuntu:/etc/xdg
 XSR
-  # Wrap gnome-session in dbus-run-session so the WM always gets a fresh
-  # per-session message bus — without it, gnome-session exits ~1s after
-  # login with "Cannot open display" / "dbus-launch not found", and the
-  # RDP client sees the same symptom as a TLS-handshake abort (xrdp logs
-  # "Window manager exited quickly").
+  # GNOME 4x is systemd-user-managed: gnome-session asks the per-user
+  # systemd instance to start gnome-session@ubuntu.target, which requires
+  # `org.freedesktop.systemd1` on the user's session bus. xrdp's PAM stack
+  # does not always start systemd --user reliably for the login user, so
+  # gnome-session aborts immediately ("Failed to start unit
+  # gnome-session@ubuntu.target: Name 'org.freedesktop.systemd1' does not
+  # exist"), exit code 134. Do NOT wrap in dbus-run-session — that creates
+  # an isolated bus without the user's systemd manager.
   echo '. /etc/skel/.xsessionrc' >> /etc/xrdp/startwm.sh
-  echo 'exec dbus-run-session -- gnome-session' >> /etc/xrdp/startwm.sh
+  echo 'exec gnome-session' >> /etc/xrdp/startwm.sh
 
   sed -i 's/TerminalServerUsers=tsusers/TerminalServerUsers=sudo/' /etc/xrdp/sesman.ini || true
   sed -i 's/TerminalServerAdmins=tsadmins/TerminalServerAdmins=sudo/' /etc/xrdp/sesman.ini || true
@@ -432,6 +449,12 @@ if [[ -n "$CLONE_USER" ]]; then
     echo "gnome-session" > "/home/$CLONE_USER/.xsession"
     cp /etc/skel/.xsessionrc "/home/$CLONE_USER/.xsessionrc" 2>/dev/null || true
     chown "$CLONE_USER:$CLONE_USER" "/home/$CLONE_USER/.xsession" "/home/$CLONE_USER/.xsessionrc" 2>/dev/null || true
+    # Enable lingering so systemd --user starts at boot and stays alive.
+    # Without this, the user's systemd instance isn't running when xrdp
+    # opens the session and gnome-session aborts because it can't reach
+    # `org.freedesktop.systemd1` on the user bus to start
+    # gnome-session@ubuntu.target.
+    loginctl enable-linger "$CLONE_USER" 2>/dev/null || true
   fi
 fi
 

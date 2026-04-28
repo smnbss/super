@@ -286,15 +286,20 @@ XSR
     if ! grep -q "XAUTHORITY=" /etc/xrdp/startwm.sh; then
       echo "export XAUTHORITY=\"\$HOME/.Xauthority\"" | sudo tee -a /etc/xrdp/startwm.sh
     fi
-    # Append GNOME start command if not present. Wrap in dbus-run-session
-    # so gnome-session always gets a fresh per-session message bus — without
-    # it, gnome-session/xfce4-session exit ~1s after login with "Cannot open
-    # display" / "dbus-launch not found", and the RDP client sees the same
-    # symptom as a TLS-handshake abort (window manager exited quickly).
+    # Append GNOME start command if not present. GNOME 4x is
+    # systemd-user-managed: gnome-session asks the per-user systemd to
+    # start gnome-session@ubuntu.target, which needs `systemd --user`
+    # running. Do NOT wrap in dbus-run-session — that creates an isolated
+    # bus without org.freedesktop.systemd1 and gnome-session aborts with
+    # exit code 134.
     if ! grep -q "gnome-session" /etc/xrdp/startwm.sh; then
       echo ". /etc/skel/.xsessionrc" | sudo tee -a /etc/xrdp/startwm.sh
-      echo "exec dbus-run-session -- gnome-session" | sudo tee -a /etc/xrdp/startwm.sh
+      echo "exec gnome-session" | sudo tee -a /etc/xrdp/startwm.sh
     fi
+    # Enable lingering for the current user so systemd --user starts at
+    # boot and stays running, exposing org.freedesktop.systemd1 on the
+    # user bus when xrdp opens the session.
+    sudo loginctl enable-linger "$(id -un)" 2>/dev/null || true
     # Allow anyone to start X server (needed for XRDP)
     sudo sed -i "s/allowed_users=console/allowed_users=anybody/" /etc/X11/Xwrapper.config 2>/dev/null || true
     # gdm3 is unused — xrdp launches its own X server on :10+. Drop to
