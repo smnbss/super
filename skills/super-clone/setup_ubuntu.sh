@@ -64,7 +64,7 @@ orb_running() { orb list 2>/dev/null | awk -v m="$1" '$1==m && $2=="running"{f=1
 # unresolvable /usr/local ownership churn on Ubuntu 25.10 questing.
 if ! orb_exists "$BASE_MACHINE"; then
   echo "Base machine '$BASE_MACHINE' not found. Creating..."
-  orb create ubuntu "$BASE_MACHINE"
+  orb create ubuntu:26.04 "$BASE_MACHINE"
   orb -m "$BASE_MACHINE" bash -lc '
     set -euo pipefail
     sudo apt-get update && sudo apt-get install -y git curl zstd ca-certificates
@@ -92,7 +92,7 @@ if ! orb_exists "$BASE_MACHINE"; then
     # Set chromium as the default browser system-wide. The snap postinst
     # does not register update-alternatives, so anything calling xdg-open,
     # BROWSER, or x-www-browser falls back to whatever is first in PATH.
-    # Register it and seed the XDG mimeapps defaults so XFCE and headless
+    # Register it and seed the XDG mimeapps defaults so GNOME and headless
     # tooling both route to chromium_chromium.desktop.
     sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
     sudo update-alternatives --set x-www-browser /snap/bin/chromium
@@ -142,23 +142,24 @@ USER_SLUG="$(printf '%s' "$USER_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z
 # on every clone/reuse instead of requiring a base rebuild.
 ensure_chromium() {
   local machine="$1"
+  # NOTE: avoid `exit 0` inside an `if` block — `orb -m ... bash -lc` reports
+  # that as exit 1, which trips the caller's `set -e`. Use a negated guard so
+  # the no-op path falls off the end of the script with the normal exit code.
   orb -m "$machine" bash -lc '
     set -euo pipefail
-    if snap list chromium &>/dev/null; then
-      exit 0
-    fi
-    echo "Installing Chromium via snap..."
-    sudo apt-get update
-    sudo apt-get install -y snapd
-    sudo systemctl enable --now snapd.socket snapd.service
-    sudo snap wait system seed.loaded
-    sudo snap install chromium
-    sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
-    sudo update-alternatives --set x-www-browser /snap/bin/chromium
-    sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /snap/bin/chromium 200
-    sudo update-alternatives --set gnome-www-browser /snap/bin/chromium
-    sudo mkdir -p /etc/xdg
-    sudo tee /etc/xdg/mimeapps.list >/dev/null <<"MIME"
+    if ! snap list chromium &>/dev/null; then
+      echo "Installing Chromium via snap..."
+      sudo apt-get update
+      sudo apt-get install -y snapd
+      sudo systemctl enable --now snapd.socket snapd.service
+      sudo snap wait system seed.loaded
+      sudo snap install chromium
+      sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
+      sudo update-alternatives --set x-www-browser /snap/bin/chromium
+      sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /snap/bin/chromium 200
+      sudo update-alternatives --set gnome-www-browser /snap/bin/chromium
+      sudo mkdir -p /etc/xdg
+      sudo tee /etc/xdg/mimeapps.list >/dev/null <<"MIME"
 [Default Applications]
 text/html=chromium_chromium.desktop
 x-scheme-handler/http=chromium_chromium.desktop
@@ -166,8 +167,9 @@ x-scheme-handler/https=chromium_chromium.desktop
 x-scheme-handler/about=chromium_chromium.desktop
 x-scheme-handler/unknown=chromium_chromium.desktop
 MIME
-    echo "export BROWSER=/snap/bin/chromium" | sudo tee /etc/profile.d/chromium-default.sh >/dev/null
-    sudo chmod +x /etc/profile.d/chromium-default.sh
+      echo "export BROWSER=/snap/bin/chromium" | sudo tee /etc/profile.d/chromium-default.sh >/dev/null
+      sudo chmod +x /etc/profile.d/chromium-default.sh
+    fi
   '
 }
 
@@ -245,33 +247,61 @@ orb -m "$MACHINE" bash -lc '
 ensure_chromium "$MACHINE"
 
 if [ "$DESKTOP" = true ]; then
-  echo "Installing XFCE desktop and XRDP..."
+  echo "Installing GNOME desktop and XRDP..."
   orb -m "$MACHINE" bash -lc '
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
     sudo apt-get update
-    sudo apt-get install -y xfce4 xfce4-goodies xrdp
-    # Configure XRDP to use XFCE
-    echo "xfce4-session" | sudo tee /etc/skel/.xsession
-    echo "xfce4-session" > ~/.xsession
+    # dbus-x11 provides dbus-launch / dbus-run-session — without it the
+    # desktop session exits immediately with "dbus-launch not found, the
+    # desktop will not work properly!" and xrdp tears the connection down
+    # one second after login. ubuntu-desktop-minimal does not always pull
+    # it in, so install explicitly.
+    sudo apt-get install -y ubuntu-desktop-minimal xrdp dbus-x11
+    # ubuntu-desktop-minimal pulls in gdm3 + the snakeoil cert symlinks at
+    # /etc/xrdp/{cert,key}.pem, which are root:ssl-cert mode 0640. xrdp
+    # cannot read them unless the service user is in ssl-cert.
+    sudo usermod -aG ssl-cert xrdp || true
+    # GNOME 4x defaults to Wayland; xrdp speaks X11 only. Drop a system-wide
+    # .xsessionrc so every xrdp login inherits the Ubuntu GNOME-on-Xorg env
+    # (XDG_CURRENT_DESKTOP, session mode, data/config dirs).
+    sudo tee /etc/skel/.xsessionrc >/dev/null <<"XSR"
+export GNOME_SHELL_SESSION_MODE=ubuntu
+export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+export XDG_DATA_DIRS=/usr/share/ubuntu:/usr/local/share:/usr/share:/var/lib/snapd/desktop
+export XDG_CONFIG_DIRS=/etc/xdg/xdg-ubuntu:/etc/xdg
+XSR
+    cp /etc/skel/.xsessionrc "$HOME/.xsessionrc"
+    echo "gnome-session" | sudo tee /etc/skel/.xsession
+    echo "gnome-session" > ~/.xsession
     # Ensure xrdp uses the local session manager
     sudo sed -i "s/^test -x \/etc\/X11\/Xsession/# test -x \/etc\/X11\/Xsession/" /etc/xrdp/startwm.sh || true
     sudo sed -i "s/^exec \/bin\/sh \/etc\/X11\/Xsession/# exec \/bin\/sh \/etc\/X11\/Xsession/" /etc/xrdp/startwm.sh || true
     # XRDP does not export XAUTHORITY into the user session by default;
-    # children of xfce4-session (notably terminals that then launch
+    # children of gnome-session (notably terminals that then launch
     # confined snap apps like chromium) can see DISPLAY but fail with
     # "Authorization required, but no authorization protocol specified"
-    # because they cannot find the X cookie. Export it before startxfce4
+    # because they cannot find the X cookie. Export it before gnome-session
     # so every process in the desktop session inherits it.
     if ! grep -q "XAUTHORITY=" /etc/xrdp/startwm.sh; then
       echo "export XAUTHORITY=\"\$HOME/.Xauthority\"" | sudo tee -a /etc/xrdp/startwm.sh
     fi
-    # Append XFCE start command if not present
-    if ! grep -q "xfce4-session" /etc/xrdp/startwm.sh; then
-      echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh
+    # Append GNOME start command if not present. Wrap in dbus-run-session
+    # so gnome-session always gets a fresh per-session message bus — without
+    # it, gnome-session/xfce4-session exit ~1s after login with "Cannot open
+    # display" / "dbus-launch not found", and the RDP client sees the same
+    # symptom as a TLS-handshake abort (window manager exited quickly).
+    if ! grep -q "gnome-session" /etc/xrdp/startwm.sh; then
+      echo ". /etc/skel/.xsessionrc" | sudo tee -a /etc/xrdp/startwm.sh
+      echo "exec dbus-run-session -- gnome-session" | sudo tee -a /etc/xrdp/startwm.sh
     fi
     # Allow anyone to start X server (needed for XRDP)
     sudo sed -i "s/allowed_users=console/allowed_users=anybody/" /etc/X11/Xwrapper.config 2>/dev/null || true
+    # gdm3 is unused — xrdp launches its own X server on :10+. Drop to
+    # multi-user.target so we do not waste RAM on a console login screen
+    # nobody will see.
+    sudo systemctl set-default multi-user.target
+    sudo systemctl disable gdm3 2>/dev/null || true
     # Start and enable XRDP
     sudo systemctl enable xrdp
     sudo systemctl restart xrdp

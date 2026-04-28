@@ -3,7 +3,7 @@ set -euo pipefail
 
 DEFAULT_MACHINE_TYPE="e2-standard-4"
 DEFAULT_DISK_SIZE_GB="80"
-DEFAULT_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
+DEFAULT_IMAGE_FAMILY="ubuntu-2604-lts-amd64"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_SSH_MODE="oslogin"
 DEFAULT_ZONE="europe-west1-b"
@@ -26,7 +26,7 @@ Options:
   --source-ip <cidr>      Restrict SSH/XRDP to this IP or CIDR (default: auto-detect
                           your public IPv4 and lock down to /32). Accepts a comma-
                           separated list of IPs/CIDRs.
-  --desktop               Install XFCE desktop and XRDP
+  --desktop               Install GNOME desktop and XRDP
   --name <instance-name>  Explicit VM name
   --dry-run               Print the resolved configuration and commands only
   --help                  Show this help
@@ -260,6 +260,25 @@ repair_xrdp_ssl_cert() {
     || log "xrdp ssl-cert repair skipped or failed."
 }
 
+repair_xrdp_session() {
+  # On existing VMs provisioned before the dbus-run-session fix shipped the
+  # desktop session exits ~1s after login (xrdp logs "Window manager exited
+  # quickly") because gnome-session/xfce4-session has no per-session bus.
+  # Symptom client-side: connect succeeds, password accepted, then immediate
+  # disconnect that looks like a TLS abort. Fix: install dbus-x11 and
+  # rewrite the exec line in /etc/xrdp/startwm.sh to wrap the WM in
+  # dbus-run-session. Idempotent; no-op if xrdp isn't installed.
+  gcloud_ssh --command '
+if id xrdp >/dev/null 2>&1; then
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y dbus-x11 >/dev/null 2>&1 || true
+  if [ -f /etc/xrdp/startwm.sh ] && ! grep -q "dbus-run-session" /etc/xrdp/startwm.sh; then
+    sudo sed -i "s|^exec gnome-session\$|exec dbus-run-session -- gnome-session|" /etc/xrdp/startwm.sh
+    sudo sed -i "s|^exec startxfce4\$|exec dbus-run-session -- xfce4-session|" /etc/xrdp/startwm.sh
+  fi
+fi' >/dev/null 2>&1 \
+    || log "xrdp session repair skipped or failed."
+}
+
 USER_NAME="$(whoami)"
 USER_SLUG="$(slugify "$USER_NAME")"
 if [[ -z "$INSTANCE_NAME" ]]; then
@@ -321,7 +340,7 @@ snap install chromium
 # Set chromium as the default browser system-wide. The snap postinst does
 # not register update-alternatives, so anything calling xdg-open, BROWSER,
 # or x-www-browser falls back to whatever is first in PATH. Register it
-# and seed the XDG mimeapps defaults so XFCE and headless tooling both
+# and seed the XDG mimeapps defaults so GNOME and headless tooling both
 # route to chromium_chromium.desktop.
 update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
 update-alternatives --set x-www-browser /snap/bin/chromium
@@ -346,8 +365,13 @@ npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
 
 DESKTOP_ENABLED="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/enable-desktop" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
 if [[ "$DESKTOP_ENABLED" == "true" ]]; then
-  $APT install -y xfce4 xfce4-goodies xrdp
-  # Ubuntu 24.04's xrdp ships /etc/xrdp/{cert,key}.pem as symlinks to
+  # dbus-x11 provides dbus-launch / dbus-run-session — without it the
+  # desktop session exits immediately with "dbus-launch not found, the
+  # desktop will not work properly!" and xrdp tears the connection down
+  # one second after login. ubuntu-desktop-minimal does not always pull
+  # it in, so install explicitly.
+  $APT install -y ubuntu-desktop-minimal xrdp dbus-x11
+  # Ubuntu's xrdp ships /etc/xrdp/{cert,key}.pem as symlinks to
   # /etc/ssl/private/ssl-cert-snakeoil.key (root:ssl-cert, mode 0640), but
   # the package postinst does not add the xrdp service user to ssl-cert.
   # Without this, TLS handshake fails with "Cannot read private key file:
@@ -360,20 +384,41 @@ if [[ "$DESKTOP_ENABLED" == "true" ]]; then
   sed -i 's/^test -x \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
   sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/#&/' /etc/xrdp/startwm.sh
   # XRDP does not export XAUTHORITY into the user session by default;
-  # children of xfce4-session (notably terminals that then launch
+  # children of gnome-session (notably terminals that then launch
   # confined snap apps like chromium) can see DISPLAY but fail with
   # "Authorization required, but no authorization protocol specified"
-  # because they can't find the X cookie. Export it before startxfce4
+  # because they can't find the X cookie. Export it before gnome-session
   # so every process in the desktop session inherits it.
   if ! grep -q 'XAUTHORITY=' /etc/xrdp/startwm.sh; then
     echo 'export XAUTHORITY="$HOME/.Xauthority"' >> /etc/xrdp/startwm.sh
   fi
-  echo 'startxfce4' >> /etc/xrdp/startwm.sh
+  # GNOME 4x defaults to Wayland, but xrdp speaks X11. Drop a system-wide
+  # .xsessionrc so every xrdp login inherits the Ubuntu GNOME-on-Xorg env
+  # (XDG_CURRENT_DESKTOP, session mode, data/config dirs).
+  cat >/etc/skel/.xsessionrc <<'XSR'
+export GNOME_SHELL_SESSION_MODE=ubuntu
+export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+export XDG_DATA_DIRS=/usr/share/ubuntu:/usr/local/share:/usr/share:/var/lib/snapd/desktop
+export XDG_CONFIG_DIRS=/etc/xdg/xdg-ubuntu:/etc/xdg
+XSR
+  # Wrap gnome-session in dbus-run-session so the WM always gets a fresh
+  # per-session message bus — without it, gnome-session exits ~1s after
+  # login with "Cannot open display" / "dbus-launch not found", and the
+  # RDP client sees the same symptom as a TLS-handshake abort (xrdp logs
+  # "Window manager exited quickly").
+  echo '. /etc/skel/.xsessionrc' >> /etc/xrdp/startwm.sh
+  echo 'exec dbus-run-session -- gnome-session' >> /etc/xrdp/startwm.sh
 
   sed -i 's/TerminalServerUsers=tsusers/TerminalServerUsers=sudo/' /etc/xrdp/sesman.ini || true
   sed -i 's/TerminalServerAdmins=tsadmins/TerminalServerAdmins=sudo/' /etc/xrdp/sesman.ini || true
 
-  echo 'xfce4-session' > /etc/skel/.xsession
+  echo 'gnome-session' > /etc/skel/.xsession
+
+  # gdm3 is unused — xrdp launches its own X server on :10+. Drop to
+  # multi-user.target so we don't waste RAM on a console login screen
+  # nobody will see.
+  systemctl set-default multi-user.target
+  systemctl disable gdm3 2>/dev/null || true
 fi
 
 CLONE_USER="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
@@ -384,8 +429,9 @@ if [[ -n "$CLONE_USER" ]]; then
   usermod -aG sudo "$CLONE_USER"
   mkdir -p "/home/$CLONE_USER/brain"
   if [[ "$DESKTOP_ENABLED" == "true" ]]; then
-    echo "xfce4-session" > "/home/$CLONE_USER/.xsession"
-    chown "$CLONE_USER:$CLONE_USER" "/home/$CLONE_USER/.xsession"
+    echo "gnome-session" > "/home/$CLONE_USER/.xsession"
+    cp /etc/skel/.xsessionrc "/home/$CLONE_USER/.xsessionrc" 2>/dev/null || true
+    chown "$CLONE_USER:$CLONE_USER" "/home/$CLONE_USER/.xsession" "/home/$CLONE_USER/.xsessionrc" 2>/dev/null || true
   fi
 fi
 
@@ -415,7 +461,8 @@ super install --all
 
 # Configure XRDP session for this user
 if [ -f /etc/xrdp/startwm.sh ]; then
-  echo "xfce4-session" > "$HOME/.xsession"
+  echo "gnome-session" > "$HOME/.xsession"
+  cp /etc/skel/.xsessionrc "$HOME/.xsessionrc" 2>/dev/null || true
 fi
 
 # Also bootstrap super + XRDP session for the local clone user (XRDP login target)
@@ -448,7 +495,8 @@ export PATH="$HOME/.local/bin:$SUPER_HOME:$PATH"
 mkdir -p "$HOME/brain"
 cd "$HOME/brain"
 super install --all
-echo "xfce4-session" > "$HOME/.xsession"
+echo "gnome-session" > "$HOME/.xsession"
+cp /etc/skel/.xsessionrc "$HOME/.xsessionrc" 2>/dev/null || true
 CLONE_EOF
 fi
 
@@ -569,6 +617,7 @@ if [[ -n "$EXISTING_STATUS" ]]; then
   # (re)apply the clone user's password. Both are idempotent — running
   # --name <existing> effectively doubles as a repair tool.
   repair_xrdp_ssl_cert
+  repair_xrdp_session
   apply_clone_password
   EXTERNAL_IP="$(gcloud --project="$PROJECT_ID" compute instances list --filter="name=$INSTANCE_NAME" --format="value(EXTERNAL_IP)" --zone="$ZONE" 2>/dev/null || true)"
   log ""
