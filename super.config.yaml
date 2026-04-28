@@ -18,6 +18,17 @@ system:
     install: "curl -LsSf https://astral.sh/uv/install.sh | sh"
     enabled: true
 
+  bun:
+    name: bun
+    # Required by gstack's setup script (skills/gstack). Without bun, gstack's
+    # ./setup exits 1 immediately and none of the gstack-* skills get expanded.
+    # The official installer drops bun in ~/.bun/bin and only edits ~/.bashrc,
+    # so the parent process running `super install` would not see it on PATH —
+    # symlink into ~/.local/bin so subsequent skill setups can find it.
+    check: "command -v bun"
+    install: "sh -c 'curl -fsSL https://bun.sh/install | bash && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$HOME/.bun/bin/bun\" \"$HOME/.local/bin/bun\" && ln -sf \"$HOME/.bun/bin/bunx\" \"$HOME/.local/bin/bunx\"'"
+    enabled: true
+
   markitdown:
     name: markitdown
     # Verify the markitdown CLI exists AND the optional format converters are installed.
