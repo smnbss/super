@@ -61,7 +61,7 @@ orb_running() { orb list 2>/dev/null | awk -v m="$1" '$1==m && $2=="running"{f=1
 # markitdown, gws, gh) is installed per-clone by `super install`. That's
 # ~5 min extra per clone but keeps the BASE_MACHINE bootstrap simple and
 # reliable; a previous attempt to pre-bake those extras ran into
-# unresolvable /usr/local ownership churn on Ubuntu 25.10 questing.
+# unresolvable /usr/local ownership churn on Ubuntu 24.04.
 if ! orb_exists "$BASE_MACHINE"; then
   echo "Base machine '$BASE_MACHINE' not found. Creating..."
   orb create ubuntu:24.04 "$BASE_MACHINE"
@@ -78,42 +78,37 @@ if ! orb_exists "$BASE_MACHINE"; then
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${NODE_ARCH}.tar.gz" | \
       sudo tar -xz -C /usr/local --strip-components=1
     curl -fsSL https://ollama.com/install.sh | sh
-    # Install Chromium via snap. On Ubuntu 25.10 questing the
-    # `chromium-browser` apt package is a transitional stub that
-    # Pre-Depends on snapd and just redirects to the chromium snap —
-    # installing it without snapd produces a 50KB empty shell with no
-    # browser binary. Bootstrap snapd first, wait for seed, then install
-    # the real chromium snap. Covers both GUI (XRDP desktop entry) and
-    # headless (--remote-debugging-port) use cases on ARM64 and x86_64.
-    sudo apt-get install -y snapd
-    sudo systemctl enable --now snapd.socket snapd.service
-    sudo snap wait system seed.loaded
-    sudo snap install chromium
-    # Set chromium as the default browser system-wide. The snap postinst
-    # does not register update-alternatives, so anything calling xdg-open,
-    # BROWSER, or x-www-browser falls back to whatever is first in PATH.
-    # Register it and seed the XDG mimeapps defaults so GNOME and headless
-    # tooling both route to chromium_chromium.desktop.
-    sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
-    sudo update-alternatives --set x-www-browser /snap/bin/chromium
-    sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /snap/bin/chromium 200
-    sudo update-alternatives --set gnome-www-browser /snap/bin/chromium
+    # On Ubuntu 24.04 LTS `chromium-browser` is a transitional package that
+    # Pre-Depends on snapd and redirects to the chromium snap — the snap
+    # binary does not integrate well with XRDP (exo-open/xdg-open fail with
+    # "Failed to execute default web browser"). Install Google Chrome from
+    # Google's apt repository instead; it covers both GUI (XRDP desktop
+    # entry) and headless (--remote-debugging-port) use cases and works
+    # out of the box with Playwright and Chrome DevTools MCP.
+    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg
+    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | \
+      sudo tee /etc/apt/sources.list.d/google-chrome.list
+    sudo apt-get update && sudo apt-get install -y google-chrome-stable
+    # Set Chrome as the default browser system-wide.
+    sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/google-chrome-stable 200
+    sudo update-alternatives --set x-www-browser /usr/bin/google-chrome-stable
+    sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/bin/google-chrome-stable 200
+    sudo update-alternatives --set gnome-www-browser /usr/bin/google-chrome-stable
     sudo mkdir -p /etc/xdg
     sudo tee /etc/xdg/mimeapps.list >/dev/null <<"MIME"
 [Default Applications]
-text/html=chromium_chromium.desktop
-x-scheme-handler/http=chromium_chromium.desktop
-x-scheme-handler/https=chromium_chromium.desktop
-x-scheme-handler/about=chromium_chromium.desktop
-x-scheme-handler/unknown=chromium_chromium.desktop
+text/html=google-chrome.desktop
+x-scheme-handler/http=google-chrome.desktop
+x-scheme-handler/https=google-chrome.desktop
+x-scheme-handler/about=google-chrome.desktop
+x-scheme-handler/unknown=google-chrome.desktop
 MIME
-    echo "export BROWSER=/snap/bin/chromium" | sudo tee /etc/profile.d/chromium-default.sh >/dev/null
-    sudo chmod +x /etc/profile.d/chromium-default.sh
-    # Ubuntu 25.10 questing images do not ship /usr/bin/gpg, and sudo-rs
-    # drops it into PATH in ways that are painful to work around. Use
-    # [trusted=yes] on the apt source to skip signature verification
-    # entirely — acceptable for a single-user dev VM sealing a local image.
-    echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" | \
+    echo "export BROWSER=/usr/bin/google-chrome-stable" | sudo tee /etc/profile.d/chrome-default.sh >/dev/null
+    sudo chmod +x /etc/profile.d/chrome-default.sh
+    # Ubuntu 24.04 ships gpg by default; add the Google Cloud signing key
+    # properly and configure the apt source.
+    wget -q -O - https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/google-cloud-sdk.gpg
+    echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | \
       sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
     sudo apt-get update && sudo apt-get install -y google-cloud-cli
     # Make /usr/local user-writable LAST. ollama runs `install -o0 -g0

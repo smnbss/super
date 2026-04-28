@@ -343,35 +343,34 @@ curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux
 curl -fsSL https://ollama.com/install.sh | sh
 # On Ubuntu 24.04 LTS `chromium-browser` is a transitional package
 # that Pre-Depends on snapd and redirects to the chromium snap —
-# installing it without snapd produces a 50KB empty stub with no
-# browser binary. Bootstrap snapd, wait for the seed, install the
-# real chromium snap. Covers both GUI (XRDP desktop entry) and
-# headless (--remote-debugging-port) use cases.
-$APT install -y snapd
-systemctl enable --now snapd.socket snapd.service
-snap wait system seed.loaded
-snap install chromium
-# Set chromium as the default browser system-wide. The snap postinst does
-# not register update-alternatives, so anything calling xdg-open, BROWSER,
-# or x-www-browser falls back to whatever is first in PATH. Register it
-# and seed the XDG mimeapps defaults so GNOME and headless tooling both
-# route to chromium_chromium.desktop.
-update-alternatives --install /usr/bin/x-www-browser x-www-browser /snap/bin/chromium 200
-update-alternatives --set x-www-browser /snap/bin/chromium
-update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /snap/bin/chromium 200
-update-alternatives --set gnome-www-browser /snap/bin/chromium
+# the snap binary does not integrate well with XRDP (exo-open/xdg-open
+# fail with "Failed to execute default web browser"). Install Google
+# Chrome from Google's apt repository instead; it covers both GUI
+# (XRDP desktop entry) and headless (--remote-debugging-port) use cases
+# and works out of the box with Playwright and Chrome DevTools MCP.
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg
+echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \
+  >/etc/apt/sources.list.d/google-chrome.list
+$APT update
+$APT install -y google-chrome-stable
+# Set Chrome as the default browser system-wide.
+update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/google-chrome-stable 200
+update-alternatives --set x-www-browser /usr/bin/google-chrome-stable
+update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/bin/google-chrome-stable 200
+update-alternatives --set gnome-www-browser /usr/bin/google-chrome-stable
 mkdir -p /etc/xdg
 cat >/etc/xdg/mimeapps.list <<'MIME'
 [Default Applications]
-text/html=chromium_chromium.desktop
-x-scheme-handler/http=chromium_chromium.desktop
-x-scheme-handler/https=chromium_chromium.desktop
-x-scheme-handler/about=chromium_chromium.desktop
-x-scheme-handler/unknown=chromium_chromium.desktop
+text/html=google-chrome.desktop
+x-scheme-handler/http=google-chrome.desktop
+x-scheme-handler/https=google-chrome.desktop
+x-scheme-handler/about=google-chrome.desktop
+x-scheme-handler/unknown=google-chrome.desktop
 MIME
-echo 'export BROWSER=/snap/bin/chromium' >/etc/profile.d/chromium-default.sh
-chmod +x /etc/profile.d/chromium-default.sh
-echo "deb [trusted=yes] https://packages.cloud.google.com/apt cloud-sdk main" \
+echo 'export BROWSER=/usr/bin/google-chrome-stable' >/etc/profile.d/chrome-default.sh
+chmod +x /etc/profile.d/chrome-default.sh
+wget -q -O - https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/google-cloud-sdk.gpg
+echo "deb https://packages.cloud.google.com/apt cloud-sdk main" \
   >/etc/apt/sources.list.d/google-cloud-sdk.list
 $APT update
 $APT install -y google-cloud-cli
@@ -436,6 +435,10 @@ XSR
   # nobody will see.
   systemctl set-default multi-user.target
   systemctl disable gdm3 2>/dev/null || true
+  # Desktop-specific browser config: Google Chrome is already installed
+  # system-wide, but seed the user-level xdg default explicitly so
+  # xdg-open/exo-open work inside the XRDP session.
+  sudo -u "$CLONE_USER" xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
 fi
 
 CLONE_USER="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
@@ -455,6 +458,9 @@ if [[ -n "$CLONE_USER" ]]; then
     # `org.freedesktop.systemd1` on the user bus to start
     # gnome-session@ubuntu.target.
     loginctl enable-linger "$CLONE_USER" 2>/dev/null || true
+    # Seed the user-level xdg default so xdg-open/exo-open work inside
+    # the XRDP session (Google Chrome is already the system-wide default).
+    sudo -u "$CLONE_USER" xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
   fi
 fi
 
