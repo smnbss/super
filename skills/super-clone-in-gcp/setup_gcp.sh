@@ -435,10 +435,6 @@ XSR
   # nobody will see.
   systemctl set-default multi-user.target
   systemctl disable gdm3 2>/dev/null || true
-  # Desktop-specific browser config: Google Chrome is already installed
-  # system-wide, but seed the user-level xdg default explicitly so
-  # xdg-open/exo-open work inside the XRDP session.
-  sudo -u "$CLONE_USER" xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
 fi
 
 CLONE_USER="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
