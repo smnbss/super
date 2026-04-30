@@ -1,0 +1,26 @@
+{
+  "skill_name": "brain-linear-release-summary",
+  "evals": [
+    {
+      "id": 1,
+      "name": "year-2026",
+      "prompt": "summarize all releases from https://linear.app/weroad/project/release-notes-1bc4d3fcb947/issues for 2026",
+      "expected_output": "outputs/releases/2026-impact-summary.md exists with three sections (measured-impact table, themes, coverage gap), no chronological table, no method appendix. The measured-impact table contains the 5 releases with comments authored by Giovanni Mautino or Ivan Parenti (MOL-432, MOL-429, MOL-437, MOL-455, MOL-484). Frontmatter includes window, release_count, impact_count.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "q1-2026",
+      "prompt": "what shipped in Q1 2026? pull from MOL release notes",
+      "expected_output": "outputs/releases/2026-q1-impact-summary.md exists with the same three-section structure, scoped to releases dated 2026-01-01..2026-03-31. Measured-impact table includes MOL-429, MOL-432, MOL-437, MOL-455 (not MOL-484, which is April). Excludes any release dated 2026-04 or later.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "last-30-days",
+      "prompt": "summarize releases from the last 30 days",
+      "expected_output": "outputs/releases/<TODAY>-last-30-days-impact-summary.md (where <TODAY> is the YYYY-MM-DD of when the run started) exists. Window is computed relative to today's date. Includes recent April 2026 releases (MOL-484, MOL-486, MOL-487, MOL-505, MOL-506, MOL-508, MOL-509, MOL-510, MOL-511, MOL-512, MOL-514, etc.). MOL-484 appears in the measured-impact table.",
+      "files": []
+    }
+  ]
+}
