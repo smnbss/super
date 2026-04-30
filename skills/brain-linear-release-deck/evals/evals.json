@@ -1,0 +1,17 @@
+{
+  "skill_name": "brain-linear-release-deck",
+  "evals": [
+    {
+      "id": "q1-2026",
+      "name": "eval-q1-2026",
+      "prompt": "can you build the q1 2026 product review deck for the next plenaria? jan thru march, focus on the Cost-Based Structure win and the WeMeet release cadence. Save it locally — don't push to drive yet.",
+      "expected_output": "A .pptx file with ~20 slides covering Q1 2026 (Jan–Mar) using the four-track structure, with at least one impact_spotlight for the Cost-Based Structure measured win and content slides covering WeMeet releases. No 'bet/bets' in deck text. Cover, by-numbers, four-tracks all window-specific (not parroted from May 2026 reference)."
+    },
+    {
+      "id": "april-2026",
+      "name": "eval-april-2026",
+      "prompt": "need slides for April releases — there are two big ones (TO_ALLOT P360 self-serve and the parallel allotment thing for ≥17 weeks tours) that I want to highlight as measured impact. Plus the Travel-Near-You launch. let me know when ready",
+      "expected_output": "A .pptx file covering April 2026 with two impact_spotlight slides (MOL-455 TO_ALLOT and MOL-484 parallel allotment) and a Travel-Near-You content slide (MOL-512). Window-specific editorial throughout. No Drive upload."
+    }
+  ]
+}
