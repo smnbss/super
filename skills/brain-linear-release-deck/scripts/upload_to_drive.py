@@ -13,7 +13,7 @@ id and Slides URL — handy for iterating without breaking links). Use
 
 Usage:
     python upload_to_drive.py \
-        --pptx outputs/releases-decks/<slug>-plenaria-deck.pptx \
+        --pptx outputs/releases-decks/<slug>/<slug>-plenaria-deck.pptx \
         --name "Jan-Apr 2026 Tech Plenaria (auto-draft)"
 
 Prints the resulting Slides URL on success.

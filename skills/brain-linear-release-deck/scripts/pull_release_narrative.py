@@ -9,7 +9,8 @@ synthesis step has enough material to write punchy slides without losing
 fidelity.
 
 The output file lives at
-`outputs/releases-decks/<slug>-narrative.json` and contains:
+`outputs/releases-decks/<slug>/<slug>-narrative.json` (each window gets
+its own subfolder under `outputs/releases-decks/`) and contains:
   - releases: per-issue records (id, ship date, title, platform,
     description, all comments, inline images, bet assignment, impact
     flag + extracted KPIs when present)
@@ -21,7 +22,7 @@ markdown) and writes the deck spec.
 Usage:
     set -a; source .env.local; set +a    # gives us LINEAR_TOKEN
     python pull_release_narrative.py --window "2026-01..2026-04" \
-        --output outputs/releases-decks/2026-01-2026-04-narrative.json
+        --output outputs/releases-decks/2026-01-2026-04/2026-01-2026-04-narrative.json
 
 The window grammar matches brain-linear-release-summary so the same slug
 convention applies.
@@ -515,7 +516,7 @@ def main():
     start, end, slug, label = window
     print(f"window: {label}  ({start} → {end})  slug={slug}")
 
-    cache_path = args.cache or Path(f"outputs/releases-decks/{slug}-raw.json")
+    cache_path = args.cache or Path(f"outputs/releases-decks/{slug}/{slug}-raw.json")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     if cache_path.is_file():
@@ -530,7 +531,7 @@ def main():
 
     narrative = build_narrative(window, issues)
 
-    out = args.output or Path(f"outputs/releases-decks/{slug}-narrative.json")
+    out = args.output or Path(f"outputs/releases-decks/{slug}/{slug}-narrative.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(narrative, indent=2))
 

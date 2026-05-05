@@ -16,8 +16,8 @@ Slides preserves the animation when the deck is uploaded.
 
 Usage:
     python fetch_linear_images.py \
-        --spec outputs/releases-decks/<slug>-deck-spec.json \
-        --assets-dir outputs/releases-decks/<slug>-assets
+        --spec outputs/releases-decks/<slug>/<slug>-deck-spec.json \
+        --assets-dir outputs/releases-decks/<slug>/<slug>-assets
 
 Reads $LINEAR_TOKEN from the environment (load .env.local first if needed).
 Issue markdown is read from $BRAIN_ROOT/src/linear/weroad/<project>/issues/<MOL-id>.md;

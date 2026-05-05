@@ -52,16 +52,18 @@ rest of the pipeline reuses it.
 
 ## Output paths
 
-Everything lives under `outputs/releases-decks/` keyed by `<slug>`:
+Everything lives under `outputs/releases-decks/<slug>/` — each window
+gets its own subfolder so artefacts from different runs don't pile up
+loose at the top level:
 
 | What | Where |
 |------|-------|
-| Raw Linear pull (cache) | `<slug>-raw.json` |
-| Extended narrative | `<slug>-narrative.json` |
-| Deck spec (JSON) | `<slug>-deck-spec.json` |
-| Slide image assets | `<slug>-assets/<MOL-id>.{gif,png,…}` |
-| Rendered deck (PPTX) | `<slug>-plenaria-deck.pptx` |
-| PDF for verification | `<slug>-plenaria-deck.pdf` |
+| Raw Linear pull (cache) | `<slug>/<slug>-raw.json` |
+| Extended narrative | `<slug>/<slug>-narrative.json` |
+| Deck spec (JSON) | `<slug>/<slug>-deck-spec.json` |
+| Slide image assets | `<slug>/<slug>-assets/<MOL-id>.{gif,png,…}` |
+| Rendered deck (PPTX) | `<slug>/<slug>-plenaria-deck.pptx` |
+| PDF for verification | `<slug>/<slug>-plenaria-deck.pdf` |
 
 A neighbouring skill, `brain-linear-release-summary`, writes a different
 file under `outputs/releases/<slug>-impact-summary.md`. That skill is
@@ -118,8 +120,8 @@ section.
 
 ```bash
 python skills/brain-linear-release-deck/scripts/fetch_linear_images.py \
-  --spec outputs/releases-decks/<slug>-deck-spec.json \
-  --assets-dir outputs/releases-decks/<slug>-assets
+  --spec outputs/releases-decks/<slug>/<slug>-deck-spec.json \
+  --assets-dir outputs/releases-decks/<slug>/<slug>-assets
 ```
 
 Walks the spec, downloads the best attachment for each `mol_id`. **Prefers
@@ -131,9 +133,9 @@ motion shows the change and Google Slides preserves the animation on upload.
 
 ```bash
 python skills/brain-linear-release-deck/scripts/build_plenaria_deck.py \
-  --spec outputs/releases-decks/<slug>-deck-spec.json \
-  --assets-dir outputs/releases-decks/<slug>-assets \
-  --output outputs/releases-decks/<slug>-plenaria-deck.pptx
+  --spec outputs/releases-decks/<slug>/<slug>-deck-spec.json \
+  --assets-dir outputs/releases-decks/<slug>/<slug>-assets \
+  --output outputs/releases-decks/<slug>/<slug>-plenaria-deck.pptx
 ```
 
 The script hardcodes coordinates, fonts, the brand palette, and the
@@ -149,7 +151,7 @@ Image resolution per content slide:
 
 ```bash
 python skills/brain-linear-release-deck/scripts/upload_to_drive.py \
-  --pptx outputs/releases-decks/<slug>-plenaria-deck.pptx \
+  --pptx outputs/releases-decks/<slug>/<slug>-plenaria-deck.pptx \
   --name "<window human label> Tech Plenaria (auto-draft)"
 ```
 
