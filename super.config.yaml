@@ -77,6 +77,17 @@ system:
     install: "sh -c 'if [ \"$(uname)\" = Darwin ]; then brew install gh; elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y curl ca-certificates && (type -p wget >/dev/null || sudo apt-get install -y wget) && sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null && sudo apt-get update -qq && sudo apt-get install -y gh; else echo skip: unsupported platform; fi'"
     enabled: true
 
+  playwright-cli:
+    name: playwright-cli
+    # Provides the `playwright-cli` binary required by the playwright-cli
+    # skill (browser automation). The skill itself is cloned from upstream
+    # by the `skills:` section below; this entry only ensures the CLI is
+    # on PATH. Try unprivileged npm first (Mac with user-owned npm prefix),
+    # fall back to sudo on Linux where the system prefix is root-owned.
+    check: "command -v playwright-cli"
+    install: "sh -c 'npm install -g @playwright/cli@latest 2>/dev/null || sudo -n npm install -g @playwright/cli@latest'"
+    enabled: true
+
 # ─── CLIs ────────────────────────────────────────────────────────────────────
 # Install commands for each supported CLI. `super install` will run these
 # automatically if the CLI is not already on PATH.
