@@ -96,7 +96,7 @@ You will not ask for token values here — secrets belong in the user's editor. 
 Two questions:
 
 1. *"What's your organization called?"* → `organization.name` (free text, one line)
-2. *"What's your role?"* → `organization.role` (free text, e.g. "CTO of Acme"). Used in qmd `globalContext` and report templates.
+2. *"What's your role?"* → `organization.role` (free text, e.g. "CTO of Acme"). Used in report templates and agent prompts.
 
 ### Step 5 — Linear
 
@@ -200,7 +200,8 @@ Next steps (run from inside the brain project):
   2. /brain-pull-sources         → populate src/
   3. /brain-rebuild-services     → generate service docs
   4. /brain-rebuild-memory       → build L1/L2 navigation
-  5. /brain-reindex              → build the qmd hybrid search index
+  5. Set up gbrain (mcp__gbrain__sync_brain or gbrain import + embed) →
+     build the hybrid search index
 ```
 
 ## Rules

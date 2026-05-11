@@ -104,22 +104,6 @@ fi
 log "SuperCLI installed successfully!"
 log "Run 'super --help' to get started"
 
-# Install qmd (brain hybrid-search indexer used by smnbss/brain skills)
-if command -v npm >/dev/null 2>&1; then
-  if command -v qmd >/dev/null 2>&1; then
-    log "qmd already installed"
-  else
-    log "Installing qmd..."
-    if npm install -g @tobilu/qmd >/dev/null 2>&1; then
-      log "  ✓ qmd installed"
-    else
-      warn "  ✗ qmd install failed (run manually: npm install -g @tobilu/qmd)"
-    fi
-  fi
-else
-  warn "npm not found — skipping qmd install (install Node.js, then: npm install -g @tobilu/qmd)"
-fi
-
 # Check for CLIs
 log "Detected CLIs:"
 for cli in claude gemini codex; do

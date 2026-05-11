@@ -101,14 +101,15 @@ existing surface that just isn't named literally. Instead:
 
 1. If there are substring matches, name the most plausible one as the likely
    target and list the rest as siblings.
-2. If there are **zero matches of any kind**, run `qmd query "<name>"` and look
-   at the top 5–10 hits. Propose up to 3 candidate repos/surfaces the user
-   might mean, based on where the name shows up (service docs, project notes,
-   memory files).
+2. If there are **zero matches of any kind**, call `mcp__gbrain__query` with
+   `"<name>"` (fall back to `gbrain query "<name>"` only if the MCP tool is
+   unavailable) and look at the top 5–10 hits. Propose up to 3 candidate
+   repos/surfaces the user might mean, based on where the name shows up
+   (service docs, project notes, memory files).
 3. Ask the user:
    > "No repo named `<name>` in `src/github`. Did you mean one of these:
    > <A>, <B>, <C>? Or is this a new capability to build from scratch?"
-4. Only after the user confirms "new capability" (or the qmd pass truly
+4. Only after the user confirms "new capability" (or the gbrain pass truly
    returns nothing related) should the skill frame this as greenfield.
 
 Greenfield framing changes the next step's work significantly — it shifts from
@@ -124,8 +125,8 @@ Look in `outputs/services/` for architecture docs:
 2. Fuzzy match: any `*.AGENT.MD` whose filename contains the input.
 3. If the repo includes a database, also look for `*.DB.AGENT.MD`.
 4. Check `outputs/services/cross/` for cross-cutting docs that mention the
-   capability (RabbitMQ topology, event flows, etc.) — use `qmd query` if
-   scanning filenames is not enough.
+   capability (RabbitMQ topology, event flows, etc.) — use `mcp__gbrain__query`
+   (or the `gbrain` CLI as a fallback) if scanning filenames is not enough.
 
 Read each matched doc. These are the source of truth for how existing services
 are built and what conventions to follow.
@@ -146,9 +147,8 @@ prior brainstorming, spikes, and scratch work live.
 If the first three steps produced little context, run a hybrid search to surface
 mentions across the brain:
 
-```bash
-qmd query "<name>"
-```
+- Preferred: call `mcp__gbrain__query` with the query `"<name>"`.
+- Fallback (only if the MCP tool isn't in this session): `gbrain query "<name>"`.
 
 Scan the top 10 results for references in `memory/`, ClickUp exports, meeting
 notes, or Linear issues. Read the 2–3 most relevant hits. This catches cases

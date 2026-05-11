@@ -22,13 +22,13 @@ Before doing anything else, check whether `agents/morning-start-additional/SKILL
 
 1. **Brew update & upgrade** — run `brew update && brew upgrade` to update Homebrew and upgrade all installed formulae and casks.
 
-2. **Global npm packages** — run `npm update -g` to update all globally installed npm packages (includes `qmd`).
+2. **Global npm packages** — run `npm update -g` to update all globally installed npm packages.
 
 3. **Gstack** — run `/gstack-upgrade` to update gstack to the latest version.
 
 4. **Python packages** — run `uv sync --upgrade` to update the Python packages used by this repo.
 
-5. **qmd reindex** — run `npx qmd update` (or `uv run qmd update` if using uv scripts) to rebuild the brain search index with any new content.
+5. **gbrain reindex** — call `mcp__gbrain__sync_brain` to refresh the hybrid search index with any new content. Fall back to `gbrain import <changed-dir>` + `gbrain embed --stale` only if the MCP tool is unavailable.
 
 6. **Git pull** — run `git pull --rebase` to pull the latest brain changes.
 
@@ -202,7 +202,7 @@ Part 1: Tool updates (sequential)
   ├─ npm update -g
   ├─ gstack upgrade
   ├─ uv sync --upgrade
-  ├─ qmd reindex
+  ├─ gbrain reindex (mcp__gbrain__sync_brain)
   └─ git pull --rebase
   ↓
 Part 2a + Part 3 (parallel start)

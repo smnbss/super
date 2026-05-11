@@ -11,7 +11,7 @@
 # The defaults below are Simone Basso / WeRoad. Adapt to your own org.
 
 organization:
-  # Human-readable name — used in qmd globalContext and report templates
+  # Human-readable name — used in report templates and agent prompts
   name: WeRoad
   # Short role label — e.g. "CTO/CPO of WeRoad"
   role: CTO/CPO of WeRoad

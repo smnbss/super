@@ -247,8 +247,9 @@ and ask the user if they want to reset and do 3 more.
 
 - What problem does this idea solve? Who benefits?
 - What are the key assumptions? Are they valid?
-- Research: use web search, DeepWiki, or brain knowledge (`qmd query`) to find
-  relevant prior art, similar implementations, documentation, or competing approaches.
+- Research: use web search, DeepWiki, or brain knowledge (`mcp__gbrain__query`,
+  with `gbrain query` as a CLI fallback) to find relevant prior art, similar
+  implementations, documentation, or competing approaches.
 - Expand the description with findings: background, prior art, relevant links.
 - List 3-5 concrete approaches or options to implement this idea.
 
