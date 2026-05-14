@@ -91,9 +91,9 @@ function autoUpdate() {
     } catch {}
   }
 
-  // Refresh global super-skill symlinks in Claude's ~/.claude/skills dir.
-  // Cheap filesystem-only op; picks up any new skills that a just-pulled
-  // super release added without requiring another `super install` run.
+  // Sweep up any legacy global super-skill symlinks under ~/.claude/skills/.
+  // Super now installs built-in skills only at project scope to avoid the
+  // double-registration that caused duplicate slash-command entries.
   try { catalog.ensureGlobalSuperSkills(null, { silent: true }); } catch {}
 
   markUpdateChecked();
@@ -439,13 +439,12 @@ async function cmdInstall(args) {
     catalog.installPhaseInstall(selectedClis, { debugMode });
   }
 
-  // Also keep super's built-in skills fresh in Claude's GLOBAL skill dir
-  // (~/.claude/skills) so skills like /super-clone invoked
-  // outside a brain project use the latest shipped version. Symlinks point
-  // directly at $SUPER_HOME/skills so super's git-pull auto-update applies
-  // to these too without needing another `super install` pass.
+  // Sweep up any legacy global super-skill symlinks under ~/.<cli>/skills/
+  // left behind by older super versions. Built-in skills now live exclusively
+  // at project scope; running them outside a brain project requires `cd`ing
+  // into one.
   ui.spacer();
-  ui.brand('Syncing super skills to global CLI dirs...');
+  ui.brand('Cleaning legacy global super-skill symlinks...');
   ui.spacer();
   catalog.ensureGlobalSuperSkills(selectedClis);
   ui.spacer();
