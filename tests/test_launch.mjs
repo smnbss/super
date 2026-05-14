@@ -1,6 +1,6 @@
 // tests/test_launch.mjs — Tests for launch arg parsing, provider resolution, and banner
 import { strict as assert } from 'assert';
-import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, PROVIDERS, SUBCOMMANDS, isCliSubcommand } from '../lib/launch.mjs';
+import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, PROVIDERS, SUBCOMMANDS, isCliSubcommand, injectSubcommandDefaults } from '../lib/launch.mjs';
 
 let passed = 0, failed = 0;
 
@@ -633,6 +633,55 @@ test('SUBCOMMANDS.claude includes the full claude --help command set', () => {
   for (const sub of expected) {
     assert.ok(SUBCOMMANDS.claude.has(sub), `SUBCOMMANDS.claude should include ${sub}`);
   }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// injectSubcommandDefaults
+// ═══════════════════════════════════════════════════════════════════════════════
+console.log('\ninjectSubcommandDefaults');
+console.log('═'.repeat(50));
+
+test('claude agents: injects --cwd <cwd> by default', () => {
+  const out = injectSubcommandDefaults('claude', ['agents'], '/x/y');
+  assert.deepStrictEqual(out, ['agents', '--cwd', '/x/y']);
+});
+
+test('claude agents: preserves user-supplied --cwd', () => {
+  const out = injectSubcommandDefaults('claude', ['agents', '--cwd', '/other'], '/x/y');
+  assert.deepStrictEqual(out, ['agents', '--cwd', '/other']);
+});
+
+test('claude agents: skips injection when --help is present', () => {
+  const out = injectSubcommandDefaults('claude', ['agents', '--help'], '/x/y');
+  assert.deepStrictEqual(out, ['agents', '--help']);
+});
+
+test('claude agents: skips injection when -h is present', () => {
+  const out = injectSubcommandDefaults('claude', ['agents', '-h'], '/x/y');
+  assert.deepStrictEqual(out, ['agents', '-h']);
+});
+
+test('non-agents subcommand: untouched', () => {
+  const args = ['mcp', 'list'];
+  assert.strictEqual(injectSubcommandDefaults('claude', args, '/x/y'), args);
+});
+
+test('non-claude CLI: untouched', () => {
+  const args = ['agents'];
+  assert.strictEqual(injectSubcommandDefaults('gemini', args, '/x/y'), args);
+});
+
+test('empty args: untouched', () => {
+  const args = [];
+  assert.strictEqual(injectSubcommandDefaults('claude', args, '/x/y'), args);
+});
+
+test('returns a new array, does not mutate input', () => {
+  const args = ['agents'];
+  const out = injectSubcommandDefaults('claude', args, '/x/y');
+  assert.notStrictEqual(out, args);
+  assert.deepStrictEqual(args, ['agents']);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

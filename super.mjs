@@ -15,7 +15,7 @@ import * as interactive from './lib/interactive.mjs';
 import { fzfPickSession, fzfPickCli, fzfIsAvailable } from './lib/fzf.mjs';
 import { securityCheck, formatBlockReason } from './lib/security.mjs';
 import { runValidators } from './lib/validators.mjs';
-import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, isCliSubcommand } from './lib/launch.mjs';
+import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, isCliSubcommand, injectSubcommandDefaults } from './lib/launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 process.env.SUPER_HOME = process.env.SUPER_HOME || __dirname;
@@ -774,7 +774,8 @@ function cmdLaunch(cli, args = []) {
   // interactive sessions. Bypass auto-update, session creation, context
   // injection, banner, and yolo flag — just exec the CLI directly.
   if (isCliSubcommand(cli, args)) {
-    try { execFileSync(CLI[cli].cmd, args, { stdio: 'inherit' }); }
+    const finalArgs = injectSubcommandDefaults(cli, args);
+    try { execFileSync(CLI[cli].cmd, finalArgs, { stdio: 'inherit' }); }
     catch (e) { process.exit(e.status || 1); }
     return;
   }
