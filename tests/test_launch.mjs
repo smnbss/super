@@ -1,6 +1,6 @@
 // tests/test_launch.mjs — Tests for launch arg parsing, provider resolution, and banner
 import { strict as assert } from 'assert';
-import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, PROVIDERS } from '../lib/launch.mjs';
+import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, PROVIDERS, SUBCOMMANDS, isCliSubcommand } from '../lib/launch.mjs';
 
 let passed = 0, failed = 0;
 
@@ -568,6 +568,70 @@ test('wizard: Ollama option labels must be plain text (no ANSI codes, no leading
     const optionStr = `${label} (${model})`;
     assert.ok(!/\x1b\[/.test(optionStr), `Option "${optionStr}" must not contain ANSI escape codes`);
     assert.ok(!/^\s/.test(optionStr), `Option "${optionStr}" must not start with whitespace (gum strips it)`);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Subcommand passthrough (super claude agents, super claude mcp, …)
+// ═══════════════════════════════════════════════════════════════════════════════
+console.log('\nisCliSubcommand');
+console.log('═'.repeat(50));
+
+test('agents is a claude subcommand', () => {
+  assert.strictEqual(isCliSubcommand('claude', ['agents']), true);
+});
+
+test('mcp is a claude subcommand (with extra args)', () => {
+  assert.strictEqual(isCliSubcommand('claude', ['mcp', 'list']), true);
+});
+
+test('doctor, plugins, project, setup-token, ultrareview, update, upgrade are claude subcommands', () => {
+  for (const sub of ['doctor', 'plugin', 'plugins', 'project', 'setup-token', 'ultrareview', 'update', 'upgrade', 'auth', 'auto-mode', 'install']) {
+    assert.strictEqual(isCliSubcommand('claude', [sub]), true, `${sub} should be recognised`);
+  }
+});
+
+test('empty args is not a subcommand', () => {
+  assert.strictEqual(isCliSubcommand('claude', []), false);
+});
+
+test('a leading flag is not a subcommand', () => {
+  assert.strictEqual(isCliSubcommand('claude', ['--model', 'opus']), false);
+});
+
+test('a flag followed by "agents" is not detected — only first positional counts', () => {
+  // Intentional: management subcommands consume their own args, mixing super
+  // flags in front would be ambiguous. The user gets the launch pipeline.
+  assert.strictEqual(isCliSubcommand('claude', ['--model', 'agents']), false);
+});
+
+test('unknown word is not a subcommand', () => {
+  assert.strictEqual(isCliSubcommand('claude', ['prompt-text']), false);
+});
+
+test('gemini has no registered subcommands yet', () => {
+  assert.strictEqual(isCliSubcommand('gemini', ['agents']), false);
+  assert.strictEqual(SUBCOMMANDS.gemini.size, 0);
+});
+
+test('codex has no registered subcommands yet', () => {
+  assert.strictEqual(isCliSubcommand('codex', ['agents']), false);
+  assert.strictEqual(SUBCOMMANDS.codex.size, 0);
+});
+
+test('unknown CLI returns false', () => {
+  assert.strictEqual(isCliSubcommand('bogus', ['agents']), false);
+});
+
+test('SUBCOMMANDS.claude includes the full claude --help command set', () => {
+  // Contract test against `claude --help` output (2026-05-13).
+  const expected = [
+    'agents', 'auth', 'auto-mode', 'doctor', 'install', 'mcp',
+    'plugin', 'plugins', 'project', 'setup-token', 'ultrareview',
+    'update', 'upgrade',
+  ];
+  for (const sub of expected) {
+    assert.ok(SUBCOMMANDS.claude.has(sub), `SUBCOMMANDS.claude should include ${sub}`);
   }
 });
 

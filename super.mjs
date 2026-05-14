@@ -15,7 +15,7 @@ import * as interactive from './lib/interactive.mjs';
 import { fzfPickSession, fzfPickCli, fzfIsAvailable } from './lib/fzf.mjs';
 import { securityCheck, formatBlockReason } from './lib/security.mjs';
 import { runValidators } from './lib/validators.mjs';
-import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs } from './lib/launch.mjs';
+import { parseLaunchArgs, resolveProvider, buildBannerLabel, buildWrapperArgs, isCliSubcommand } from './lib/launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 process.env.SUPER_HOME = process.env.SUPER_HOME || __dirname;
@@ -254,6 +254,11 @@ function installHooksClaude() {
   const data = JSON.parse(expandTemplate(template));
   if (existsSync(sf)) { mergeJsonHooks(sf, data, 'command'); ui.success(`Updated ${sf}`); }
   else { writeFileSync(sf, JSON.stringify(data, null, 2) + '\n'); ui.success(`Created ${sf}`); }
+
+  // Persist yolo to .claude/settings.local.json (gitignored) so background
+  // agents and out-of-super claude invocations inherit it. Toggles both ways
+  // based on super.config.yaml `security.yoloMode`.
+  catalog.applyClaudeYoloSetting(config.yoloMode());
 }
 
 function installHooksGemini() {
@@ -764,6 +769,17 @@ function cmdLaunch(cli, args = []) {
   cli = cli.toLowerCase();
   if (!CLI[cli]) die(`Unknown CLI: ${cli}`);
   if (!catalog.isInstalled(cli)) die(`${CLI[cli].label} is not installed`);
+
+  // Subcommand passthrough: `super claude agents`, `super claude mcp ...`,
+  // `super claude doctor` — these are management subcommands of the CLI, not
+  // interactive sessions. Bypass auto-update, session creation, context
+  // injection, banner, and yolo flag — just exec the CLI directly.
+  if (isCliSubcommand(cli, args)) {
+    try { execFileSync(CLI[cli].cmd, args, { stdio: 'inherit' }); }
+    catch (e) { process.exit(e.status || 1); }
+    return;
+  }
+
   autoUpdate(cli);
 
   const { doResume, resumeFile: resumeArg, title, provider, passthrough } = parseLaunchArgs(args);
@@ -1203,6 +1219,8 @@ EXAMPLES
   super claude --resume           # Resume with picker
   super gemini --title "fix auth" # Named session
   super claude --provider ollama --model glm-5:cloud  # Ollama provider
+  super claude agents             # Passthrough to a CLI subcommand (no session)
+  super claude mcp list           # Same — works for any claude subcommand
   super switch gemini             # Continue in Gemini
   super doctor                    # Health check
 `);
