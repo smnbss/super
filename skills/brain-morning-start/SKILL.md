@@ -28,7 +28,7 @@ Before doing anything else, check whether `agents/morning-start-additional/SKILL
 
 4. **Python packages** — run `uv sync --upgrade` to update the Python packages used by this repo.
 
-5. **gbrain reindex** — call `mcp__gbrain__sync_brain` to refresh the hybrid search index with any new content. Fall back to `gbrain import <changed-dir>` + `gbrain embed --stale` only if the MCP tool is unavailable.
+5. **gbrain reindex** — call `mcp__gbrain__sync_brain` to refresh the hybrid search index with any new content. Fall back to `gbrain import <changed-dir>` + `gbrain embed --stale` only if the MCP tool is unavailable. Note: `sync_brain` keeps embeddings fresh but does **not** materialize wikilinks into graph edges or extract timeline entries — that happens in Phase 4.5 of `brain-rebuild-memory` (Part 2c below), which calls `mcp__gbrain__add_link` and `mcp__gbrain__add_timeline_entry` directly over the running MCP server. No serve restart needed.
 
 6. **Git pull** — run `git pull --rebase` to pull the latest brain changes.
 
@@ -177,6 +177,8 @@ Today's prep:
 ✓ Deep Dive SAITAMA → outputs/agents/my-deep-dives/saitama.md
 ✓ 1:1 Alex → outputs/agents/my-one-on-one/alex.md
 ✓ 1:1 Ryan → outputs/agents/my-one-on-one/ryan.md
+
+gbrain graph: <N> new edges, <N> timeline entries (via MCP)
 ```
 
 ## Skill References
@@ -222,6 +224,9 @@ Part 2b.5: agents/morning-start-additional/SKILL.md (if present)
                                                          ↓
 Part 2c: brain-rebuild-memory ────────────────────────────┘
   └─ Rebuild L2 domain knowledge + L1 MOCs → memory/
+     Phase 4.5 walks rebuilt files and calls
+     mcp__gbrain__add_link + add_timeline_entry → graph edges
+     and timeline entries. Pure MCP, no serve restart.
                                                          ↓
 Part 4: Prepare today's meetings (after Part 2c complete)
   ├─ Fetch calendar → classify events

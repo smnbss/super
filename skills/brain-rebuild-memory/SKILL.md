@@ -377,6 +377,71 @@ Record final symlink status (`created` / `already-correct` / `skipped: gemini no
 
 ---
 
+## Phase 4.5 — Refresh gbrain graph (MCP-native)
+
+After Phase 4 verifies wikilinks, the gbrain graph in PGLite is still stale: `mcp__gbrain__sync_brain` keeps embeddings fresh but does **not** materialize `[[wikilinks]]` into edges. This phase walks the rebuilt files and writes edges + timeline entries through the running MCP server — no kill-serve, no CLI fallback.
+
+**Why MCP-native:** gbrain's CLI `extract all` needs the PGLite writer lock, which `gbrain serve` (the MCP host) holds. Calling `mcp__gbrain__add_link` / `add_timeline_entry` goes through the same process and avoids the lock contention entirely.
+
+If no memory files were rewritten in this run (full no-op), skip this phase entirely.
+
+Otherwise:
+
+### 4.5a. Walk wikilinks → edges
+
+Scope: only files rewritten in Phase 2/3 (track them as `REWRITTEN_FILES` during those phases). The bulk of pages under `src/` are raw exports with no `[[wikilink]]` syntax — walking them is wasted work.
+
+For each rewritten markdown file:
+
+1. **Compute source slug** from the file path:
+   - `memory/L1/hub.md` → `hub`
+   - `memory/L2/releases.md` → `releases`
+   - `outputs/services/<repo>.AGENT.MD` → `<repo>-agent` (lowercase, follow gbrain's slug convention)
+
+2. **Extract wikilinks** with regex `\[\[([^\]\|]+)(?:\|[^\]]+)?\]\]` — captures the target before any `|` display-text. Normalize each target to a slug (lowercase, `[^a-z0-9-]` → `-`, collapse repeats).
+
+3. **Dedupe** within the file so we don't issue duplicate writes for the same (source, target) pair.
+
+4. **Resolve targets**: call `mcp__gbrain__resolve_slugs` once per file (it accepts a batch) to filter out targets that don't exist as pages. Skipping unresolved wikilinks matches what `gbrain extract links` does — broken refs are reported in Phase 4, not materialized as edges.
+
+5. **Write edges**: for each resolved (source, target), call `mcp__gbrain__add_link({from: source, to: target, type: "wikilink"})`. This is idempotent — duplicate calls return the existing edge unchanged.
+
+Cap parallelism at 10 concurrent MCP calls to avoid swamping the server.
+
+### 4.5b. Walk dated `verified:` blocks → timeline entries
+
+For each rewritten file, scan for fact blocks matching:
+
+```
+<!-- verified: YYYY-MM-DD | source: <path-or-url> -->
+<next non-blank line — the fact text, truncated at the next blank line>
+```
+
+For each match:
+- `slug` = source slug (same as 4.5a)
+- `date` = the captured `YYYY-MM-DD`
+- `text` = the first non-blank line(s) following the marker, max 280 chars
+
+Call `mcp__gbrain__add_timeline_entry({slug, date, text})`. Idempotent on (slug, date, text-hash).
+
+This deliberately differs from `gbrain extract timeline`, which scans every page in the brain for dated patterns. Our memory files are the authoritative timeline source — capturing those is the high-signal subset.
+
+### 4.5c. Refresh embeddings
+
+Single MCP call: `mcp__gbrain__sync_brain` — picks up any new chunks from rewritten files. Idempotent.
+
+### 4.5d. Tally
+
+Aggregate the counters for Phase 5:
+- `edges_added` — count of `add_link` calls that returned a newly-created edge (vs. existing)
+- `timeline_added` — count of new `add_timeline_entry` returns
+- `wikilinks_skipped_unresolved` — count of `[[targets]]` that didn't resolve to a page (these are also flagged by Phase 4's broken-link check)
+- `embed_chunks_added` — from the `sync_brain` response
+
+**Do not** call `gbrain extract` (CLI), `gbrain dream` (broken in v0.37.5.0), `submit_job(name="extract")` (no PGLite worker), or kill `gbrain serve`. The MCP path above replaces all of them.
+
+---
+
 ## Phase 5 — Digest
 
 Write `outputs/agents/brain-sync/YYYY-MM-DD-rebuild.md` with:
@@ -403,7 +468,8 @@ Phase 1   (inventory src + outputs/services)
       → Phase 3   (rebuild dirty L1 from L2 + outputs/services + src structure)
         → Phase 3.5 (regenerate AGENTS.md + CLAUDE.md/GEMINI.md symlinks)
           → Phase 4   (verify)
-            → Phase 5   (digest + persist state)
+            → Phase 4.5 (walk rebuilt files → mcp__gbrain__add_link + add_timeline_entry, then sync_brain)
+              → Phase 5   (digest + persist state)
 ```
 
 ## Rules
