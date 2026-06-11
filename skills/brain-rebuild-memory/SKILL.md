@@ -379,7 +379,7 @@ Record final symlink status (`created` / `already-correct` / `skipped: gemini no
 
 ## Phase 4.5 — Refresh gbrain graph (MCP-native)
 
-After Phase 4 verifies wikilinks, the gbrain graph in PGLite is still stale: `mcp__gbrain__sync_brain` keeps embeddings fresh but does **not** materialize `[[wikilinks]]` into edges. This phase walks the rebuilt files and writes edges + timeline entries through the running MCP server — no kill-serve, no CLI fallback.
+After Phase 4 verifies wikilinks, the gbrain graph in PGLite is still stale: `mcp__gbrain__sync_brain` keeps embeddings fresh but does **not** materialize `[[wikilinks]]` into edges. This phase walks the rebuilt files and writes edges + timeline entries through the running MCP server — no kill-serve, no lock contention. (A CLI fallback exists *only* for sessions where `gbrain serve` is not running and the writer lock is free — see 4.5a — but never run the CLI extractor while serve holds the lock; it will deadlock.)
 
 **Why MCP-native:** gbrain's CLI `extract all` needs the PGLite writer lock, which `gbrain serve` (the MCP host) holds. Calling `mcp__gbrain__add_link` / `add_timeline_entry` goes through the same process and avoids the lock contention entirely.
 
@@ -391,22 +391,31 @@ Otherwise:
 
 Scope: only files rewritten in Phase 2/3 (track them as `REWRITTEN_FILES` during those phases). The bulk of pages under `src/` are raw exports with no `[[wikilink]]` syntax — walking them is wasted work.
 
+**Prerequisite (one-time, already set on this brain 2026-06-11):** `gbrain config get link_resolution.global_basename` must be `true`. If not, run `gbrain config set link_resolution.global_basename true` once. Without it, bare `[[teams]]`-style links never resolve.
+
 For each rewritten markdown file:
 
-1. **Compute source slug** from the file path:
-   - `memory/L1/hub.md` → `hub`
-   - `memory/L2/releases.md` → `releases`
-   - `outputs/services/<repo>.AGENT.MD` → `<repo>-agent` (lowercase, follow gbrain's slug convention)
+1. **Compute source slug** = the file path *relative to its import root*, lowercased, extension dropped, with `/` separators KEPT. This matches how `gbrain import <dir>` slugs pages (verified against `gbrain extract links --dir`):
+   - `memory/L1/hub.md` → `l1/hub`
+   - `memory/L2/releases.md` → `l2/releases`
+   - `outputs/services/<repo>.AGENT.MD` → `services/<repo>.agent` (strip the `outputs/` import root, lowercase)
 
-2. **Extract wikilinks** with regex `\[\[([^\]\|]+)(?:\|[^\]]+)?\]\]` — captures the target before any `|` display-text. Normalize each target to a slug (lowercase, `[^a-z0-9-]` → `-`, collapse repeats).
+   The import root (`memory/`, `outputs/`) is stripped; everything below it is preserved and lowercased. **Do NOT collapse to basename** — `hub` is a different (non-existent) page from `l1/hub`. Slugging to basename here is the historical bug that left the graph at 0 edges.
+
+2. **Extract wikilinks** with regex `\[\[([^\]\|#]+)(?:#[^\]\|]*)?(?:\|[^\]]+)?\]\]` — capture the target, dropping any `#anchor` and `|display-text`. Then **resolve each target as a path relative to the source file's directory** — do NOT dash-mangle it (the old `[^a-z0-9-]→-` step turned `../L2/exco` into garbage and is why `../`-relative links never resolved):
+   - resolve `../` segments against the source file's directory, strip a leading `./`, drop a trailing `.md`, lowercase, KEEP `/`.
+   - from `memory/L1/hub.md`: `[[../L2/exco]]` → `l2/exco`; `[[teams]]` → `l1/teams`; `[[data-model]]` → `l1/data-model`.
+   - Keep TWO candidate forms per target: the resolved path-slug AND its bare basename (last segment, e.g. `exco`). The basename is the `global_basename` fallback for when the path form misses.
 
 3. **Dedupe** within the file so we don't issue duplicate writes for the same (source, target) pair.
 
-4. **Resolve targets**: call `mcp__gbrain__resolve_slugs` once per file (it accepts a batch) to filter out targets that don't exist as pages. Skipping unresolved wikilinks matches what `gbrain extract links` does — broken refs are reported in Phase 4, not materialized as edges.
+4. **Resolve targets**: call `mcp__gbrain__resolve_slugs` once per file (batch) with the candidate forms, mapping each to a real page and dropping targets that don't exist. Skipping unresolved wikilinks matches what `gbrain extract links` does — broken refs are reported in Phase 4, not materialized as edges.
 
 5. **Write edges**: for each resolved (source, target), call `mcp__gbrain__add_link({from: source, to: target, type: "wikilink"})`. This is idempotent — duplicate calls return the existing edge unchanged.
 
 Cap parallelism at 10 concurrent MCP calls to avoid swamping the server.
+
+**Sanity check:** after the walk, the memory subgraph should match what `gbrain extract links --dir memory` produces (~220 edges from ~43 files; `l1/hub` → ~37 targets). If `add_link` calls succeed but `gbrain backlinks l2/exco` stays empty, the slugs got basename-mangled again — recheck steps 1–2. **CLI fallback:** if `gbrain serve` is NOT running this session (no `mcp__gbrain__*` tools, so the PGLite writer lock is free), you may skip the MCP walk entirely and run the proven CLI form instead: `gbrain extract links --dir memory && gbrain extract links --dir outputs`.
 
 ### 4.5b. Walk dated `verified:` blocks → timeline entries
 
@@ -438,7 +447,7 @@ Aggregate the counters for Phase 5:
 - `wikilinks_skipped_unresolved` — count of `[[targets]]` that didn't resolve to a page (these are also flagged by Phase 4's broken-link check)
 - `embed_chunks_added` — from the `sync_brain` response
 
-**Do not** call `gbrain extract` (CLI), `gbrain dream` (broken in v0.37.5.0), `submit_job(name="extract")` (no PGLite worker), or kill `gbrain serve`. The MCP path above replaces all of them.
+**Do not** call `gbrain extract` (CLI) *while `gbrain serve` is running* — it needs the writer lock serve holds and will deadlock; the MCP path above replaces it. (The 4.5a CLI fallback applies only when serve is NOT running.) Also **do not** call `gbrain dream` (broken in v0.37.5.0), `submit_job(name="extract")` (no PGLite worker), or kill `gbrain serve`.
 
 ---
 
