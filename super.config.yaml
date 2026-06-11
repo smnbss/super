@@ -88,6 +88,17 @@ system:
     install: "sh -c 'npm install -g @playwright/cli@latest 2>/dev/null || sudo -n npm install -g @playwright/cli@latest'"
     enabled: true
 
+  coolify-cli:
+    name: coolify-cli
+    # Provides the `coolify` binary used by the coolify-deploy skill to
+    # manage Coolify projects/resources. Installed via the coollabsio
+    # Homebrew tap, which works identically on macOS (brew) and Linux
+    # (Linuxbrew). If brew is absent (e.g. a minimal clone image), skip
+    # with a pointer rather than failing the whole install.
+    check: "command -v coolify"
+    install: "sh -c 'if command -v brew >/dev/null 2>&1; then brew install coollabsio/coolify-cli/coolify-cli; else echo \"coolify-cli: Homebrew not found — install manually from https://github.com/coollabsio/coolify-cli\" >&2; fi'"
+    enabled: true
+
 # ─── CLIs ────────────────────────────────────────────────────────────────────
 # Install commands for each supported CLI. `super install` will run these
 # automatically if the CLI is not already on PATH.
