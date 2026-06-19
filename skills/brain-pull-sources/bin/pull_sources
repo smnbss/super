@@ -7,6 +7,13 @@ AGENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SOURCES_FILE="${1:-$REPO_ROOT/sources.md}"
 
+# If a relative path was given (or a bare basename) and it doesn't resolve from
+# the current directory, fall back to resolving it against the repo root. This
+# keeps `bin/pull_sources sources.md` working no matter which directory it's run from.
+if [[ ! -f "$SOURCES_FILE" && "$SOURCES_FILE" != /* ]]; then
+  SOURCES_FILE="$REPO_ROOT/$SOURCES_FILE"
+fi
+
 if [[ ! -f "$SOURCES_FILE" ]]; then
   echo "Error: sources file not found: $SOURCES_FILE"
   exit 1

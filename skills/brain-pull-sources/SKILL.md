@@ -78,10 +78,10 @@ The sync runs in three phases.
 
 **Step 1: Re-export sources**
 
-Run the export pipeline from the repo root:
+Run the export pipeline (works from any directory — `sources.md` is resolved against the repo root):
 
 ```bash
-bin/pull_sources sources.md   # run from the skill directory
+bin/pull_sources              # defaults to <repo-root>/sources.md
 ```
 
 This reads `sources.md` line by line, strips `#` comments, and runs each command via `bin/<tool>`. It writes `src/.last_export.json` with a timestamp and success/failure counts.
