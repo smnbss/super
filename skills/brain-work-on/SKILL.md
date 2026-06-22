@@ -102,8 +102,7 @@ existing surface that just isn't named literally. Instead:
 1. If there are substring matches, name the most plausible one as the likely
    target and list the rest as siblings.
 2. If there are **zero matches of any kind**, call `mcp__gbrain__query` with
-   `"<name>"` (fall back to `gbrain query "<name>"` only if the MCP tool is
-   unavailable) and look at the top 5–10 hits. Propose up to 3 candidate
+   `"<name>"` and look at the top 5–10 hits. Propose up to 3 candidate
    repos/surfaces the user might mean, based on where the name shows up
    (service docs, project notes, memory files).
 3. Ask the user:
@@ -126,7 +125,7 @@ Look in `outputs/services/` for architecture docs:
 3. If the repo includes a database, also look for `*.DB.AGENT.MD`.
 4. Check `outputs/services/cross/` for cross-cutting docs that mention the
    capability (RabbitMQ topology, event flows, etc.) — use `mcp__gbrain__query`
-   (or the `gbrain` CLI as a fallback) if scanning filenames is not enough.
+   if scanning filenames is not enough.
 
 Read each matched doc. These are the source of truth for how existing services
 are built and what conventions to follow.
@@ -147,8 +146,7 @@ prior brainstorming, spikes, and scratch work live.
 If the first three steps produced little context, run a hybrid search to surface
 mentions across the brain:
 
-- Preferred: call `mcp__gbrain__query` with the query `"<name>"`.
-- Fallback (only if the MCP tool isn't in this session): `gbrain query "<name>"`.
+- Call `mcp__gbrain__query` with the query `"<name>"`.
 
 Scan the top 10 results for references in `memory/`, ClickUp exports, meeting
 notes, or Linear issues. Read the 2–3 most relevant hits. This catches cases

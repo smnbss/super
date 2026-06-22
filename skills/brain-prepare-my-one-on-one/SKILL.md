@@ -32,7 +32,7 @@ For every 1:1 calendar event:
    - `team` / `department`: from the **Team / Department** column
    - `email`: from the **Email** column, or fall back to calendar attendees
    - `linear_teams`: from the **Linear teams** column (`—` means the person does not use Linear)
-3. **If not found in `memory/L1/team-members.md`**, search the brain using `mcp__gbrain__query` with `"<identifier> role position team"` (fall back to `gbrain query` only if the MCP tool is unavailable). Also try `"<identifier> people hr"`. Combine results to build the person's context.
+3. **If not found in `memory/L1/team-members.md`**, search the brain using `mcp__gbrain__query` with `"<identifier> role position team"`. Also try `"<identifier> people hr"`. Combine results to build the person's context.
 
 **If identity still cannot be resolved** (neither `team-members.md` nor brain search returns a clear match):
 Stop and ask the user: *"I found a 1:1 with '<identifier>' but couldn't resolve who they are. Who is this person? (full name, role, team/department, email, Linear team names if any). Tip: update memory/L1/team-members.md or run brain-rebuild-memory so next time the lookup works automatically."*
@@ -148,11 +148,10 @@ If the person manages teams with active incidents, check for recent incident pro
 
 ## Step 4 — Enrich with brain context
 
-Search the brain for recent context about this person and their areas. Prefer
-the gbrain MCP tools; fall back to the CLI only if MCP is unavailable:
+Search the brain for recent context about this person and their areas using the
+gbrain MCP tools:
 
-- Preferred: `mcp__gbrain__query` with `"<person name> <team name> recent updates"`
-- Fallback: `gbrain query "<person name> <team name> recent updates"`
+- `mcp__gbrain__query` with `"<person name> <team name> recent updates"`
 
 Check:
 - `src/gws/gmeet/` — recent meeting notes mentioning this person

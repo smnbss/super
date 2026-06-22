@@ -340,7 +340,7 @@ Content (assemble from Phase 1 inventory + the just-rebuilt L1 files):
 2. **Repository Layout** — code fence showing `memory/`, `src/`, `outputs/` with live counts from Phase 1 (subdirs + file counts). L1 and L2 counts come from `ls memory/L1 | wc -l` and `ls memory/L2 | wc -l` after rebuild.
 3. **How to Navigate** — 4-step path starting at `memory/L1/hub.md` + a `Quick Access` list pointing at the highest-signal L1 files (`entities.md`, `data-model.md`, `product-areas.md`, `teams.md`, `system-map.md`) plus `outputs/services/<repo>.AGENT.MD`.
 4. **Freshness Tracking** — explain `verified:` fact blocks, `staleness_threshold:` frontmatter, and the `superseded:` marker convention.
-5. **Searching** — prefer the gbrain MCP tools (`mcp__gbrain__query`, `mcp__gbrain__search`, `mcp__gbrain__get_page`); fall back to the `gbrain` CLI only if those tools aren't available in the session. Note that Grep is for exact matches only.
+5. **Searching** — always use the gbrain MCP tools (`mcp__gbrain__query`, `mcp__gbrain__search`, `mcp__gbrain__get_page`); the HTTP server is always-on so they're always available — there is no CLI fallback (a parallel `gbrain` CLI would deadlock on the PGLite writer lock). Note that Grep is for exact matches only.
 6. **External Tools** — only include sections for tools the user actually has (detect via `command -v`): `gws` CLI, Chrome DevTools, etc. Skip sections whose CLI isn't installed.
 7. **Skill Routing** — pull the routing table from `<brain_root>/.super/brain.config.yml` key `skill_routing` if present. If absent, write a short generic pointer: "skills live in `.claude/skills/` — invoke by name when the user's request matches their description."
 
@@ -379,9 +379,9 @@ Record final symlink status (`created` / `already-correct` / `skipped: gemini no
 
 ## Phase 4.5 — Refresh gbrain graph (MCP-native)
 
-After Phase 4 verifies wikilinks, the gbrain graph in PGLite is still stale: `mcp__gbrain__sync_brain` keeps embeddings fresh but does **not** materialize `[[wikilinks]]` into edges. This phase walks the rebuilt files and writes edges + timeline entries through the running MCP server — no kill-serve, no lock contention. (A CLI fallback exists *only* for sessions where `gbrain serve` is not running and the writer lock is free — see 4.5a — but never run the CLI extractor while serve holds the lock; it will deadlock.)
+After Phase 4 verifies wikilinks, the gbrain graph in PGLite is still stale: `mcp__gbrain__sync_brain` keeps embeddings fresh but does **not** materialize `[[wikilinks]]` into edges. This phase walks the rebuilt files and writes edges + timeline entries through the always-on MCP server — no kill-serve, no lock contention, and no CLI fallback (the server is always up, so the MCP path always works).
 
-**Why MCP-native:** gbrain's CLI `extract all` needs the PGLite writer lock, which `gbrain serve` (the MCP host) holds. Calling `mcp__gbrain__add_link` / `add_timeline_entry` goes through the same process and avoids the lock contention entirely.
+**Why MCP-native:** gbrain's CLI `extract all` needs the PGLite writer lock, which the always-on `gbrain serve --http` holds. Calling `mcp__gbrain__add_link` / `add_timeline_entry` goes through the same process and avoids the lock contention entirely.
 
 If no memory files were rewritten in this run (full no-op), skip this phase entirely.
 
@@ -415,7 +415,7 @@ For each rewritten markdown file:
 
 Cap parallelism at 10 concurrent MCP calls to avoid swamping the server.
 
-**Sanity check:** after the walk, the memory subgraph should match what `gbrain extract links --dir memory` produces (~220 edges from ~43 files; `l1/hub` → ~37 targets). If `add_link` calls succeed but `gbrain backlinks l2/exco` stays empty, the slugs got basename-mangled again — recheck steps 1–2. **CLI fallback:** if `gbrain serve` is NOT running this session (no `mcp__gbrain__*` tools, so the PGLite writer lock is free), you may skip the MCP walk entirely and run the proven CLI form instead: `gbrain extract links --dir memory && gbrain extract links --dir outputs`.
+**Sanity check:** after the walk, the memory subgraph should match what the `gbrain extract links --dir memory` filesystem walk produces (~220 edges from ~43 files; `l1/hub` → ~37 targets). If `add_link` calls succeed but `mcp__gbrain__backlinks` for `l2/exco` stays empty, the slugs got basename-mangled again — recheck steps 1–2.
 
 ### 4.5b. Walk dated `verified:` blocks → timeline entries
 
@@ -447,7 +447,7 @@ Aggregate the counters for Phase 5:
 - `wikilinks_skipped_unresolved` — count of `[[targets]]` that didn't resolve to a page (these are also flagged by Phase 4's broken-link check)
 - `embed_chunks_added` — from the `sync_brain` response
 
-**Do not** call `gbrain extract` (CLI) *while `gbrain serve` is running* — it needs the writer lock serve holds and will deadlock; the MCP path above replaces it. (The 4.5a CLI fallback applies only when serve is NOT running.) Also **do not** call `gbrain dream` (broken in v0.37.5.0), `submit_job(name="extract")` (no PGLite worker), or kill `gbrain serve`.
+**Do not** call `gbrain extract` (CLI) — the always-on `gbrain serve --http` holds the PGLite writer lock, so the CLI will deadlock; the MCP path above replaces it entirely. Also **do not** call `gbrain dream` (broken in v0.37.5.0), `submit_job(name="extract")` (no PGLite worker), or kill/bootout `gbrain serve` during a rebuild.
 
 ---
 
@@ -491,7 +491,7 @@ Phase 1   (inventory src + outputs/services)
 - **Cite gdrive files by their Drive URL, not the local path**: any `.md` file under `src/gdrive/` is a converted-from-Drive export carrying YAML frontmatter with `gdrive_url`. When a fact derives from such a file, the `source:` field must be the `gdrive_url` value — not `src/gdrive/<path>.md`. The local path is an implementation detail; the Drive URL is what lets a human click through. For non-gdrive sources, continue to use the local path as before. When the input is a per-folder `INDEX.md` (index-only mode), cite the folder's Drive URL (the `Drive link:` line inside the INDEX) rather than the INDEX itself.
 - **Preserve `<!-- superseded: -->` markers**: Keep them even in a rebuild.
 - **Conservative on entities**: 2+ source appearances required for `entities.md`.
-- **Use `mcp__gbrain__query`** (or `gbrain query` as a CLI fallback) for semantic searches across the brain. Use Grep only for exact string/regex matches.
+- **Use `mcp__gbrain__query`** for semantic searches across the brain (the HTTP server is always-on; no CLI fallback). Use Grep only for exact string/regex matches.
 - **Agent outputs are read-only for L2**: `outputs/agents` reports feed into L2 summaries but are never modified by this command.
 - **Don't touch clean files**: in incremental mode, skipped targets must keep their existing `verified:` and `updated:` values byte-for-byte. Rewriting an unchanged file defeats the entire staleness signal.
 - **Content-hash short-circuit**: even for a dirty target, if the newly-synthesized content hashes identical to the file already on disk, leave the file unchanged and only update the state file.

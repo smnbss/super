@@ -28,7 +28,7 @@ Before doing anything else, check whether `agents/morning-start-additional/SKILL
 
 4. **Python packages** — run `uv sync --upgrade` to update the Python packages used by this repo.
 
-5. **gbrain reindex** — call `mcp__gbrain__sync_brain` to refresh the hybrid search index with any new content. Fall back to `gbrain import <changed-dir>` + `gbrain embed --stale` only if the MCP tool is unavailable. Note: `sync_brain` keeps embeddings fresh but does **not** materialize wikilinks into graph edges or extract timeline entries — that happens in Phase 4.5 of `brain-rebuild-memory` (Part 2c below), which calls `mcp__gbrain__add_link` and `mcp__gbrain__add_timeline_entry` directly over the running MCP server. No serve restart needed.
+5. **gbrain reindex** — call `mcp__gbrain__sync_brain` to refresh the hybrid search index with any new content. It reindexes and embeds through the always-on HTTP server (`io.weroad.gbrain` on `:3131`), so it never contends for the PGLite writer lock — there is no CLI fallback, and none should be necessary. Note: `sync_brain` keeps embeddings fresh but does **not** materialize wikilinks into graph edges or extract timeline entries — that happens in Phase 4.5 of `brain-rebuild-memory` (Part 2c below), which calls `mcp__gbrain__add_link` and `mcp__gbrain__add_timeline_entry` directly over the running MCP server. No serve restart needed.
 
 6. **Git pull** — run `git pull --rebase` to pull the latest brain changes.
 
