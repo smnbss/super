@@ -480,9 +480,27 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
     meetings = [event_to_meeting(e) for e in events]
 
     day_dir = os.path.join(OUTPUT_BASE, str(d.year), iso_week_dir(d), d.strftime("%m-%d"))
-    if os.path.isdir(day_dir):
-        shutil.rmtree(day_dir)
     os.makedirs(day_dir, exist_ok=True)
+    # Rebuild idempotently, but never destroy artifacts the CLI doesn't own/reproduce:
+    #   - day-level `*-digest.md` (LLM rollups from the meeting-notes skill)
+    #   - per-meeting `transcript.md` (Meet-API transcripts — out of CLI scope)
+    # Everything else (metadata.json, notes.md, agenda.md, recording.md,
+    # attachment-*.md, index.md) is CLI-owned and rebuilt fresh.
+    for entry in os.listdir(day_dir):
+        p = os.path.join(day_dir, entry)
+        if os.path.isfile(p):
+            if not entry.endswith("-digest.md"):
+                os.remove(p)
+            continue
+        kept_transcript = False
+        for f in os.listdir(p):
+            if f == "transcript.md":
+                kept_transcript = True
+                continue
+            fp = os.path.join(p, f)
+            shutil.rmtree(fp) if os.path.isdir(fp) else os.remove(fp)
+        if not kept_transcript:
+            shutil.rmtree(p)
 
     # Pre-fetch Drive candidates once per day (cheaper than per-meeting).
     time_min, time_max = day_bounds_utc(d)
