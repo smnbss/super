@@ -1,22 +1,27 @@
 #!/bin/bash
-# Pull all sources listed in a sources.md file
-# Usage: pull_sources [sources.md]
+# Pull all sources listed in one or more sources files.
+#
+# Usage:
+#   pull_sources                       # default: reads sources.md AND sources.github.md
+#   pull_sources sources.md            # one explicit file
+#   pull_sources a.md b.md             # several explicit files, in order
+#
+# Sources are split across two files by where their output lands:
+#   sources.md          -> non-GitHub sources, exported into  src/<source>/
+#   sources.github.md   -> github_clone repos,  cloned   into  github/<owner>/<repo>/
+# (github_clone always writes to github/ regardless of which file lists it; the
+#  split is an organizing convention so the two output trees stay obvious.)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-SOURCES_FILE="${1:-$REPO_ROOT/sources.md}"
 
-# If a relative path was given (or a bare basename) and it doesn't resolve from
-# the current directory, fall back to resolving it against the repo root. This
-# keeps `bin/pull_sources sources.md` working no matter which directory it's run from.
-if [[ ! -f "$SOURCES_FILE" && "$SOURCES_FILE" != /* ]]; then
-  SOURCES_FILE="$REPO_ROOT/$SOURCES_FILE"
-fi
-
-if [[ ! -f "$SOURCES_FILE" ]]; then
-  echo "Error: sources file not found: $SOURCES_FILE"
-  exit 1
+# Build the list of sources files to process.
+SOURCES_FILES=()
+if [[ $# -gt 0 ]]; then
+  SOURCES_FILES=("$@")
+else
+  SOURCES_FILES=("$REPO_ROOT/sources.md" "$REPO_ROOT/sources.github.md")
 fi
 
 # Load .env.local if present (tokens and secrets)
@@ -26,42 +31,63 @@ if [[ -f "$REPO_ROOT/.env.local" ]]; then
   set +a
 fi
 
-echo "Pulling sources from: $SOURCES_FILE"
-echo ""
-
 success=0
 failed=0
 
-while IFS= read -r line; do
-  # Strip inline comments and trim whitespace
-  cmd="${line%%#*}"
-  cmd="${cmd%"${cmd##*[![:space:]]}"}"
+process_file() {
+  local sources_file="$1"
 
-  # Skip empty lines
-  [[ -z "$cmd" ]] && continue
-
-  # Extract the tool name (first word)
-  tool="${cmd%% *}"
-
-  # Resolve to bin/ wrapper if available, else fall back to python3 utils/
-  if [[ -x "$SCRIPT_DIR/$tool" ]]; then
-    runner="$SCRIPT_DIR/$tool"
-    args="${cmd#* }"
-  else
-    echo "Unknown command: $tool — skipping"
-    continue
+  # If a relative path was given (or a bare basename) and it doesn't resolve from
+  # the current directory, fall back to resolving it against the repo root. This
+  # keeps `bin/pull_sources sources.md` working no matter which directory it's run from.
+  if [[ ! -f "$sources_file" && "$sources_file" != /* ]]; then
+    sources_file="$REPO_ROOT/$sources_file"
   fi
 
-  echo ">>> $cmd"
-  if "$runner" $args; then
-    ((success++))
-  else
-    echo "FAILED: $cmd"
-    ((failed++))
+  if [[ ! -f "$sources_file" ]]; then
+    echo "Skipping (not found): $sources_file"
+    echo ""
+    return
   fi
+
+  echo "Pulling sources from: $sources_file"
   echo ""
 
-done < "$SOURCES_FILE"
+  while IFS= read -r line; do
+    # Strip inline comments and trim whitespace
+    cmd="${line%%#*}"
+    cmd="${cmd%"${cmd##*[![:space:]]}"}"
+
+    # Skip empty lines
+    [[ -z "$cmd" ]] && continue
+
+    # Extract the tool name (first word)
+    tool="${cmd%% *}"
+
+    # Resolve to bin/ wrapper if available, else fall back to python3 utils/
+    if [[ -x "$SCRIPT_DIR/$tool" ]]; then
+      runner="$SCRIPT_DIR/$tool"
+      args="${cmd#* }"
+    else
+      echo "Unknown command: $tool — skipping"
+      continue
+    fi
+
+    echo ">>> $cmd"
+    if "$runner" $args; then
+      ((success++))
+    else
+      echo "FAILED: $cmd"
+      ((failed++))
+    fi
+    echo ""
+
+  done < "$sources_file"
+}
+
+for f in "${SOURCES_FILES[@]}"; do
+  process_file "$f"
+done
 
 # Write export manifest for brain-sync
 MANIFEST="$REPO_ROOT/src/.last_export.json"

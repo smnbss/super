@@ -154,7 +154,7 @@ gbrain MCP tools:
 - `mcp__gbrain__query` with `"<person name> <team name> recent updates"`
 
 Check:
-- `src/gws/gmeet/` — recent meeting notes mentioning this person
+- `src/gmeet/` — recent meeting notes mentioning this person
 - `outputs/agents/my-workflowy/` — recent WorkFlowy entries for their section
 - `outputs/agents/tech-linear-project-updates/` — recent project update reports
 

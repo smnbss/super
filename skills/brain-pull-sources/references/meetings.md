@@ -6,7 +6,7 @@ Collect all meeting artifacts from yesterday (or a date range) and organize them
 
 ```
 TIMEZONE: Europe/Rome
-OUTPUT_DIR: src/gws/gmeet/YYYY/WNN/MM-DD
+OUTPUT_DIR: src/gmeet/YYYY/WNN/MM-DD
 DEFAULT_RANGE: yesterday (single day)
 CRON: 07:00 CET daily
 ```
@@ -173,7 +173,7 @@ Write `metadata.json` for each meeting:
 **IMPORTANT: Only create a per-meeting folder if the meeting has at least one content artifact** (notes.md, transcript.md, recording.md, or agenda.md). Meetings with no artifacts should appear in the digest and index but NOT get their own folder. Do not create folders containing only metadata.json — this creates clutter with no value.
 
 ```
-src/gws/gmeet/
+src/gmeet/
   YYYY/
     WNN/                  (ISO week number, e.g. W14)
       MM-DD/
@@ -193,7 +193,7 @@ src/gws/gmeet/
   YYYY-ytd-digest.md         (year-to-date: decisions tracker, action items, resolved items)
 ```
 
-Compute the week number with ISO week numbering (Monday start). Example: `2026-03-31` is week 14 → `src/gws/gmeet/2026/W14/03-31/`.
+Compute the week number with ISO week numbering (Monday start). Example: `2026-03-31` is week 14 → `src/gmeet/2026/W14/03-31/`.
 
 **Slug convention:** lowercase, spaces to hyphens, strip special chars (`/`, `:`, `(`, `)`, `'`, `"`), collapse multiple hyphens. Example: `"Simone / Cass 1:1"` → `simone-cass-1on1`.
 
@@ -275,7 +275,7 @@ Aggregate all per-meeting summaries into the daily digest:
 - Map decisions to the right L2 file based on topic (releases, teams, data, product areas, etc.)
 - If no meetings produced L2-worthy decisions, omit the Brain Updates section entirely
 
-Save as `src/gws/gmeet/YYYY/WNN/MM-DD/MM-DD-digest.md`.
+Save as `src/gmeet/YYYY/WNN/MM-DD/MM-DD-digest.md`.
 
 ## Step 7 — Generate weekly digest
 
@@ -314,7 +314,7 @@ Read all daily digests for the week and produce:
 - L2/file.md: ACTION description (aggregated from daily digests)
 ```
 
-Save as `src/gws/gmeet/YYYY/WNN/WNN-weekly-digest.md`.
+Save as `src/gmeet/YYYY/WNN/WNN-weekly-digest.md`.
 
 The weekly digest aggregates and deduplicates Brain Updates from the daily digests. If multiple daily digests update the same L2 file, combine them into one update with the latest state.
 
@@ -364,7 +364,7 @@ What recurring topics dominated meetings this month? What shifted from last mont
 - L2/file.md: ACTION description (aggregated from weekly digests, deduplicated)
 ```
 
-Save as `src/gws/gmeet/YYYY/MM-monthly-digest.md`.
+Save as `src/gmeet/YYYY/MM-monthly-digest.md`.
 
 The monthly digest is the executive summary. It should be readable in 2 minutes and
 capture what someone who missed the entire month needs to know.
@@ -422,7 +422,7 @@ what shifted, what carried forward.
 Threads that span multiple months. What's accelerating? What stalled?
 ```
 
-Save as `src/gws/gmeet/YYYY/YYYY-ytd-digest.md`.
+Save as `src/gmeet/YYYY/YYYY-ytd-digest.md`.
 
 The YTD digest is cumulative. Each run should preserve and update the decision tracker
 and action item tracker from prior runs, marking items as resolved when later meetings

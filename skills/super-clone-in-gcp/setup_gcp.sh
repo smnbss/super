@@ -14,8 +14,12 @@ usage() {
   cat <<'EOF'
 Usage: setup_gcp.sh [project-dir] [sources.md] [options]
 
+By default both sources.md (non-GitHub → src/) and sources.github.md (repos →
+github/) are copied to the VM. An explicit --source names a single file that
+lands as ~/brain/sources.md and skips the sources.github.md companion.
+
 Options:
-  --source <file>         Use <file> instead of sources.md
+  --source <file>         Use <file> as the sole sources file (instead of sources.md + sources.github.md)
   --project <id>          Override the GCP project ID
   --zone <zone>           Override the Compute Engine zone
   --machine-type <type>   Machine type (default: e2-standard-4)
@@ -493,9 +497,9 @@ fi
 # Also bootstrap super + XRDP session for the local clone user (XRDP login target)
 CLONE_USER="$(curl -fsSL "http://metadata.google.internal/computeMetadata/v1/instance/attributes/brain-clone-username" -H "Metadata-Flavor: Google" 2>/dev/null || true)"
 if [[ -n "$CLONE_USER" && -d "/home/$CLONE_USER" ]]; then
-  # Seed the clone user's ~/brain with the same .env.local and sources.md
+  # Seed the clone user's ~/brain with the same .env.local + sources files
   sudo mkdir -p "/home/$CLONE_USER/brain"
-  for f in .env.local sources.md; do
+  for f in .env.local sources.md sources.github.md; do
     if [[ -f "$HOME/brain/$f" ]]; then
       sudo cp "$HOME/brain/$f" "/home/$CLONE_USER/brain/$f"
     fi
@@ -684,6 +688,12 @@ gcloud_ssh --command "mkdir -p ~/brain"
 gcloud_scp "$ENV_LOCAL" "$INSTANCE_NAME:~/brain/.env.local"
 if [[ -f "$SOURCES_MD" ]]; then
   gcloud_scp "$SOURCES_MD" "$INSTANCE_NAME:~/brain/sources.md"
+fi
+# Sources are split: sources.md (non-GitHub → src/) + sources.github.md (repos → github/).
+# With an explicit --source override the user names a single file, so only copy the
+# companion sources.github.md on the default (non-override) path.
+if [[ -z "$EXPLICIT_SOURCES" && -f "$PROJECT_DIR/sources.github.md" ]]; then
+  gcloud_scp "$PROJECT_DIR/sources.github.md" "$INSTANCE_NAME:~/brain/sources.github.md"
 fi
 gcloud_scp "$REMOTE_BOOTSTRAP" "$INSTANCE_NAME:~/.super-bootstrap.sh"
 

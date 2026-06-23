@@ -82,7 +82,7 @@ if ! orb_exists "$BASE_MACHINE"; then
     # Pre-Depends on snapd and redirects to the chromium snap — the snap
     # binary does not integrate well with XRDP (exo-open/xdg-open fail with
     # "Failed to execute default web browser"). Install Google Chrome from
-    # Google's apt repository instead; it covers both GUI (XRDP desktop
+    # Google apt repository instead; it covers both GUI (XRDP desktop
     # entry) and headless (--remote-debugging-port) use cases and works
     # out of the box with Playwright and Chrome DevTools MCP.
     wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg
@@ -217,6 +217,12 @@ orb -m "$MACHINE" bash -c 'mkdir -p ~/brain'
 orb push -m "$MACHINE" "$ENV_LOCAL" brain/.env.local
 if [ -f "$SOURCES_MD" ]; then
   orb push -m "$MACHINE" "$SOURCES_MD" brain/sources.md
+fi
+# Sources are split: sources.md (non-GitHub → src/) + sources.github.md (repos → github/).
+# With an explicit --source override the user names a single file, so only push the
+# companion sources.github.md on the default (non-override) path.
+if [ -z "$EXPLICIT_SOURCES" ] && [ -f "$PROJECT_DIR/sources.github.md" ]; then
+  orb push -m "$MACHINE" "$PROJECT_DIR/sources.github.md" brain/sources.github.md
 fi
 
 # OrbStack symlinks /etc/resolv.conf -> /opt/orbstack-guest/etc/resolv.conf

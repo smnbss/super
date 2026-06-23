@@ -40,7 +40,7 @@ The current directory (or an ancestor **strictly between cwd and `$HOME`**) must
 1. `<project>/.super/brain.config.yml` — the project-scoped config consumed by every `brain-*` skill (org, role, Linear slug, Medium handle, source toggles, teams)
 2. `<project>/{agents,memory,outputs,src}/` — scaffolded if missing
 3. `<project>/.env.local` — copied from `~/.super/references/env.example` (only if the file doesn't already exist). The brain pull/rebuild skills read this for tokens. The user fills in the secrets after setup.
-4. `<project>/sources.md` — generated from `~/.super/skills/brain-pull-sources/references/sources.md` (only if the file doesn't already exist)
+4. `<project>/sources.md` + `<project>/sources.github.md` — generated from the matching templates in `~/.super/skills/brain-pull-sources/references/` (each only if it doesn't already exist). `sources.md` lists non-GitHub sources (→ `src/`); `sources.github.md` lists `github_clone` repos (→ `github/`).
 
 ## Flow
 
@@ -153,21 +153,25 @@ The `teams[]` list is awkward to collect question-by-question. Offer three choic
 
 For option 2: read the existing `teams:` block span (from `^teams:` to either the next top-level key or EOF), then replace. Validate the pasted YAML parses as a list before writing.
 
-### Step 10 — sources.md
+### Step 10 — sources.md + sources.github.md
 
-Ask: *"Generate a starter `sources.md` at `<project>/sources.md`?"* (Yes/No).
+Sources are split across two files by where their output lands: `sources.md`
+holds non-GitHub sources (→ `src/`) and `sources.github.md` holds `github_clone`
+repos (→ `github/`). Generate both (each is independently write-once).
 
-- If `<project>/sources.md` already exists → tell the user and skip regardless of their answer.
+Ask: *"Generate starter `sources.md` + `sources.github.md` at `<project>/`?"* (Yes/No).
+
+- For each of the two files: if it already exists → tell the user and skip that one regardless of their answer.
 - If Yes and missing:
-  1. Read `~/.super/skills/brain-pull-sources/references/sources.md`
+  1. Read the matching template — `~/.super/skills/brain-pull-sources/references/sources.md` and `~/.super/skills/brain-pull-sources/references/sources.github.md`
   2. Substitute placeholders using the collected answers:
      - `<your-org>` → the Linear slug (or ask separately for the Confluence/Atlassian subdomain if different)
-     - `<org>` in github lines → the first GitHub org from Step 7
+     - `<org>` in github lines (sources.github.md) → the first GitHub org from Step 7
      - `<your-folder-id>` → ask the user for a top-level GDrive folder ID (skip the line if they don't have one)
      - `<SPACE_KEY>` → ask for the Confluence space key (skip the line if Confluence disabled)
      - `<TEAM_KEY>` → leave as-is (per-team; user fills in manually)
      - `<your-domain>` → ask for the Metabase hostname (skip if Metabase disabled)
-  3. Write to `<project>/sources.md`
+  3. Write `<project>/sources.md` and `<project>/sources.github.md`
 
 ### Step 11 — Re-run `super install` if new env vars landed
 
@@ -188,7 +192,7 @@ Print a concise summary:
 - Brain root: `<project>`
 - Config file: `<project>/.super/brain.config.yml` — N values changed
 - Dirs scaffolded: <list>
-- Sources file: `<project>/sources.md` — created / skipped / existing
+- Sources files: `<project>/sources.md` + `<project>/sources.github.md` — created / skipped / existing
 - Env file: `<project>/.env.local` — created / skipped / existing
 - `super install` — ran (N times)
 
@@ -196,7 +200,7 @@ Then suggest:
 
 ```
 Next steps (run from inside the brain project):
-  1. Edit sources.md to add your actual source URLs and repos
+  1. Edit sources.md (non-GitHub) + sources.github.md (repos) with your actual URLs
   2. /brain-pull-sources         → populate src/
   3. /brain-rebuild-services     → generate service docs
   4. /brain-rebuild-memory       → build L1/L2 navigation
@@ -212,7 +216,7 @@ Next steps (run from inside the brain project):
 - **Never clobber silently** — every write must show the user what's changing. Use the Edit tool's diff output.
 - **Preserve comments and layout** — targeted Edits only; no whole-file rewrites.
 - **Defaults are current values** — if a key already has a non-sample value, show it and ask "keep?" first.
-- **`<project>/sources.md` is write-once** — never overwrite if it exists; note and move on.
+- **`<project>/sources.md` and `<project>/sources.github.md` are write-once** — never overwrite either if it exists; note and move on.
 - **Source toggles cascade** — disabling a source should skip its follow-up questions, not leave dead keys. Leave the source block in the YAML but set `enabled: false`.
 - **Short questions** — one decision per `AskUserQuestion` call. No walls of text.
 - **Abortable** — at any step the user can say "stop" / "skip" / "I'll edit by hand" and the skill should exit cleanly, reporting what was written so far.

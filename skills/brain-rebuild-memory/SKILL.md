@@ -61,7 +61,7 @@ For each top-level directory in `src/`, count files and list immediate children:
 | `src/confluence/` | `Intranet/`, `Monkeys Wiki/` |
 | `src/gdrive/` | `Monkeys/`, `Monkeys Heads/`, `Monkeys_Projects/`, `<Org> ExCo/`, `<Org>/` |
 | `github/` | `<org>/` (repos), personal repos |
-| `src/gws/` | `gmeet/` (2025/, 2026/) — meeting transcripts by year |
+| `src/gmeet/` | `2025/`, `2026/` — meeting transcripts by year |
 | `src/linear/` | `<org>/` (`MOL-issues/`, `all/`) |
 | `src/medium/` | `smnbss/` — Simone's blog posts |
 | `src/metabase/` | `<org>/` — collection/dashboard/card index |
@@ -189,7 +189,7 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2h. meetings.md
 
-**Inputs:** `src/gws/gmeet/` (year/month/day structure)
+**Inputs:** `src/gmeet/` (year/month/day structure)
 
 - Count meetings per month
 - Date range covered

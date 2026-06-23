@@ -2,7 +2,7 @@
 name: super-clone-in-gcp
 description: >-
   Create a persistent GCP Ubuntu machine pre-configured for the current project,
-  copying `.env.local` and `sources.md`. Optional GNOME desktop via XRDP.
+  copying `.env.local`, `sources.md`, and `sources.github.md`. Optional GNOME desktop via XRDP.
 ---
 
 # /super-clone-in-gcp
@@ -31,7 +31,8 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --network weroad-vpc-1-development --subnet weroad-eu-subnet-1-development
    ```
-   To copy a specific sources file (e.g. `sources.dev.super.md`) instead of the default `sources.md`, pass it positionally or via `--source`:
+   By default it copies both `sources.md` (non-GitHub → `src/`) and `sources.github.md` (repos → `github/`).
+   To copy a single specific sources file (e.g. `sources.dev.super.md`) as `sources.md` instead, pass it positionally or via `--source` (this skips the `sources.github.md` companion):
    ```bash
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh sources.dev.super.md
    <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --source sources.dev.super.md
@@ -62,7 +63,7 @@ The script will:
 - Run a startup script that installs: `git`, `curl`, `zstd`, Node.js 20.19.0, Ollama, Chromium, the Google Cloud CLI, and the `@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli` npm globals
 - With `--desktop`: additionally install GNOME (`ubuntu-desktop-minimal`) and XRDP, force the GNOME-on-Xorg session for xrdp, create the `allow-xrdp` firewall rule, and print the RDP connection address
 - Create/update the `allow-ssh` (and, with `--desktop`, `allow-xrdp`) firewall rules so they only permit traffic from the caller's current public IPv4 (auto-detected via `curl -4 https://api.ipify.org` with fallbacks). Override with `--source-ip`. The IP is refreshed on every run — including `--name` reuse — so the lockdown tracks your current IP if it changes. If detection fails and no `--source-ip` is given, the script aborts rather than falling back to `0.0.0.0/0`.
-- Wait for SSH readiness, copy `.env.local` and optional `sources.md`, then bootstrap `super` (git clone into `~/.super` + `super install --all`)
+- Wait for SSH readiness, copy `.env.local` plus `sources.md` and `sources.github.md` (or, with `--source`, just the single explicit file as `sources.md`), then bootstrap `super` (git clone into `~/.super` + `super install --all`)
 - Print the SSH command plus manual start/stop/delete commands for the workstation
 
 ## Environment Variables
