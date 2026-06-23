@@ -1,0 +1,32 @@
+#!/bin/bash
+# Google Meet / Calendar meeting-notes harvester (deterministic, no LLM).
+# Usage: gmeet_to_md <email> [--since YYYY-MM-DD | --day YYYY-MM-DD | --days N] [--force]
+#        gmeet_to_md --list
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Find a Python interpreter that has markitdown installed (used to convert
+# non-Google-Doc attachments — PDF/PPTX/DOCX). Plain harvest works without it;
+# attachments just fall back to a Drive-link stub.
+PYTHON="python3"
+
+if python3 -c "import markitdown" 2>/dev/null; then
+    PYTHON="python3"
+elif [ -x "$HOME/.local/pipx/venvs/markitdown/bin/python" ]; then
+    PYTHON="$HOME/.local/pipx/venvs/markitdown/bin/python"
+elif command -v markitdown >/dev/null 2>&1; then
+    MARKITDOWN_BIN="$(command -v markitdown)"
+    if command -v readlink >/dev/null 2>&1; then
+        RESOLVED="$(readlink -f "$MARKITDOWN_BIN" 2>/dev/null || python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$MARKITDOWN_BIN")"
+        [ -n "$RESOLVED" ] && MARKITDOWN_BIN="$RESOLVED"
+    fi
+    if [[ "$MARKITDOWN_BIN" == */bin/markitdown ]]; then
+        VENV_PYTHON="${MARKITDOWN_BIN%/bin/markitdown}/bin/python"
+        if [ -x "$VENV_PYTHON" ] && "$VENV_PYTHON" -c "import markitdown, mammoth" 2>/dev/null; then
+            PYTHON="$VENV_PYTHON"
+        fi
+    fi
+fi
+
+exec "$PYTHON" "$PROJECT_ROOT/utils/gmeet_to_md.py" "$@"

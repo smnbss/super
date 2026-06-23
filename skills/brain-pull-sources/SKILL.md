@@ -20,9 +20,9 @@ All paths below are relative to the repo root (`git rev-parse --show-toplevel`).
 | Agent scripts | `bin/` (relative to this skill) |
 | Python utilities | `utils/` (relative to this skill) |
 | Reference templates | `references/` (relative to this skill) |
-| Source manifest | `sources.md` (repo root) |
+| Source manifests | `sources.md` + `sources.github.md` (repo root) |
 | Secrets | `.env.local` (repo root, gitignored) |
-| Export output | `src/clickup/`, `src/confluence/`, `src/gdrive/`, `github/`, `src/linear/`, `src/medium/` |
+| Export output | non-GitHub → `src/clickup/`, `src/confluence/`, `src/gdrive/`, `src/linear/`, `src/medium/`, `src/metabase/`; GitHub → `github/<owner>/<repo>/` |
 | Last export manifest | `src/.last_export.json` |
 
 **Resolving the skill path at runtime:**
@@ -36,7 +36,14 @@ When installed via the Claude marketplace, resolve the path dynamically.
 
 ### Environment check (run first)
 
-If `sources.md` does not exist at the repo root, create one by copying `references/sources.md` from this skill's directory
+Sources are split across two files at the repo root, by where their output lands:
+
+| File | Holds | Output tree |
+|------|-------|-------------|
+| `sources.md` | every non-GitHub source (ClickUp, Confluence, Drive, Medium, Linear, Metabase) | `src/<source>/` |
+| `sources.github.md` | `github_clone` lines only | `github/<owner>/<repo>/` |
+
+If either file is missing at the repo root, create it by copying the matching template from this skill's `references/` directory (`references/sources.md`, `references/sources.github.md`).
 
 Before doing anything else, verify `.env.local` exists and has all required keys
 Only proceed to the pipeline once all keys are present and non-empty.
@@ -55,7 +62,7 @@ Only proceed to the pipeline once all keys are present and non-empty.
 
 ---
 
-Source commands in `sources.md`:
+Source commands (the `github_clone` command lives in `sources.github.md`; all the rest live in `sources.md`):
 - `clickup_doc_to_md <url>` — export ClickUp docs
 - `clickup_prj_to_md <url>` — export ClickUp project/folder roadmap lists
 - `confluence_space_to_md <url>` — export Confluence spaces
@@ -65,6 +72,7 @@ Source commands in `sources.md`:
 - `linear_to_md <url>` — export Linear projects
 - `linear_issues_to_md <url>` — export ALL issues for a Linear team (including triage)
 - `metabase_index <url>` — export full Metabase index
+- `gmeet_to_md <email>` — harvest meeting notes/agendas/recordings/attachments the email is invited to (Google Calendar + Drive) into `src/gmeet/`; deterministic Steps 1–5 of `brain-pull-my-meeting-notes`, no LLM digests. Incremental via `src/gmeet/.registry.json`; `--since` / `--day` / `--days` / `--force` / `--list`. Assumes `email` == the authenticated gws user.
 
 GitHub repos are full clones (~48 repos from the IDP service catalog).
 
@@ -78,13 +86,14 @@ The sync runs in three phases.
 
 **Step 1: Re-export sources**
 
-Run the export pipeline (works from any directory — `sources.md` is resolved against the repo root):
+Run the export pipeline (works from any directory — the sources files are resolved against the repo root):
 
 ```bash
-bin/pull_sources              # defaults to <repo-root>/sources.md
+bin/pull_sources              # no args → reads BOTH sources.md and sources.github.md
+bin/pull_sources sources.md   # or pass explicit file(s) to process just those
 ```
 
-This reads `sources.md` line by line, strips `#` comments, and runs each command via `bin/<tool>`. It writes `src/.last_export.json` with a timestamp and success/failure counts.
+With no arguments it reads both `sources.md` (→ `src/`) and `sources.github.md` (→ `github/`), line by line, strips `#` comments, and runs each command via `bin/<tool>`. It writes `src/.last_export.json` with a timestamp and combined success/failure counts.
 
 If any source fails (expired token, network error), it's logged and skipped — a partial sync is better than no sync.
 
