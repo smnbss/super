@@ -13,10 +13,10 @@ without reading every source file.
 ## Input
 
 The user provides a repo name. Resolve it:
-- `community` → `src/github/<org>/community/`
-- `<org>/repo-name` → `src/github/<org>/repo-name/`
+- `community` → `github/<org>/community/`
+- `<org>/repo-name` → `github/<org>/repo-name/`
 
-If the repo directory doesn't exist in `src/github/`, stop and tell the user.
+If the repo directory doesn't exist in `github/`, stop and tell the user.
 
 ## Process
 
@@ -97,9 +97,9 @@ concept (e.g., no DB for a stateless service).
 # {owner}/{repo}
 
 > {One-line description — what the service does in the ecosystem}
-**Source:** `src/github/{owner}/{repo}/`
+**Source:** `github/{owner}/{repo}/`
 
-<!-- verified: {today YYYY-MM-DD} | source: src/github/{owner}/{repo}/ -->
+<!-- verified: {today YYYY-MM-DD} | source: github/{owner}/{repo}/ -->
 
 ## Stack
 {Bullet list: framework, language, runtime, DB, ORM, cache, messaging, auth, key libs, version}
@@ -250,9 +250,9 @@ Check these indicators **in order** (stop at first match):
 # {owner}/{repo} — Database Schema
 
 > <one-line description of what this database stores>
-**Source:** `src/github/{owner}/{repo}/`
+**Source:** `github/{owner}/{repo}/`
 
-<!-- verified: {today YYYY-MM-DD} | source: src/github/{owner}/{repo}/ -->
+<!-- verified: {today YYYY-MM-DD} | source: github/{owner}/{repo}/ -->
 
 ## Overview
 

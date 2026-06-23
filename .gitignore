@@ -18,6 +18,6 @@ super-debug.log
 .codex/.codex
 .claude/.claude
 .gemini/.gemini
-src/github/
+github/
 skills/brain-linear-release-summary-workspace/
 skills/brain-linear-release-deck-workspace/

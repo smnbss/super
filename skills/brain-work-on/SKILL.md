@@ -2,7 +2,7 @@
 name: brain-work-on
 description: >
   Bootstrap a working session on a specific project or capability by loading all
-  relevant context — DEVELOPER.md, matching repos in src/github, service docs in
+  relevant context — DEVELOPER.md, matching repos in github, service docs in
   outputs/services, and prior project workspace notes in outputs/projects. Use
   when the user says "work on <name>", "/brain-work-on <name>", "start working on",
   "I want to build <x>", "let's build <x>", or passes a project/capability name
@@ -39,7 +39,7 @@ multi-project requests almost always mean "I'm working across a seam" — making
 the seam explicit up front saves the model from re-deriving it mid-task.
 
 Each name may match:
-- A repo under `src/github/<org>/<name>` (exact match preferred, then substring)
+- A repo under `github/<org>/<name>` (exact match preferred, then substring)
 - A service doc at `outputs/services/<name>.AGENT.MD` or `*<name>*.AGENT.MD`
 - A project workspace at `outputs/projects/<name>/`
 
@@ -58,9 +58,9 @@ Check for `DEVELOPER.md` at the repo root (`$BRAIN_ROOT/DEVELOPER.md`, typically
 This is the baseline: how WeRoad code runs locally and which shared resources
 matter. Without it the session may miss tooling expectations.
 
-## Step 2 — Find matching repos in `src/github`
+## Step 2 — Find matching repos in `github`
 
-The GitHub export is organized by org: `src/github/<org>/<repo>`.
+The GitHub export is organized by org: `github/<org>/<repo>`.
 
 Run both passes and **classify each hit** — the exact/substring distinction
 matters because substring matches on short names (like `catalog`) can pull in
@@ -68,9 +68,9 @@ matters because substring matches on short names (like `catalog`) can pull in
 
 1. **Exact match pass:**
    ```
-   src/github/*/<name>
+   github/*/<name>
    ```
-   (e.g., `src/github/weroad/ask-weroad`, `src/github/smnbss/ask-weroad`).
+   (e.g., `github/weroad/ask-weroad`, `github/smnbss/ask-weroad`).
    Tag these as `exact`.
 
 2. **Substring pass:** list any directory whose name **contains** the input as
@@ -106,7 +106,7 @@ existing surface that just isn't named literally. Instead:
    repos/surfaces the user might mean, based on where the name shows up
    (service docs, project notes, memory files).
 3. Ask the user:
-   > "No repo named `<name>` in `src/github`. Did you mean one of these:
+   > "No repo named `<name>` in `github`. Did you mean one of these:
    > <A>, <B>, <C>? Or is this a new capability to build from scratch?"
 4. Only after the user confirms "new capability" (or the gbrain pass truly
    returns nothing related) should the skill frame this as greenfield.
@@ -165,7 +165,7 @@ add the cross-project synthesis section if more than one name was given.
 
 **Developer guide:** <loaded | missing>
 
-**Matching repos** (src/github):
+**Matching repos** (github):
 - [exact] <org>/<repo> — <one-line stack + purpose>
 - [substring] <org>/<repo> — <one-line stack + purpose>
 - ...

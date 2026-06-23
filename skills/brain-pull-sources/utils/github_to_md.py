@@ -16,7 +16,7 @@ Examples:
     # Force re-export all files
     python github_to_md.py https://github.com/org/repo --force
 
-Output is saved to: src/github/<owner>/<repo>/
+Output is saved to: github/<owner>/<repo>/
 
 Environment:
     GITHUB_TOKEN -- Personal access token (or use --token)

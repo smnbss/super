@@ -22,7 +22,7 @@ All paths below are relative to the repo root (`git rev-parse --show-toplevel`).
 | Reference templates | `references/` (relative to this skill) |
 | Source manifest | `sources.md` (repo root) |
 | Secrets | `.env.local` (repo root, gitignored) |
-| Export output | `src/clickup/`, `src/confluence/`, `src/gdrive/`, `src/github/`, `src/linear/`, `src/medium/` |
+| Export output | `src/clickup/`, `src/confluence/`, `src/gdrive/`, `github/`, `src/linear/`, `src/medium/` |
 | Last export manifest | `src/.last_export.json` |
 
 **Resolving the skill path at runtime:**
@@ -60,7 +60,7 @@ Source commands in `sources.md`:
 - `clickup_prj_to_md <url>` — export ClickUp project/folder roadmap lists
 - `confluence_space_to_md <url>` — export Confluence spaces
 - `drive_to_md <url> [--mode full|index]` — export a Google Drive folder. **Default `--mode full`**: downloads + converts every file to `.md` (via markitdown) and also writes a per-folder `INDEX.md` with links to both the local `.md` and the original Drive file. **`--mode index`**: skips downloads and writes only per-folder `INDEX.md` catalogs (title + link + type + metadata). Use `index` for large/low-signal folders where full export is overkill. Output (both modes): `src/gdrive/<Drive Name>/<sub/path>/`. Registry at `src/gdrive/.registry.json`. Supports `--list` to review previously exported folders, `--full-rebuild` to ignore the folder-tree cache, and `--force` to re-download every file (full mode). Every converted `.md` carries YAML frontmatter with `gdrive_id`, `gdrive_url`, `gdrive_name`, `gdrive_mime`, `gdrive_modified`, and `gdrive_path` so downstream tools can cite the original Drive file.
-- `github_clone <url>` — full-clone or update a GitHub repo into `src/github/<owner>/<repo>/`
+- `github_clone <url>` — full-clone or update a GitHub repo into `github/<owner>/<repo>/`
 - `medium_to_md <url>` — export Medium feed
 - `linear_to_md <url>` — export Linear projects
 - `linear_issues_to_md <url>` — export ALL issues for a Linear team (including triage)
@@ -92,7 +92,7 @@ If any source fails (expired token, network error), it's logged and skipped — 
 
 For each L2 file in `memory/L2/`, scan the `<!-- verified: ... | source: ... -->` comments. Compare the `verified:` date against source file change dates.
 
-- **Git repos** (`src/github/`): use `git log -1 --format=%ci -- <file>` (git doesn't preserve mtime)
+- **Git repos** (`github/`): use `git log -1 --format=%ci -- <file>` (git doesn't preserve mtime)
 - **Other sources**: use `src/.last_export.json` timestamp
 
 Only process sources that changed since last run — do NOT re-read all files.
@@ -133,7 +133,7 @@ Apply these updates during reconciliation. REMOVE marks facts as `<!-- supersede
 
 **Step 6: Per-service docs**
 
-For each `src/github/` repo that changed since last sync:
+For each `github/` repo that changed since last sync:
 - Check if `outputs/services/<service>.AGENT.MD` exists and compare `verified:` date against `git log -1`
 - Stale service docs: re-read repo source and update stack, schema, messaging, auth, APIs sections
 - New repos without service docs: flag in the digest as candidates for doc creation

@@ -44,7 +44,7 @@ Export all external sources (ClickUp, Confluence, GDrive, Linear, GitHub, Medium
 ### 2b. Rebuild services (`brain-rebuild-services`)
 Regenerate deep technical `.AGENT.MD` service documentation from cloned GitHub repos. Only runs when repos have changed since last sync. Updates cross-cutting RabbitMQ topology files when messaging configs change.
 
-**Wait for:** Part 2a complete (needs `src/github/` updated with latest repos).
+**Wait for:** Part 2a complete (needs `github/` updated with latest repos).
 
 ### 2b.5. Additional morning agents (`agents/morning-start-additional/SKILL.md`)
 If `agents/morning-start-additional/SKILL.md` exists, read it and execute any `run <path>` directives it contains, in order. Skip this step if the file does not exist.
@@ -240,7 +240,7 @@ Part 5: Final report
 
 **Dependency chain:**
 1. `brain-pull-sources` exports all external sources to `src/`
-2. `brain-rebuild-services` reads `src/github/`, writes `outputs/services/*.AGENT.MD`
+2. `brain-rebuild-services` reads `github/`, writes `outputs/services/*.AGENT.MD`
 3. `brain-rebuild-memory` reads `src/` + `outputs/services/`, writes `memory/L1/` + `memory/L2/`
 4. Meeting prep skills read `memory/L1/teams.md` and `memory/L1/team-members.md`
 

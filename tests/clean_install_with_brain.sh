@@ -9,8 +9,8 @@ set -euo pipefail
 # =============================================================================
 
 BRAIN_DIR="${PWD}"
-SUPER_REPO="${BRAIN_DIR}/src/github/smnbss/super"
-BRAIN_REPO="${BRAIN_DIR}/src/github/smnbss/brain"
+SUPER_REPO="${BRAIN_DIR}/github/smnbss/super"
+BRAIN_REPO="${BRAIN_DIR}/github/smnbss/brain"
 HOME_SUPER="${HOME}/.super"
 REPORT_FILE="/tmp/super_clean_install_report_$(date +%s).txt"
 ERRORS=0

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full-clone or update a GitHub repo into src/github/<owner>/<repo>/
+# Full-clone or update a GitHub repo into github/<owner>/<repo>/
 # Usage: github_clone <github_repo_url>
 #
 # If the repo already exists locally, pulls latest changes.
@@ -9,7 +9,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
-OUTPUT_BASE="$PROJECT_ROOT/src/github"
+OUTPUT_BASE="$PROJECT_ROOT/github"
 
 URL="$1"
 if [[ -z "$URL" ]]; then

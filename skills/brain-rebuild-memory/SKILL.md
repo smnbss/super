@@ -60,7 +60,7 @@ For each top-level directory in `src/`, count files and list immediate children:
 | `src/clickup/` | `Docs BUKTU/`, `Docs Tium/`, `🐵 Monkeys Wiki/` |
 | `src/confluence/` | `Intranet/`, `Monkeys Wiki/` |
 | `src/gdrive/` | `Monkeys/`, `Monkeys Heads/`, `Monkeys_Projects/`, `<Org> ExCo/`, `<Org>/` |
-| `src/github/` | `<org>/` (repos), personal repos |
+| `github/` | `<org>/` (repos), personal repos |
 | `src/gws/` | `gmeet/` (2025/, 2026/) — meeting transcripts by year |
 | `src/linear/` | `<org>/` (`MOL-issues/`, `all/`) |
 | `src/medium/` | `smnbss/` — Simone's blog posts |
@@ -100,7 +100,7 @@ Record all counts — they go in the Phase 5 digest.
    ```
    Missing / unparseable → treat every target as dirty (equivalent to full rebuild) and keep going.
 
-2. For every L2 and L1 target listed in Phases 2–3 below, compute `current_max_mtime` = max `mtime` of all files matched by that target's `inputs` globs. Primary check is mtime (fast, good enough on 446K-file `src/github/`).
+2. For every L2 and L1 target listed in Phases 2–3 below, compute `current_max_mtime` = max `mtime` of all files matched by that target's `inputs` globs. Primary check is mtime (fast, good enough on 446K-file `github/`).
 
 3. Mark a target **dirty** when any of:
    - target file does not exist on disk, **or**
@@ -143,7 +143,7 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2b. technologies.md
 
-**Inputs:** `outputs/services/*.AGENT.MD` (stack sections) + `src/github/<org>/` (repo languages/frameworks)
+**Inputs:** `outputs/services/*.AGENT.MD` (stack sections) + `github/<org>/` (repo languages/frameworks)
 
 - Aggregate tech stacks from all service docs (language, framework, DB, messaging)
 - Group by layer: frontend, backend, data, infra
@@ -259,7 +259,7 @@ For each source in `src/`, create/update `memory/L1/<source>.md`:
 | `clickup.md` | `src/clickup/` structure + L2 files that cite clickup |
 | `confluence.md` | `src/confluence/` structure + L2 files that cite confluence |
 | `gdrive.md` | `src/gdrive/` structure + L2 files that cite gdrive |
-| `github.md` | `src/github/` structure + L2 files that cite github |
+| `github.md` | `github/` structure + L2 files that cite github |
 | `metabase.md` | `src/metabase/` structure + L2 files that cite metabase |
 
 Each source MOC contains:
