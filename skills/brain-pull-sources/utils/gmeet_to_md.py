@@ -11,13 +11,21 @@ and writes per-meeting folders + a static per-day index.md. It does NOT produce
 the daily/weekly/monthly/YTD digests — those stay in the skill (they need an LLM).
 
 Usage:
-    gmeet_to_md <email>                      # incremental: last_harvested+1 .. yesterday
-                                             #   (first run for an email: yesterday only)
+    gmeet_to_md <email>                      # default: full span last_harvested .. today,
+                                             #   re-harvested every run (idempotent — safe to
+                                             #   loop every 15 min; the whole range is re-checked
+                                             #   so notes added after a meeting ended are captured.
+                                             #   First run for an email: yesterday + today)
     gmeet_to_md <email> --since 2026-06-01   # that date .. yesterday, inclusive
     gmeet_to_md <email> --day 2026-06-20     # a single specific day
     gmeet_to_md <email> --days 14            # trailing N days .. yesterday
-    gmeet_to_md <email> --force              # re-export even if the day folder exists
     gmeet_to_md --list                       # print the registry and exit
+
+Re-running always rebuilds each day in range non-destructively: CLI-owned files
+(metadata.json, notes.md, agenda.md, recording.md, attachment-*.md, index.md)
+are regenerated fresh, while day-level *-digest.md and per-meeting transcript.md
+are preserved. `last_harvested` in the registry tracks the latest COMPLETE day
+(never today).
 
 Assumes  email == the authenticated gws user  (email is passed as calendarId).
 A 403/404 from the calendar API is a hard error, never a silent fallback.
@@ -242,13 +250,16 @@ def resolve_range(args, last_harvested: str | None, today: date) -> list[date]:
         return list(daterange(parse_ymd(args.since), yesterday))
     if args.days:
         return list(daterange(yesterday - timedelta(days=args.days - 1), yesterday))
-    # No flag → incremental. First run (no registry) seeds with yesterday only.
+    # No flag → default: re-harvest the FULL span [last_harvested .. today],
+    # inclusive, on every run. The start is last_harvested itself (not +1), and
+    # every day in range is rebuilt non-destructively each pass — so notes and
+    # recordings added after a meeting ended are always re-captured, and a gap is
+    # self-healed. Safe to loop (e.g. every 15 min). First run (no registry)
+    # seeds with yesterday + today.
     if last_harvested:
-        start = parse_ymd(last_harvested) + timedelta(days=1)
-        if start > yesterday:
-            return []
-        return list(daterange(start, yesterday))
-    return [yesterday]
+        start = min(parse_ymd(last_harvested), today)
+        return list(daterange(start, today))
+    return list(daterange(yesterday, today))
 
 
 # -- slug / matching ----------------------------------------------------------
@@ -755,7 +766,8 @@ def main() -> int:
     ap.add_argument("--since", help="harvest from this YYYY-MM-DD through yesterday")
     ap.add_argument("--day", help="harvest a single YYYY-MM-DD")
     ap.add_argument("--days", type=int, help="harvest the trailing N days through yesterday")
-    ap.add_argument("--force", action="store_true", help="re-export even if a day folder exists")
+    ap.add_argument("--force", action="store_true",
+                    help="(no-op; kept for compatibility) every run already re-exports each day")
     ap.add_argument("--list", action="store_true", help="print the registry and exit")
     args = ap.parse_args()
 
@@ -798,21 +810,28 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    # Update registry — last_harvested = max day processed.
-    new_last = max(days).strftime("%Y-%m-%d")
+    # Update registry. `last_harvested` tracks the latest COMPLETE day captured,
+    # so today is excluded — the default run re-harvests today on every pass and
+    # today is not "done" until it becomes yesterday. The value only ever moves
+    # forward (a stale-then-default run keeps the older value if it's newer).
     now_iso = datetime.now(TIMEZONE).isoformat()
+    prev_last = entry.get("last_harvested") if entry else None
+    complete = [d for d in days if d < today]
+    cand = max(complete).strftime("%Y-%m-%d") if complete else None
+    recorded_last = max([x for x in (cand, prev_last) if x], default=None)
     if entry:
-        entry["last_harvested"] = max(new_last, entry.get("last_harvested") or new_last)
+        if recorded_last:
+            entry["last_harvested"] = recorded_last
         entry["last_synced"] = now_iso
         entry["stats"] = stats
     else:
-        reg.append({"email": args.email, "last_harvested": new_last,
+        reg.append({"email": args.email, "last_harvested": recorded_last,
                     "last_synced": now_iso, "stats": stats})
     save_registry(reg)
 
     print(f"Done. {stats['meetings']} meetings, {stats['notes']} notes, "
           f"{stats['recordings']} recordings, {stats['attachments']} attachments "
-          f"across {stats['days']} day(s). last_harvested={new_last}")
+          f"across {stats['days']} day(s). last_harvested={recorded_last}")
     return 0
 
 
