@@ -33,7 +33,7 @@ Before doing anything else, check whether `agents/morning-start-additional/SKILL
    ```bash
    launchctl bootout gui/$(id -u)/io.weroad.gbrain
    cd <brain-root> && set -a && source .env.local && set +a
-   gbrain import memory && gbrain import outputs && gbrain import src/clickup && gbrain import src/confluence \
+   gbrain import memory && gbrain import outputs && gbrain import src/clickup && gbrain import src/confluence && gbrain import src/outline \
      && gbrain import src/linear && gbrain import src/gmeet && gbrain import src/medium && gbrain import src/metabase && gbrain import src/gdrive
    gbrain embed --stale     # 3 chunks stay unembedded (403-filtered) — that's done; don't pipe through `| tail`
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.weroad.gbrain.plist
