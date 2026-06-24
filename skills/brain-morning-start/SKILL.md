@@ -28,7 +28,18 @@ Before doing anything else, check whether `agents/morning-start-additional/SKILL
 
 4. **Python packages** — run `uv sync --upgrade` to update the Python packages used by this repo.
 
-5. **gbrain reindex** — call `mcp__gbrain__sync_brain` to refresh the hybrid search index with any new content. It reindexes and embeds through the always-on HTTP server (`io.weroad.gbrain` on `:3131`), so it never contends for the PGLite writer lock — there is no CLI fallback, and none should be necessary. Note: `sync_brain` keeps embeddings fresh but does **not** materialize wikilinks into graph edges or extract timeline entries — that happens in Phase 4.5 of `brain-rebuild-memory` (Part 2c below), which calls `mcp__gbrain__add_link` and `mcp__gbrain__add_timeline_entry` directly over the running MCP server. No serve restart needed.
+5. **gbrain reindex** — there is **no** `mcp__gbrain__sync_brain` tool (it doesn't exist in CLI 0.42.38) and the queue worker is Postgres-only, so `submit_job(sync)` never drains. On PGLite, reindex + embed is a **stop-server CLI** operation. Run it after Part 2 has re-exported sources and rebuilt memory (so the import picks up everything in one pass):
+
+   ```bash
+   launchctl bootout gui/$(id -u)/io.weroad.gbrain
+   cd <brain-root> && set -a && source .env.local && set +a
+   gbrain import memory && gbrain import outputs && gbrain import src/clickup && gbrain import src/confluence && gbrain import src/outline \
+     && gbrain import src/linear && gbrain import src/gmeet && gbrain import src/medium && gbrain import src/metabase && gbrain import src/gdrive
+   gbrain embed --stale     # 3 chunks stay unembedded (403-filtered) — that's done; don't pipe through `| tail`
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.weroad.gbrain.plist
+   ```
+
+   (Shortcut: with the server stopped, invoking any `gbrain` CLI command auto-syncs configured sources.) The graph edges + timeline entries are written separately in Phase 4.5 of `brain-rebuild-memory` (Part 2c) via `mcp__gbrain__add_link` / `add_timeline_entry`, which DO work through the running MCP server with no restart. **Ordering caveat:** the graph writes need the server UP, but this reindex needs it DOWN — so do NOT run the reindex here in Part 1. Run it as the **final indexing step, after Part 2c (memory rebuild incl. its Phase 4.5 graph writes) completes**, then git-pull/commit. (Today's index state will simply reflect yesterday's content until this end-of-run reindex.)
 
 6. **Git pull** — run `git pull --rebase` to pull the latest brain changes.
 
@@ -204,7 +215,7 @@ Part 1: Tool updates (sequential)
   ├─ npm update -g
   ├─ gstack upgrade
   ├─ uv sync --upgrade
-  ├─ gbrain reindex (mcp__gbrain__sync_brain)
+  │  (gbrain reindex is NOT here — it's a stop-server CLI step run at the very end, after Part 2c)
   └─ git pull --rebase
   ↓
 Part 2a + Part 3 (parallel start)
