@@ -9,12 +9,14 @@ nodes in one request (rate-limited to ~1/min). We fetch it once, rebuild the
 tree via `parent_id`, order siblings by `priority`, and render the outline to
 Markdown under src/workflowly/.
 
-Layout — SIZE-THRESHOLD split (not fixed depth):
-    A node becomes a FOLDER only when its subtree exceeds --max-nodes (default
-    200) AND it has children; otherwise its whole subtree is inlined into a
-    single <name>.md as nested Markdown bullets. This adapts to a lopsided
-    outline automatically: huge branches fan out into folders, small ones stay
-    one file, and no file exceeds ~max-nodes bullets.
+Layout — size-threshold split:
+    A node fans out into a FOLDER only when its subtree exceeds --max-nodes
+    (default 200); otherwise its whole subtree is inlined into a single <name>.md
+    as nested Markdown bullets. So a small branch (e.g. a 1:1 week) stays one
+    file while a big one (a whole person's history) becomes a folder. Optionally
+    --min-folder-depth N forces the top N levels to folders even when small (but
+    only where a node has a non-leaf child, to avoid piles of one-line stubs);
+    the default 0 leaves the split purely size-driven.
 
 Incremental:
     src/workflowly/.registry.json records, per output file, the max `modifiedAt`
@@ -23,8 +25,8 @@ Incremental:
     the export are pruned, and emptied directories are removed.
 
 Usage:
-    python workflowly_to_md.py [--max-nodes N] [--force] [--no-completed]
-                               [--token TOKEN] [--list] [--verbose]
+    python workflowly_to_md.py [--max-nodes N] [--min-folder-depth N] [--force]
+                               [--no-completed] [--token TOKEN] [--list] [--verbose]
 
 Environment (first match wins):
     WORKFLOWY_API_KEY / WORKFLOWLY_API_KEY / workflowy   -- API bearer token
@@ -300,6 +302,15 @@ def subtree_max_modified(node: dict, children: dict) -> int:
 
 # -- Planning the output tree -------------------------------------------------
 
+def _claim_name(base: str, dir_used: set[str], node_id: str, ext: str = "") -> str:
+    """Reserve a collision-free entry name within a directory (id suffix on clash)."""
+    name = f"{base}{ext}"
+    if name.lower() in dir_used:
+        name = f"{base}-{node_id[:8]}{ext}"
+    dir_used.add(name.lower())
+    return name
+
+
 def plan_outputs(roots, children, size, prod, max_nodes, min_folder_depth):
     """Walk the tree and decide every output file.
 
@@ -308,16 +319,36 @@ def plan_outputs(roots, children, size, prod, max_nodes, min_folder_depth):
     in stable (depth-first, priority) order. `rel_path` is relative to
     PROJECT_ROOT. Sibling name collisions get an id suffix.
 
-    A node with children becomes a FOLDER when it is shallower than
-    `min_folder_depth` (the top levels are always folders) OR its subtree
-    exceeds `max_nodes`; otherwise its whole subtree is inlined into one file.
+    A node with children becomes a FOLDER when its subtree exceeds `max_nodes`,
+    OR it is shallower than `min_folder_depth` AND has at least one non-leaf
+    child (so forcing a folder yields real sub-structure, not a pile of
+    one-line stub files). Otherwise its whole subtree is inlined into one file —
+    so a small shallow node like a week with only leaf items stays a single file.
     """
     plan: list[dict] = []
+
+    def has_nonleaf_child(node: dict) -> bool:
+        """True if any rendered child of `node` itself has a rendered child."""
+        for c in children.get(node["id"], []):
+            if prod.get(c["id"]) and any(prod.get(g["id"]) for g in children.get(c["id"], [])):
+                return True
+        return False
 
     def is_folder(node: dict, depth: int) -> bool:
         if not children.get(node["id"]):
             return False
-        return depth < min_folder_depth or size[node["id"]] > max_nodes
+        if size[node["id"]] > max_nodes:
+            return True
+        return depth < min_folder_depth and has_nonleaf_child(node)
+
+    def add(kind: str, node: dict, rel_path: str, max_modified: int):
+        plan.append({
+            "kind": kind,
+            "node_id": node["id"],
+            "name": plain_text(node.get("name")),
+            "rel_path": rel_path,
+            "max_modified": max_modified,
+        })
 
     def emit(node: dict, cur_dir: str, used: dict[str, set], depth: int):
         if not prod.get(node["id"], False):
@@ -326,33 +357,18 @@ def plan_outputs(roots, children, size, prod, max_nodes, min_folder_depth):
         dir_used = used.setdefault(cur_dir, set())
 
         if is_folder(node, depth):
-            folder = base
-            if folder.lower() in dir_used:
-                folder = f"{base}-{node['id'][:8]}"
-            dir_used.add(folder.lower())
-            node_dir = os.path.join(cur_dir, folder)
+            node_dir = os.path.join(cur_dir, _claim_name(base, dir_used, node["id"]))
             if (node.get("note") or "").strip():
-                plan.append({
-                    "kind": "index",
-                    "node_id": node["id"],
-                    "name": plain_text(node.get("name")),
-                    "rel_path": os.path.relpath(os.path.join(node_dir, "_index.md"), PROJECT_ROOT),
-                    "max_modified": node.get("modifiedAt") or 0,
-                })
+                rel = os.path.relpath(os.path.join(node_dir, "_index.md"), PROJECT_ROOT)
+                add("index", node, rel, node.get("modifiedAt") or 0)
             for c in children.get(node["id"], []):
                 emit(c, node_dir, used, depth + 1)
         else:
-            fname = f"{base}.md"
-            if fname.lower() in dir_used:
-                fname = f"{base}-{node['id'][:8]}.md"
-            dir_used.add(fname.lower())
-            plan.append({
-                "kind": "file",
-                "node_id": node["id"],
-                "name": plain_text(node.get("name")),
-                "rel_path": os.path.relpath(os.path.join(cur_dir, fname), PROJECT_ROOT),
-                "max_modified": subtree_max_modified(node, children),
-            })
+            rel = os.path.relpath(
+                os.path.join(cur_dir, _claim_name(base, dir_used, node["id"], ".md")),
+                PROJECT_ROOT,
+            )
+            add("file", node, rel, subtree_max_modified(node, children))
 
     used: dict[str, set] = {}
     for r in roots:
@@ -419,6 +435,38 @@ def prune_stale(expected_abs: set[str]):
     return pruned
 
 
+# -- Writing ------------------------------------------------------------------
+
+def select_to_write(plan: list[dict], prev: dict, force: bool) -> list[dict]:
+    """Plan entries that are new, changed, or missing on disk (all, if --force)."""
+    out = []
+    for p in plan:
+        rec = prev.get(p["rel_path"])
+        if (force or rec is None
+                or rec.get("max_modified") != p["max_modified"]
+                or not os.path.isfile(os.path.join(PROJECT_ROOT, p["rel_path"]))):
+            out.append(p)
+    return out
+
+
+def write_outputs(to_write: list[dict], by_id: dict, renderer: "Renderer", prev: dict) -> dict:
+    """Render and write each selected entry; return {'new', 'updated'} counts."""
+    counts = {"new": 0, "updated": 0}
+    total = len(to_write)
+    for i, p in enumerate(to_write):
+        print(f"  [{i + 1}/{total}] {p['name'][:60]}...", end="\r")
+        node = by_id[p["node_id"]]
+        content = renderer.render_index(node) if p["kind"] == "index" else renderer.render_file(node)
+        abs_path = os.path.join(PROJECT_ROOT, p["rel_path"])
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        counts["updated" if p["rel_path"] in prev else "new"] += 1
+    if total:
+        print(f"  [{total}/{total}] Done.{' ' * 40}")
+    return counts
+
+
 # -- Main ---------------------------------------------------------------------
 
 def main():
@@ -427,8 +475,9 @@ def main():
     )
     parser.add_argument("--max-nodes", type=int, default=200,
                         help="Subtree size above which a node fans out into a folder (default 200).")
-    parser.add_argument("--min-folder-depth", type=int, default=3,
-                        help="Tree levels that are always folders regardless of size (default 3).")
+    parser.add_argument("--min-folder-depth", type=int, default=0,
+                        help="Top levels forced to folders even when small (default 0 = pure "
+                             "size threshold; a shallow node still needs a non-leaf child to be forced).")
     parser.add_argument("--token", default="",
                         help="WorkFlowy API token (else WORKFLOWY_API_KEY / workflowy env).")
     parser.add_argument("--force", action="store_true",
@@ -470,54 +519,34 @@ def main():
     print(f"  Planning {len(plan)} output files "
           f"(max-nodes={args.max_nodes}, min-folder-depth={args.min_folder_depth}).")
 
-    prev = load_registry().get("files", {})
+    registry = load_registry()
+    prev = registry.get("files", {})
     renderer = Renderer(children, prod)
 
-    stats = {"new": 0, "updated": 0, "unchanged": 0, "pruned": 0}
-    new_files: dict[str, dict] = {}
-    expected_abs: set[str] = set()
-
-    to_write = [p for p in plan
-                if args.force
-                or p["rel_path"] not in prev
-                or prev[p["rel_path"]].get("max_modified") != p["max_modified"]
-                or not os.path.isfile(os.path.join(PROJECT_ROOT, p["rel_path"]))]
-
+    to_write = select_to_write(plan, prev, args.force)
     print(f"  {len(to_write)} to write, {len(plan) - len(to_write)} unchanged.")
-    for i, p in enumerate(plan):
-        abs_path = os.path.join(PROJECT_ROOT, p["rel_path"])
-        expected_abs.add(abs_path)
-        new_files[p["rel_path"]] = {"node_id": p["node_id"], "max_modified": p["max_modified"]}
+    counts = write_outputs(to_write, by_id, renderer, prev)
 
-    for i, p in enumerate(to_write):
-        print(f"  [{i + 1}/{len(to_write)}] {p['name'][:60]}...", end="\r")
-        node = by_id[p["node_id"]]
-        content = renderer.render_index(node) if p["kind"] == "index" else renderer.render_file(node)
-        abs_path = os.path.join(PROJECT_ROOT, p["rel_path"])
-        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        with open(abs_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        if p["rel_path"] in prev:
-            stats["updated"] += 1
-        else:
-            stats["new"] += 1
-    if to_write:
-        print(f"  [{len(to_write)}/{len(to_write)}] Done.{' ' * 40}")
-    stats["unchanged"] = len(plan) - len(to_write)
-
-    stats["pruned"] = prune_stale(expected_abs)
+    expected_abs = {os.path.join(PROJECT_ROOT, p["rel_path"]) for p in plan}
+    stats = {
+        "new": counts["new"],
+        "updated": counts["updated"],
+        "unchanged": len(plan) - len(to_write),
+        "pruned": prune_stale(expected_abs),
+    }
 
     save_registry({
         "source": "workflowy",
         "base_url": DEFAULT_BASE_URL,
         "last_export": datetime.now(timezone.utc).isoformat(),
-        "export_count": load_registry().get("export_count", 0) + 1,
+        "export_count": registry.get("export_count", 0) + 1,
         "node_count": len(nodes),
         "max_nodes": args.max_nodes,
         "min_folder_depth": args.min_folder_depth,
         "include_completed": include_completed,
         "stats": stats,
-        "files": new_files,
+        "files": {p["rel_path"]: {"node_id": p["node_id"], "max_modified": p["max_modified"]}
+                  for p in plan},
     })
 
     print(f"\nDone! {stats['new']} new, {stats['updated']} updated, "
