@@ -1,0 +1,8 @@
+#!/bin/bash
+# WorkFlowy outline to Markdown exporter wrapper
+# Usage: workflowly_to_md [--max-nodes N] [--force] [--no-completed] [--list]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+python3 "$PROJECT_ROOT/utils/workflowly_to_md.py" "$@"
