@@ -96,10 +96,24 @@ def save_registry(entries: list[dict]):
         json.dump(entries, f, indent=2, ensure_ascii=False)
 
 
+def get_existing_issue_updates(team_key: Optional[str], project_slug: Optional[str]) -> dict[str, str]:
+    """Return the prior {issue_id: updatedAt} map for this source (empty if none).
+
+    Used for incremental export: an issue whose updatedAt is unchanged AND whose
+    file still exists on disk is skipped (no per-issue detail fetch, no rewrite).
+    """
+    entries = load_registry()
+    field = "team_key" if team_key else "project_slug"
+    val = team_key if team_key else project_slug
+    existing = next((e for e in entries if e.get(field) == val), None)
+    return (existing or {}).get("issue_updates", {}) or {}
+
+
 def upsert_registry(url: str, workspace: str,
                     team_key: Optional[str], team_name: Optional[str],
                     project_slug: Optional[str], project_name: Optional[str],
-                    output_path: str, stats: dict):
+                    output_path: str, stats: dict,
+                    issue_updates: Optional[dict] = None):
     """Upsert registry entry for either team or project export."""
     entries = load_registry()
     now = datetime.now(timezone.utc).isoformat()
@@ -119,6 +133,9 @@ def upsert_registry(url: str, workspace: str,
         "last_exported": now,
         "stats": stats,
     }
+    # Per-issue {id: updatedAt} map drives the next run's incremental skip.
+    if issue_updates is not None:
+        entry_data["issue_updates"] = issue_updates
 
     if team_key:
         entry_data["team_key"] = team_key
@@ -675,16 +692,39 @@ def main():
         is_project_mode = True
         name, key = project_name, project_slug
 
-    # Fetch full descriptions for each issue (bulk queries truncate descriptions)
-    issues = enrich_issues_with_full_descriptions(issues, token)
+    # ---- Incremental: only enrich + rewrite issues whose updatedAt changed ----
+    # The bulk query already returns updatedAt per issue; the per-issue detail
+    # fetch (for full descriptions) is the expensive part — skip it for issues
+    # unchanged since the last export whose file still exists.
+    prev_updates = {} if args.force else get_existing_issue_updates(team_key, project_slug)
+    issues_dir = os.path.join(out_dir, "issues")
+
+    def _issue_file_exists(issue: dict) -> bool:
+        ident = issue.get("identifier", "")
+        return bool(ident) and os.path.isfile(
+            os.path.join(issues_dir, f"{sanitize_filename(ident)}.md"))
+
+    to_process = [
+        i for i in issues
+        if args.force
+        or prev_updates.get(i.get("id")) != i.get("updatedAt")
+        or not _issue_file_exists(i)
+    ]
+    skipped = len(issues) - len(to_process)
+    print(f"  Incremental: {len(to_process)} changed/new, {skipped} unchanged (skipped)")
+
+    # Fetch full descriptions only for changed/new issues (enrich mutates in place,
+    # so the shared dicts in `issues` are updated for the index too).
+    if to_process:
+        enrich_issues_with_full_descriptions(to_process, token)
 
     now = datetime.now(timezone.utc)
     export_time = now.strftime("%Y-%m-%d %H:%M UTC")
 
-    # Write individual issue files
+    # Write only the changed/new issue files; unchanged files are left intact.
     print("Writing individual issue files...")
-    files_written = write_issue_files(issues, out_dir)
-    print(f"  {files_written} issue files written to {rel_path}/issues/")
+    files_written = write_issue_files(to_process, out_dir)
+    print(f"  {files_written} issue files written/updated to {rel_path}/issues/ ({skipped} unchanged)")
 
     # Write index file
     index_content = render_index_file(name, key, issues, export_time, "issues",
@@ -705,6 +745,10 @@ def main():
         "by_state": state_counts,
     }
 
+    # Per-issue {id: updatedAt} for the next run's incremental skip (all current
+    # issues — issues that disappear from the source naturally drop out of the map).
+    issue_updates = {i["id"]: i.get("updatedAt") for i in issues if i.get("id")}
+
     if is_project_mode:
         upsert_registry(
             url=args.url,
@@ -715,6 +759,7 @@ def main():
             project_name=project_name,
             output_path=rel_path,
             stats=stats,
+            issue_updates=issue_updates,
         )
     else:
         upsert_registry(
@@ -726,6 +771,7 @@ def main():
             project_name=None,
             output_path=rel_path,
             stats=stats,
+            issue_updates=issue_updates,
         )
 
     print(f"\nDone! {len(issues)} issues exported to {rel_path}/")

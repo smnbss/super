@@ -70,7 +70,7 @@ Source commands (the `github_clone` command lives in `sources.github.md`; all th
 - `github_clone <url>` — full-clone or update a GitHub repo into `github/<owner>/<repo>/`
 - `medium_to_md <url>` — export Medium feed
 - `linear_to_md <url>` — export Linear projects
-- `linear_issues_to_md <url>` — export ALL issues for a Linear team (including triage)
+- `linear_issues_to_md <url>` — export ALL issues for a Linear team or project (including triage). **Incremental**: keeps a per-issue `updatedAt` map in `.issues-registry.json` and re-fetches the full description + rewrites the file only for issues that changed since the last run (the index is always rebuilt from the cheap bulk query). `--force` re-fetches everything. (A no-change run of a ~120-issue project drops from ~85s to ~2s.)
 - `metabase_index <url>` — export full Metabase index
 - `gmeet_to_md <email>` — harvest meeting notes/agendas/recordings/attachments the email is invited to (Google Calendar + Drive) into `src/gmeet/`; deterministic Steps 1–5 of `brain-pull-my-meeting-notes`, no LLM digests. Incremental via `src/gmeet/.registry.json`; `--since` / `--day` / `--days` / `--force` / `--list`. Assumes `email` == the authenticated gws user.
 
@@ -91,11 +91,17 @@ Run the export pipeline (works from any directory — the sources files are reso
 ```bash
 bin/pull_sources              # no args → reads BOTH sources.md and sources.github.md
 bin/pull_sources sources.md   # or pass explicit file(s) to process just those
+GBRAIN_PULL_PAR=12 bin/pull_sources   # raise the parallel-lane cap (default 8)
 ```
 
-With no arguments it reads both `sources.md` (→ `src/`) and `sources.github.md` (→ `github/`), line by line, strips `#` comments, and runs each command via `bin/<tool>`. It writes `src/.last_export.json` with a timestamp and combined success/failure counts.
+With no arguments it reads both `sources.md` (→ `src/`) and `sources.github.md` (→ `github/`), strips `#` comments, and runs the sources **in parallel** via `bin/<tool>`. It writes `src/.last_export.json` with a timestamp and combined success/failure counts.
 
-If any source fails (expired token, network error), it's logged and skipped — a partial sync is better than no sync.
+**Parallelism (safe by construction):** each source becomes a *lane*, and lanes run concurrently up to `GBRAIN_PULL_PAR` (default 8):
+- Commands of the **same tool** (e.g. two `clickup_doc_to_md`) share one registry file, so they run **serially within a single per-tool lane**.
+- **Different tools** touch different registries → their lanes run concurrently.
+- `github_clone` has no shared state → **every repo is its own lane** (the ~70 repo fetches all run in parallel, the biggest wall-clock win).
+
+Most exporters are also incremental on their own (registry + per-item `updatedAt`/`version`/`date_updated`/git-fetch), so a no-change daily run mostly skips re-fetching content. If any source fails (expired token, network error), it's logged and counted but doesn't block the others — a partial sync is better than no sync.
 
 **Step 2: Diff — identify stale facts**
 

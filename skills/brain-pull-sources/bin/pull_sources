@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pull all sources listed in one or more sources files.
+# Pull all sources listed in one or more sources files — PARALLEL.
 #
 # Usage:
 #   pull_sources                       # default: reads sources.md AND sources.github.md
@@ -9,15 +9,21 @@
 # Sources are split across two files by where their output lands:
 #   sources.md          -> non-GitHub sources, exported into  src/<source>/
 #   sources.github.md   -> github_clone repos,  cloned   into  github/<owner>/<repo>/
-# (github_clone always writes to github/ regardless of which file lists it; the
-#  split is an organizing convention so the two output trees stay obvious.)
+#
+# Parallelism model (why it's safe):
+#   - Commands of the SAME tool (e.g. two `clickup_doc_to_md`) share one registry
+#     file (src/<tool>/.registry.json), so they run SERIALLY within a per-tool lane.
+#   - Different tools touch different registries, so their lanes run CONCURRENTLY.
+#   - `github_clone` has no shared state (each repo is an independent git dir), so
+#     every repo gets its own lane and they all run concurrently.
+#   - All lanes run through a global concurrency cap (GBRAIN_PULL_PAR, default 8)
+#     via `xargs -P` (portable to macOS bash 3.2 — no `wait -n`).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+MAX_PAR="${GBRAIN_PULL_PAR:-8}"
 
 # Build the list of sources files to process.
-SOURCES_FILES=()
 if [[ $# -gt 0 ]]; then
   SOURCES_FILES=("$@")
 else
@@ -31,67 +37,101 @@ if [[ -f "$REPO_ROOT/.env.local" ]]; then
   set +a
 fi
 
-success=0
-failed=0
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pull_sources.XXXXXX")"
+LANES="$TMP/lanes"     # one file per lane; each line is a full command
+RES="$TMP/res"         # one file per lane; "OK" / "FAIL: <cmd>" lines
+mkdir -p "$LANES" "$RES"
+trap 'rm -rf "$TMP"' EXIT
 
-process_file() {
-  local sources_file="$1"
-
-  # If a relative path was given (or a bare basename) and it doesn't resolve from
-  # the current directory, fall back to resolving it against the repo root. This
-  # keeps `bin/pull_sources sources.md` working no matter which directory it's run from.
+# --- Parse all sources files into lanes -------------------------------------
+# (No associative arrays — macOS /bin/bash is 3.2. Counts are derived from the
+#  lane files after parsing.)
+gh_n=0
+for sources_file in "${SOURCES_FILES[@]}"; do
+  # Resolve a bare/relative path against the repo root.
   if [[ ! -f "$sources_file" && "$sources_file" != /* ]]; then
     sources_file="$REPO_ROOT/$sources_file"
   fi
-
   if [[ ! -f "$sources_file" ]]; then
     echo "Skipping (not found): $sources_file"
-    echo ""
-    return
+    continue
   fi
 
-  echo "Pulling sources from: $sources_file"
-  echo ""
-
   while IFS= read -r line; do
-    # Strip inline comments and trim whitespace
-    cmd="${line%%#*}"
-    cmd="${cmd%"${cmd##*[![:space:]]}"}"
-
-    # Skip empty lines
+    cmd="${line%%#*}"                           # strip inline comments
+    cmd="${cmd%"${cmd##*[![:space:]]}"}"         # rtrim
+    cmd="${cmd#"${cmd%%[![:space:]]*}"}"         # ltrim
     [[ -z "$cmd" ]] && continue
-
-    # Extract the tool name (first word)
     tool="${cmd%% *}"
 
-    # Resolve to bin/ wrapper if available, else fall back to python3 utils/
-    if [[ -x "$SCRIPT_DIR/$tool" ]]; then
-      runner="$SCRIPT_DIR/$tool"
-      args="${cmd#* }"
-    else
+    if [[ ! -x "$SCRIPT_DIR/$tool" ]]; then
       echo "Unknown command: $tool — skipping"
       continue
     fi
 
-    echo ">>> $cmd"
-    if "$runner" $args; then
-      ((success++))
+    if [[ "$tool" == "github_clone" ]]; then
+      # One lane per repo — fully parallel (no shared state).
+      printf '%s\n' "$cmd" > "$LANES/gh_$gh_n"
+      gh_n=$((gh_n + 1))
     else
-      echo "FAILED: $cmd"
-      ((failed++))
+      # One lane per tool — serial within (shared registry).
+      printf '%s\n' "$cmd" >> "$LANES/tool_$tool"
     fi
-    echo ""
-
   done < "$sources_file"
-}
-
-for f in "${SOURCES_FILES[@]}"; do
-  process_file "$f"
 done
+
+lane_count=$(find "$LANES" -type f 2>/dev/null | wc -l | tr -d ' ')
+gh_lanes=$(find "$LANES" -name 'gh_*' -type f 2>/dev/null | wc -l | tr -d ' ')
+tool_groups=$(find "$LANES" -name 'tool_*' -type f 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$lane_count" -eq 0 ]]; then
+  echo "No sources to pull."
+  exit 0
+fi
+echo "Pulling ${lane_count} lanes (${gh_lanes} github repos + ${tool_groups} tool groups), up to ${MAX_PAR} in parallel…"
+echo ""
+
+# --- Lane runner (invoked once per lane file by xargs) -----------------------
+export SCRIPT_DIR RES
+run_lane() {
+  local lane_file="$1"
+  local lane_name; lane_name="$(basename "$lane_file")"
+  local res_file="$RES/$lane_name"
+  : > "$res_file"
+  while IFS= read -r cmd; do
+    [[ -z "$cmd" ]] && continue
+    local tool="${cmd%% *}"
+    local args="${cmd#* }"
+    echo ">>> $cmd"
+    if "$SCRIPT_DIR/$tool" $args > "$res_file.log" 2>&1; then
+      echo "OK" >> "$res_file"
+    else
+      echo "FAIL: $cmd" >> "$res_file"
+    fi
+    # Surface the tail of each command's output (interleaved but attributed).
+    sed "s|^|[$lane_name] |" "$res_file.log" | tail -3
+    rm -f "$res_file.log"
+  done < "$lane_file"
+}
+export -f run_lane
+
+# --- Run all lanes through the concurrency cap -------------------------------
+find "$LANES" -type f -print0 \
+  | xargs -0 -P "$MAX_PAR" -I{} bash -c 'run_lane "$@"' _ {}
+
+# --- Tally -------------------------------------------------------------------
+success=$(grep -rh '^OK$'    "$RES" 2>/dev/null | wc -l | tr -d ' ')
+failed=$( grep -rh '^FAIL: ' "$RES" 2>/dev/null | wc -l | tr -d ' ')
+
+if [[ "$failed" -gt 0 ]]; then
+  echo ""
+  echo "Failures:"
+  grep -rh '^FAIL: ' "$RES" 2>/dev/null | sed 's/^/  /'
+fi
 
 # Write export manifest for brain-sync
 MANIFEST="$REPO_ROOT/src/.last_export.json"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+mkdir -p "$REPO_ROOT/src"
 {
   echo "{"
   echo "  \"timestamp\": \"$NOW\","
@@ -100,5 +140,6 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   echo "}"
 } > "$MANIFEST"
 
+echo ""
 echo "Done. $success succeeded, $failed failed."
 echo "Manifest written to src/.last_export.json"
