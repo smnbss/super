@@ -189,7 +189,7 @@ plugins:
   telegram:
     source: claude-plugins-official/telegram
     description: Telegram bot integration
-    enabled: true
+    enabled: false
   ralph-loop:
     source: claude-plugins-official/ralph-loop
     description: Ralph loop plugin
