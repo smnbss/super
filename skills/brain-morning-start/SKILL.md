@@ -9,240 +9,142 @@ description: >
 
 # Morning Start
 
-Daily bootstrap: update tools (brew, npm, gstack, python), sync brain sources, rebuild memory and service docs, harvest every meeting since the last harvested day, and prepare today's agendas for deep dives and 1:1s.
+Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs, harvest every meeting since the last harvested day, prepare today's deep-dive and 1:1 agendas, then refresh the gbrain index in one pass.
+
+## How to run this (keep the orchestrator lean)
+
+**Delegate each heavy phase to a subagent and keep only its summary.** Parts 2, 3, 4d/4e, and 5 each do bulky work (exporting thousands of files, rewriting ~46 memory files, querying Linear). Spawn an `Agent` per phase that invokes the named skill and returns a **concise summary only** (counts + errors, not file dumps). This is what keeps the morning run cheap in tokens — the verbose output stays in the subagent. The meeting-prep parts already use this pattern; apply it to the rest.
+
+Each sub-skill carries its own detailed instructions — do **not** restate them here; just dispatch and collect.
 
 ## Part 0 — First-run bootstrap
 
-Before doing anything else, check whether `agents/morning-start-additional/SKILL.md` exists (relative to the brain repo root).
+Check whether `agents/morning-start-additional/SKILL.md` exists (relative to the brain repo root). If it does, continue. If not, copy `resources/morning-start-additional.template.md` (relative to this skill's directory) to that path first — a one-time seed for extra per-morning agent runs.
 
-- If it exists → skip this part and continue to Part 1.
-- If it does not exist → copy `resources/morning-start-additional.template.md` (relative to this skill's directory) to `agents/morning-start-additional/SKILL.md`, then continue to Part 1. This is a one-time seed so the user has a place to add extra per-morning agent runs without editing this skill.
+## Part 1 — Update tools (parallel) & pull
 
-## Part 1 — Update tools & sync
+Run the independent updaters **concurrently in the background**, then collect:
 
-1. **Brew update & upgrade** — run `brew update && brew upgrade` to update Homebrew and upgrade all installed formulae and casks.
+- `brew update && brew upgrade` (background)
+- `npm update -g` (background)
+- `uv sync --upgrade` (background)
+- `/gstack-upgrade`
+- `git pull --rebase`
 
-2. **Global npm packages** — run `npm update -g` to update all globally installed npm packages.
+There is **no gbrain step here.** The reindex happens once at the very end (Part 5), after all new content has been written — running it now would index nothing new.
 
-3. **Gstack** — run `/gstack-upgrade` to update gstack to the latest version.
+Report what was updated; flag errors or notable version bumps.
 
-4. **Python packages** — run `uv sync --upgrade` to update the Python packages used by this repo.
+## Part 2 — Brain sync & rebuild (sequential chain, subagent per phase)
 
-5. **gbrain reindex** — call `mcp__gbrain__sync_brain` to refresh the hybrid search index with any new content. It reindexes and embeds through the always-on HTTP server (`io.weroad.gbrain` on `:3131`), so it never contends for the PGLite writer lock — there is no CLI fallback, and none should be necessary. Note: `sync_brain` keeps embeddings fresh but does **not** materialize wikilinks into graph edges or extract timeline entries — that happens in Phase 4.5 of `brain-rebuild-memory` (Part 2c below), which calls `mcp__gbrain__add_link` and `mcp__gbrain__add_timeline_entry` directly over the running MCP server. No serve restart needed.
+Dispatch each as a subagent invoking the named skill; collect a short summary.
 
-6. **Git pull** — run `git pull --rebase` to pull the latest brain changes.
+- **2a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 3 in parallel with this.**
+- **2b `brain-rebuild-services`** — regenerate `.AGENT.MD` service docs from changed repos → `outputs/services/`. *After 2a.*
+- **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its `run <path>` directives in order. *After 2b, before 2c.*
+- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. Its Phase 4.5 materializes wikilink edges via native `gbrain extract links --dir memory` (+ a small custom pass for `verified:`-block timeline entries). **No embedding step here** — that's Part 5. *After 2b.5.*
 
-7. **Report** — summarize what was updated, flag any errors or version bumps worth noting.
+## Part 3 — Harvest meetings since last harvest (parallel with Part 2a)
 
-## Part 2 — Brain sync & rebuild (sequential with parallel start)
+Subagent invoking `brain-pull-my-meeting-notes` for every day since the last harvested day through yesterday (backfills weekends/holidays/travel).
 
-### 2a. Pull sources (`brain-pull-sources`)
-Export all external sources (ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase) and refresh L2 memory files. This is the heavy lifting of fetching fresh data from all integrations.
-
-**Run Part 3 in parallel with this** — meeting notes harvest is independent.
-
-### 2b. Rebuild services (`brain-rebuild-services`)
-Regenerate deep technical `.AGENT.MD` service documentation from cloned GitHub repos. Only runs when repos have changed since last sync. Updates cross-cutting RabbitMQ topology files when messaging configs change.
-
-**Wait for:** Part 2a complete (needs `github/` updated with latest repos).
-
-### 2b.5. Additional morning agents (`agents/morning-start-additional/SKILL.md`)
-If `agents/morning-start-additional/SKILL.md` exists, read it and execute any `run <path>` directives it contains, in order. Skip this step if the file does not exist.
-
-**Wait for:** Part 2b complete. Must finish before Part 2c so any outputs feed into the memory rebuild.
-
-### 2c. Rebuild memory (`brain-rebuild-memory`)
-Rebuild the memory layers L2 (domain knowledge) and L1 (navigation MOCs) from the latest source exports and service docs. This creates team files, releases tracking, entity index, and navigation MOCs like `hub.md` and `teams.md`.
-
-**Wait for:** Part 2b.5 complete.
-
-## Part 3 — Harvest meeting notes since last harvest (parallel with Part 2a)
-
-Run the `brain-pull-my-meeting-notes` skill covering **every day since the last harvested day** (inclusive re-run of that day, through yesterday). This backfills any days missed since the last morning start — useful after weekends, holidays, travel, or sick days.
-
-### 3a. Detect the last harvested day
-
-Scan `src/gmeet/YYYY/WNN/MM-DD/` to find the most recent `MM-DD` folder that contains a `MM-DD-digest.md` file. That day is `LAST_HARVESTED`.
+**Detect `LAST_HARVESTED`** — the most recent `MM-DD` folder with a daily digest:
 
 ```bash
-# Find the latest MM-DD folder with a daily digest across all years/weeks
 ls -1d src/gmeet/*/W*/??-?? 2>/dev/null \
-  | while read d; do
-      [ -f "$d/$(basename "$d")-digest.md" ] && echo "$d"
-    done \
-  | sort \
-  | tail -1
+  | while read d; do [ -f "$d/$(basename "$d")-digest.md" ] && echo "$d"; done \
+  | sort | tail -1
 ```
 
-Parse the `YYYY/WNN/MM-DD` path to reconstruct the full `YYYY-MM-DD` date.
-
-### 3b. Decide the range
-
-- If `LAST_HARVESTED` exists and is **before yesterday** → invoke `brain-pull-my-meeting-notes --since LAST_HARVESTED`. The skill processes each day from `LAST_HARVESTED` through yesterday, idempotently rebuilding each day's folder (the skill deletes and recreates the day folder on each run, so re-running the last day is safe and picks up any late-arriving Gemini notes or transcripts).
-- If `LAST_HARVESTED` is **yesterday** → invoke with the default range (yesterday only).
-- If `LAST_HARVESTED` is **today or later** (unusual — means the skill already ran today) → still invoke with the default range (yesterday) as a safety re-run; it's idempotent.
-- If no prior harvest folder exists → invoke with the default range (yesterday only) and report that this is a first-time run.
-
-Output goes to `src/gmeet/YYYY/WNN/MM-DD/` — one folder per day in the range, plus refreshed weekly/monthly/YTD digests.
-
-**Parallel:** This runs in parallel with Part 2a (pull-sources) — it reads from GWS/Calendar, not from brain memory.
+Reconstruct `YYYY-MM-DD` from the `YYYY/WNN/MM-DD` path, then invoke with `--since LAST_HARVESTED` (the skill is idempotent and re-runs the last day safely). If none found, run the default (yesterday) and note it's a first run. Reads GWS/Calendar — independent of brain memory.
 
 ## Part 4 — Prepare today's meetings
 
-Fetch today's calendar, identify deep dives and 1:1s, and generate agendas for each meeting in parallel.
-
-### Step 4a — Fetch today's calendar
-
-Compute today's date boundaries in Europe/Rome (start of day → end of day), convert to UTC, and fetch events:
+**4a.** Fetch today's calendar (Europe/Rome day bounds → UTC):
 
 ```bash
-gws calendar events list --params '{
-  "calendarId": "primary",
-  "timeMin": "<TODAY_START_UTC>",
-  "timeMax": "<TODAY_END_UTC>",
-  "singleEvents": true,
-  "orderBy": "startTime"
-}'
+gws calendar events list --params '{"calendarId":"primary","timeMin":"<TODAY_START_UTC>","timeMax":"<TODAY_END_UTC>","singleEvents":true,"orderBy":"startTime"}'
 ```
 
-### Step 4b — Classify events
-
-Scan the results and sort into two buckets:
+**4b. Classify** (skip `status:"cancelled"`):
 
 | Type | Match rule |
 |------|-----------|
 | Deep Dive | `summary` contains "Deep Dive" (case-insensitive) |
 | 1:1 | `summary` contains "1:1" (case-insensitive), excluding "Prepare for 1:1s" |
 
-Skip cancelled events (`status: "cancelled"`). Log any events that partially match but don't fit either bucket.
+**4c.** Print the day's schedule. If none match, report "No deep dives or 1:1s today" and skip to Part 5.
 
-### Step 4c — Report the day's schedule
+**4d/4e.** Spawn one `Agent` per meeting, **all in parallel**, each invoking `brain-prepare-my-deep-dives` (→ `outputs/agents/my-deep-dives/<team>.md`) or `brain-prepare-my-one-on-one` (→ `outputs/agents/my-one-on-one/<person>.md`) with `LOOKAHEAD_DAYS: 1`. The skills carry their own logic; just pass the meeting and collect the output path.
 
-Print a quick summary of what was found before starting the agents:
+## Part 5 — gbrain reindex (LIVE, no stop-server, runs LAST)
 
+Every file is now written — src exports, gmeet, service docs, memory, today's agendas. Refresh the index in one pass. The brain runs on **Postgres** (multi-writer), so this runs **live against the always-on server — no `launchctl bootout`/`bootstrap`, no lock dance.** `gbrain import`/`embed` simply run concurrently with `gbrain serve --http` and the `io.weroad.gbrain.jobs` worker.
+
+> **Use `import`, not `sync`.** `gbrain sync` slugs pages from the repo root (`memory/l1/hub`), but this brain's pages are import-root-stripped (`l1/hub`) — `sync` would duplicate every page and break the wikilink graph + `brain-rebuild-memory` Phase 4.5. Keep `import`.
+
+Delegate to a subagent (returns the embedded-chunk delta). Import only the source dirs that actually changed this run, then one parallel embed pass:
+
+```bash
+cd <brain-root> && set -a && source .env.local && set +a            # OPENAI_API_KEY + OPENAI_BASE_URL
+# import only dirs with working-tree changes (git-tracked); fall back to all if unsure
+CHANGED=$(git status --porcelain memory outputs src | awk '{print $2}' \
+  | awk -F/ '{ if ($1=="src") print $1"/"$2; else print $1 }' | sort -u)
+for d in ${CHANGED:-memory outputs src/clickup src/confluence src/outline src/linear \
+         src/gmeet src/medium src/metabase src/gdrive src/workflowly}; do
+  [ -d "$d" ] && gbrain import "$d" --no-embed                       # live; --no-embed defers embedding
+done
+gbrain embed --stale                                                 # ONE parallel pass (20× concurrency, real on Postgres)
+gbrain extract links --dir memory && gbrain extract links --dir outputs   # native edge extraction (idempotent)
 ```
-Today's meetings to prepare:
-- 11:00 — Deep Dive SAITAMA
-- 14:00 — 1:1 Alex
-- 16:00 — 1:1 Ryan
-```
 
-If no deep dives or 1:1s are found, report "No deep dives or 1:1s on the calendar today".
+One chunk fails embedding with `Forbidden` (a permanently 403-filtered page) — that's expected; `embed --stale` still exits 0. Don't pipe it through `| tail`. The server stays up throughout.
 
-### Step 4d — Run deep-dive skill
+**Faster alternative (fire-and-forget):** since the jobs worker is running, you can background the embed — `gbrain embed --stale --background` enqueues to `io.weroad.gbrain.jobs` and returns immediately, so Part 6 doesn't wait on embedding.
 
-For each deep dive found, spawn an Agent that invokes the `brain-prepare-my-deep-dives` skill with `LOOKAHEAD_DAYS: 1` (today only). If multiple deep dives exist, run them **in parallel** using concurrent Agent tool calls.
-
-**Deep Dive Skill Details:**
-- Reads `memory/L1/teams.md` to map calendar team names to Linear teams
-- Queries Linear for active projects per team
-- Computes flags: OVERDUE, At Risk, No update Nd, No target, NEW
-- Generates agenda sections: items due before next deep dive, overdue, at-risk/stale, upcoming work, capacity gaps
-- Output: `outputs/agents/my-deep-dives/<team-slug>.md`
-
-### Step 4e — Run 1:1 skill
-
-For each 1:1 found, spawn an Agent that invokes the `brain-prepare-my-one-on-one` skill with `LOOKAHEAD_DAYS: 1`. If multiple 1:1s exist, run them **in parallel** using concurrent Agent tool calls.
-
-**1:1 Skill Details:**
-- Reads `memory/L1/team-members.md` to resolve person identity from calendar
-- Reads previous agenda from `outputs/agents/my-one-on-one/<slug>.md` for follow-ups
-- Queries Linear for projects led by this person, high-priority issues, and bugs
-- Enriches with brain context (recent meeting notes, WorkFlowy entries)
-- Generates agenda sections: follow-ups from last 1:1, delivery deadlines, at-risk/stale items, strategic topics, capacity & team health
-- Output: `outputs/agents/my-one-on-one/<person-slug>.md`
-
-Steps 4d and 4e can run in parallel with each other — launch all agents at once.
-
-## Part 5 — Final report
-
-After all agents complete, print a combined summary:
+## Part 6 — Final report
 
 ```
 Morning start complete:
 
-Tools:
-  - brew: <N> packages upgraded
-  - npm/gstack/python: <status>
-
-Brain sync & rebuild:
-  - Sources: <N> exported (X succeeded, Y failed)
-  - Services: <N> docs refreshed
-  - Memory: L2 <N> files, L1 <N> MOCs updated
-
-Meetings harvested (<LAST_HARVESTED> → yesterday, <D> days):
-  - <N> meetings processed → src/gmeet/...
-
-Today's prep:
-✓ Deep Dive SAITAMA → outputs/agents/my-deep-dives/saitama.md
-✓ 1:1 Alex → outputs/agents/my-one-on-one/alex.md
-✓ 1:1 Ryan → outputs/agents/my-one-on-one/ryan.md
-
-gbrain graph: <N> new edges, <N> timeline entries (via MCP)
+Tools:    brew <N> upgraded · npm/gstack/python <status> · git <status>
+Sources:  <N> exported (X ok, Y failed)
+Services: <N> docs refreshed
+Memory:   L2 <N> files, L1 <N> MOCs · gbrain graph: <N> edges, <N> timeline
+Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet/
+Prep:
+  ✓ Deep Dive SAITAMA → outputs/agents/my-deep-dives/saitama.md
+  ✓ 1:1 Alex          → outputs/agents/my-one-on-one/alex.md
+gbrain reindex: <N> chunks embedded
 ```
+
+## Dependency chain
+
+```
+Part 1 tools (parallel) ─┐
+                         ↓
+Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (edges via native extract)
+Part 3 harvest ────────┘  (3 runs parallel to 2a)                        ↓
+                                                          Part 4 prep agents (parallel)
+                                                                         ↓
+                                       Part 5 gbrain reindex — LIVE import+embed (server stays up)
+                                                                         ↓
+                                                                  Part 6 report
+```
+
+The reindex is intentionally **last**: it depends on every prior write (including the agendas). On Postgres it runs concurrently with the always-on server, so it never blocks — and the Part 4 agents' `mcp__gbrain__query` calls keep working throughout.
 
 ## Skill References
 
-| Skill | Purpose | Output Location |
-|-------|---------|-----------------|
-| `brain-pull-sources` | Export all external sources (ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase) | `src/<source>/` |
-| `brain-rebuild-services` | Generate deep `.AGENT.MD` service docs from GitHub repos | `outputs/services/` |
-| `brain-rebuild-memory` | Rebuild L2 domain knowledge and L1 navigation MOCs | `memory/L1/`, `memory/L2/` |
-| `brain-pull-my-meeting-notes` | Harvest meeting notes and transcripts from the last harvested day through yesterday | `src/gmeet/` |
-| `brain-prepare-my-deep-dives` | Prepare deep-dive agendas from Linear project data | `outputs/agents/my-deep-dives/` |
-| `brain-prepare-my-one-on-one` | Prepare 1:1 agendas from Linear and brain context | `outputs/agents/my-one-on-one/` |
+| Skill | Output |
+|-------|--------|
+| `brain-pull-sources` | `src/<source>/` |
+| `brain-rebuild-services` | `outputs/services/` |
+| `brain-rebuild-memory` | `memory/L1/`, `memory/L2/` |
+| `brain-pull-my-meeting-notes` | `src/gmeet/` |
+| `brain-prepare-my-deep-dives` | `outputs/agents/my-deep-dives/` |
+| `brain-prepare-my-one-on-one` | `outputs/agents/my-one-on-one/` |
 
 ## When to Use
 
-Run at the start of each working day to fully bootstrap your brain and prepare all meeting agendas at once.
-
-## Execution Flow
-
-```
-Part 1: Tool updates (sequential)
-  ├─ Brew update & upgrade
-  ├─ npm update -g
-  ├─ gstack upgrade
-  ├─ uv sync --upgrade
-  ├─ gbrain reindex (mcp__gbrain__sync_brain)
-  └─ git pull --rebase
-  ↓
-Part 2a + Part 3 (parallel start)
-  ├─ brain-pull-sources ───────────────────────────────────┐
-  │    └─ Export ClickUp, Confluence, GDrive, Linear,     │
-  │       GitHub, Medium, Metabase → src/                │
-  │                                                      ↓
-  ├─ brain-pull-my-meeting-notes ────────────────────────┤
-       └─ Harvest meetings since last harvested day →     │
-          src/gmeet/                                  │
-                                                         │
-Part 2b: brain-rebuild-services ────────────────────────→┤
-  └─ Generate service docs from repos → outputs/services/│
-                                                         ↓
-Part 2b.5: agents/morning-start-additional/SKILL.md (if present)
-  └─ Run any `run <path>` directives it lists
-                                                         ↓
-Part 2c: brain-rebuild-memory ────────────────────────────┘
-  └─ Rebuild L2 domain knowledge + L1 MOCs → memory/
-     Phase 4.5 walks rebuilt files and calls
-     mcp__gbrain__add_link + add_timeline_entry → graph edges
-     and timeline entries. Pure MCP, no serve restart.
-                                                         ↓
-Part 4: Prepare today's meetings (after Part 2c complete)
-  ├─ Fetch calendar → classify events
-  ├─ brain-prepare-my-deep-dives (parallel per team)
-  │    └─ Query Linear → outputs/agents/my-deep-dives/
-  └─ brain-prepare-my-one-on-one (parallel per person)
-       └─ Query Linear → outputs/agents/my-one-on-one/
-  ↓
-Part 5: Final report
-```
-
-**Dependency chain:**
-1. `brain-pull-sources` exports all external sources to `src/`
-2. `brain-rebuild-services` reads `github/`, writes `outputs/services/*.AGENT.MD`
-3. `brain-rebuild-memory` reads `src/` + `outputs/services/`, writes `memory/L1/` + `memory/L2/`
-4. Meeting prep skills read `memory/L1/teams.md` and `memory/L1/team-members.md`
-
-**Independent/parallel:**
-- `brain-pull-my-meeting-notes` can run parallel with Part 2a (GWS/Calendar is independent)
+Run at the start of each working day to fully bootstrap the brain and prepare all meeting agendas at once.

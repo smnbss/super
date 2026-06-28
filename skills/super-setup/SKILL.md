@@ -204,8 +204,8 @@ Next steps (run from inside the brain project):
   2. /brain-pull-sources         → populate src/
   3. /brain-rebuild-services     → generate service docs
   4. /brain-rebuild-memory       → build L1/L2 navigation
-  5. Set up gbrain (mcp__gbrain__sync_brain or gbrain import + embed) →
-     build the hybrid search index
+  5. Set up gbrain (gbrain import <dir> --no-embed + gbrain embed --stale,
+     then gbrain extract links) → build the hybrid search index
 ```
 
 ## Rules
