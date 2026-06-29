@@ -143,3 +143,20 @@ mkdir -p "$REPO_ROOT/src"
 echo ""
 echo "Done. $success succeeded, $failed failed."
 echo "Manifest written to src/.last_export.json"
+
+# --- Scope the gbrain link graph to curated pages ---------------------------
+# The raw exports carry local-navigation markdown links (e.g. `[..](../INDEX.md)`,
+# `[file](file.md)`) — kept intentionally so src/ stays browsable. But gbrain's
+# `global_basename` resolution turns those into a multi-million-edge hairball
+# (`INDEX.md` → every `index` page, etc.). After any (re)extraction, drop link
+# edges that ORIGINATE from non-curated pages, keeping only the curated
+# memory/ + outputs/ graph. Idempotent; safe to run every time; no-op if gbrain
+# or psql aren't available (e.g. a thin checkout).
+if command -v gbrain >/dev/null 2>&1 && command -v psql >/dev/null 2>&1; then
+  DSN="$(gbrain config show 2>/dev/null | sed -n 's/^ *database_url: *//p')"
+  if [[ -n "$DSN" ]]; then
+    if psql "$DSN" -c "DELETE FROM links WHERE from_page_id NOT IN (SELECT id FROM pages WHERE slug LIKE 'memory/%' OR slug LIKE 'outputs/%');" >/dev/null 2>&1; then
+      echo "Scoped gbrain link graph to curated pages (memory/ + outputs/)."
+    fi
+  fi
+fi

@@ -42,7 +42,7 @@ Dispatch each as a subagent invoking the named skill; collect a short summary.
 - **2a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 3 in parallel with this.**
 - **2b `brain-rebuild-services`** — regenerate `.AGENT.MD` service docs from changed repos → `outputs/services/`. *After 2a.*
 - **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its `run <path>` directives in order. *After 2b, before 2c.*
-- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. Its Phase 4.5 materializes wikilink edges via native `gbrain extract links --dir memory` (+ a small custom pass for `verified:`-block timeline entries). **No embedding step here** — that's Part 5. *After 2b.5.*
+- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. It only **writes markdown**; the gbrain index (chunks, embeddings, wikilink edges, timeline) is refreshed by the single `gbrain sync` in Part 5. **No gbrain step inside 2c.** *After 2b.5.*
 
 ## Part 3 — Harvest meetings since last harvest (parallel with Part 2a)
 
@@ -77,30 +77,30 @@ gws calendar events list --params '{"calendarId":"primary","timeMin":"<TODAY_STA
 
 **4d/4e.** Spawn one `Agent` per meeting, **all in parallel**, each invoking `brain-prepare-my-deep-dives` (→ `outputs/agents/my-deep-dives/<team>.md`) or `brain-prepare-my-one-on-one` (→ `outputs/agents/my-one-on-one/<person>.md`) with `LOOKAHEAD_DAYS: 1`. The skills carry their own logic; just pass the meeting and collect the output path.
 
-## Part 5 — gbrain reindex (LIVE, no stop-server, runs LAST)
+## Part 5 — gbrain reindex (`gbrain sync`, LIVE, runs LAST)
 
-Every file is now written — src exports, gmeet, service docs, memory, today's agendas. Refresh the index in one pass. The brain runs on **Postgres** (multi-writer), so this runs **live against the always-on server — no `launchctl bootout`/`bootstrap`, no lock dance.** `gbrain import`/`embed` simply run concurrently with `gbrain serve --http` and the `io.weroad.gbrain.jobs` worker.
+Every file is now written — src exports, gmeet, service docs, memory, today's agendas. Refresh the index with **one incremental `gbrain sync`**: it git-diffs the repo, imports only changed files, embeds them, and extracts links/timeline — all in a single command. It runs live alongside the always-on server and the `io.weroad.gbrain.jobs` worker. The repo is the system of record (`gbrain.yml` at the root); pages are repo-relative-slugged (`memory/l1/hub`).
 
-> **Use `import`, not `sync`.** `gbrain sync` slugs pages from the repo root (`memory/l1/hub`), but this brain's pages are import-root-stripped (`l1/hub`) — `sync` would duplicate every page and break the wikilink graph + `brain-rebuild-memory` Phase 4.5. Keep `import`.
-
-Delegate to a subagent (returns the embedded-chunk delta). Import only the source dirs that actually changed this run, then one parallel embed pass:
+Delegate to a subagent (returns the sync delta):
 
 ```bash
 cd <brain-root> && set -a && source .env.local && set +a            # OPENAI_API_KEY + OPENAI_BASE_URL
-# import only dirs with working-tree changes (git-tracked); fall back to all if unsure
-CHANGED=$(git status --porcelain memory outputs src | awk '{print $2}' \
-  | awk -F/ '{ if ($1=="src") print $1"/"$2; else print $1 }' | sort -u)
-for d in ${CHANGED:-memory outputs src/clickup src/confluence src/outline src/linear \
-         src/gmeet src/medium src/metabase src/gdrive src/workflowly}; do
-  [ -d "$d" ] && gbrain import "$d" --no-embed                       # live; --no-embed defers embedding
-done
-gbrain embed --stale                                                 # ONE parallel pass (20× concurrency, real on Postgres)
-gbrain extract links --dir memory && gbrain extract links --dir outputs   # native edge extraction (idempotent)
+gbrain sync --repo "$(pwd)" --skip-failed --no-pull --yes           # incremental: import changed + embed + extract
+# Scope the link graph to curated pages: raw src/ exports are basename-resolved
+# into a huge hairball by global_basename, so drop links ORIGINATING from non-
+# curated pages (keep memory/ + outputs/). Idempotent; safe to run every sync.
+psql "$(gbrain config show 2>/dev/null | sed -n 's/^ *database_url: *//p')" -c \
+  "DELETE FROM links WHERE from_page_id NOT IN (SELECT id FROM pages WHERE slug LIKE 'memory/%' OR slug LIKE 'outputs/%');"
 ```
+
+Notes:
+- `--skip-failed` keeps a handful of oversized/binary `src/` exports (≈18 files: >5 MB markdown, null-byte PDF conversions) from blocking the sync; they auto-skip after 3 runs.
+- A daily run is **incremental** — only files changed since the last sync are re-imported/embedded/extracted, so it's fast (the full re-embed only happens on a `--full` rebuild).
+- `link_resolution.global_basename` must stay `true` (bare `[[hub]]`/`[[teams]]` wikilinks in the L1/L2 MOCs resolve by basename). That's also what inflates the src link graph — hence the cleanup above.
 
 One chunk fails embedding with `Forbidden` (a permanently 403-filtered page) — that's expected; `embed --stale` still exits 0. Don't pipe it through `| tail`. The server stays up throughout.
 
-**Faster alternative (fire-and-forget):** since the jobs worker is running, you can background the embed — `gbrain embed --stale --background` enqueues to `io.weroad.gbrain.jobs` and returns immediately, so Part 6 doesn't wait on embedding.
+**Fire-and-forget option:** to avoid blocking Part 6 on embedding, run `gbrain sync --repo "$(pwd)" --no-embed --skip-failed --no-pull --yes` then `gbrain embed --stale --background` (the `io.weroad.gbrain.jobs` worker drains the embed). Still run the link-scoping `DELETE` after.
 
 ## Part 6 — Final report
 
@@ -123,11 +123,11 @@ gbrain reindex: <N> chunks embedded
 ```
 Part 1 tools (parallel) ─┐
                          ↓
-Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (edges via native extract)
+Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (writes markdown only)
 Part 3 harvest ────────┘  (3 runs parallel to 2a)                        ↓
                                                           Part 4 prep agents (parallel)
                                                                          ↓
-                                       Part 5 gbrain reindex — LIVE import+embed (server stays up)
+                                       Part 5 gbrain reindex — single `gbrain sync` (server stays up)
                                                                          ↓
                                                                   Part 6 report
 ```
