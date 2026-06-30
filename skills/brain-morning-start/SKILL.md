@@ -46,7 +46,7 @@ Dispatch each as a subagent invoking the named skill; collect a short summary.
 
 ## Part 3 — Harvest meetings since last harvest (parallel with Part 2a)
 
-Subagent invoking `brain-pull-my-meeting-notes` for every day since the last harvested day through yesterday (backfills weekends/holidays/travel).
+Two stages, dispatched to one subagent (collect a short summary): a **deterministic harvest** (the `gmeet_to_md` extractor) followed by **LLM digest generation** (the [Meeting digest generation](#meeting-digest-generation) appendix below). Backfills every day since the last harvested day through yesterday (weekends/holidays/travel). Reads GWS/Calendar — independent of brain memory.
 
 **Detect `LAST_HARVESTED`** — the most recent `MM-DD` folder with a daily digest:
 
@@ -56,7 +56,15 @@ ls -1d src/gmeet/*/W*/??-?? 2>/dev/null \
   | sort | tail -1
 ```
 
-Reconstruct `YYYY-MM-DD` from the `YYYY/WNN/MM-DD` path, then invoke with `--since LAST_HARVESTED` (the skill is idempotent and re-runs the last day safely). If none found, run the default (yesterday) and note it's a first run. Reads GWS/Calendar — independent of brain memory.
+Reconstruct `YYYY-MM-DD` from the `YYYY/WNN/MM-DD` path. If none found, use yesterday and note it's a first run.
+
+**3a — Harvest raw artifacts (deterministic, no LLM).** Run the `gmeet_to_md` extractor (it lives in the `brain-pull-sources` skill's `bin/`) for the authenticated gws user. It walks Calendar, discovers Drive artifacts (Gemini notes, agendas, recordings, attachments, transcripts), and writes per-meeting folders + a static per-day `index.md` under `src/gmeet/YYYY/WNN/MM-DD/`. It is idempotent and re-runs the last day safely — the full-span re-harvest self-heals gaps and **preserves existing `*-digest.md` and `transcript.md`** files:
+
+```bash
+bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"   # from skills/brain-pull-sources/
+```
+
+**3b — Generate digests (LLM synthesis).** For each harvested day, generate the daily digest, then roll up the weekly / monthly / YTD digests, following the [Meeting digest generation](#meeting-digest-generation) appendix. These are the LLM rollups `gmeet_to_md` deliberately does not produce.
 
 ## Part 4 — Prepare today's meetings
 
@@ -141,10 +149,199 @@ The reindex is intentionally **last**: it depends on every prior write (includin
 | `brain-pull-sources` | `src/<source>/` |
 | `brain-rebuild-services` | `outputs/services/` |
 | `brain-rebuild-memory` | `memory/L1/`, `memory/L2/` |
-| `brain-pull-my-meeting-notes` | `src/gmeet/` |
+| `gmeet_to_md` (in `brain-pull-sources`) + [digest appendix](#meeting-digest-generation) | `src/gmeet/` |
 | `brain-prepare-my-deep-dives` | `outputs/agents/my-deep-dives/` |
 | `brain-prepare-my-one-on-one` | `outputs/agents/my-one-on-one/` |
 
 ## When to Use
 
 Run at the start of each working day to fully bootstrap the brain and prepare all meeting agendas at once.
+
+---
+
+## Meeting digest generation
+
+Used by **Part 3b**. The raw per-meeting artifacts and the static per-day `index.md` are produced deterministically by `gmeet_to_md` (Part 3a) — these steps are the **LLM synthesis** on top of them: a daily digest per harvested day, then weekly → monthly → YTD rollups. (Formerly Steps 6–9 of the retired `brain-pull-my-meeting-notes` skill.)
+
+Process each harvested day, then roll up at week / month / year boundaries as they complete.
+
+### Daily digest (LLM synthesis, per-meeting then rollup)
+
+A two-pass synthesis. The agent reads the artifacts in each day's meeting folders and produces the digest.
+
+**Pass 1 — per-meeting summary.** For each meeting that has notes or a transcript, read the artifact and produce a structured summary:
+- **Key decisions** made in the meeting
+- **Action items** with owner (@ mention)
+- **Key points** (3–5 bullets of what was discussed)
+
+If a meeting has no artifacts (just metadata), include it with: "No Gemini notes or transcript available."
+
+**Pass 2 — daily rollup.** Aggregate all per-meeting summaries into the daily digest:
+
+```markdown
+# Meeting Digest: YYYY-MM-DD
+
+## Summary
+- N meetings, Xh Ym total meeting time
+- N had Gemini notes, M had recordings, K had transcripts
+
+## Meetings
+
+### 1. Meeting Title (HH:MM–HH:MM)
+**Attendees:** names
+**Key decisions:**
+- Decision 1
+- Decision 2
+
+**Action items:**
+- [ ] @person: action description
+
+**Key points:**
+- Point 1
+- Point 2
+
+[Full notes](meeting-slug/notes.md)
+
+### 2. Next Meeting (HH:MM–HH:MM)
+...
+
+## Cross-Meeting Action Items
+- [ ] @simone: action from meeting 1
+- [ ] @cass: action from meeting 3
+
+## Brain Updates
+- L2/teams.md: UPDATE <team changes discussed today>
+```
+
+**Brain Updates rules:**
+- Only include updates when a meeting produced a clear, actionable decision that changes the state of the world.
+- Format: `- L2/<file>.md: <ACTION> <description>` where `<ACTION>` is `ADD` (new fact), `UPDATE` (refresh existing), or `REMOVE` (mark superseded).
+- Map decisions to the right L2 file by topic (releases, teams, data, product areas, etc.).
+- If no meetings produced L2-worthy decisions, omit the Brain Updates section entirely.
+
+**Linear project links:** if notes/transcripts mention specific Linear projects, resolve each project's URL via `get_project` / `list_projects` and format the name as a markdown link `[Project Name](url)` in summaries, Brain Updates, and action items.
+
+Save as `src/gmeet/YYYY/WNN/MM-DD/MM-DD-digest.md`.
+
+### Weekly digest
+
+After all days in a week are processed, read all daily digests for the week and produce a rollup:
+
+```markdown
+# Weekly Meeting Digest: YYYY WNN
+
+## Week Summary
+- N meetings across M days
+- Xh Ym total meeting time
+- N had notes, M had recordings
+
+## Major Decisions This Week
+- [Mon] Decision from meeting X
+- [Tue] Decision from meeting Y
+
+## Key Action Items
+- [ ] @person: action (from Meeting Name, Day)
+
+## Daily Breakdown
+
+### Monday MM-DD
+- Meeting 1: key point
+[Full digest](MM-DD/MM-DD-digest.md)
+
+### Tuesday MM-DD
+...
+
+## Brain Updates
+- L2/file.md: ACTION description (aggregated from daily digests)
+```
+
+Save as `src/gmeet/YYYY/WNN/WNN-weekly-digest.md`. Aggregate and deduplicate Brain Updates from the daily digests — if multiple days update the same L2 file, combine into one update with the latest state.
+
+### Monthly digest
+
+After all weeks in a month are processed, read all weekly digests and produce a year-level rollup:
+
+```markdown
+# Monthly Meeting Digest: YYYY-MM (Month Name)
+
+## Month at a Glance
+- N meetings across M days
+- Xh total meeting time
+- N had notes, M had recordings
+
+## Strategic Decisions
+Highlight the 5–10 most important decisions made this month — ones that change direction, launch initiatives, or commit resources. Group by theme, not by date.
+
+### Theme 1: [e.g., US Launch Preparation]
+- Decision A (Week WNN)
+- Decision B (Week WNN)
+
+### Theme 2: [e.g., AI/ML Initiatives]
+- Decision C (Week WNN)
+
+## Key Action Items (Still Open)
+Only strategic or cross-team items; skip small/tactical ones.
+- [ ] @person: action (from WNN)
+
+## Week-by-Week Summary
+
+### WNN (MM-DD to MM-DD)
+2–3 sentence summary of the week's focus.
+[Full weekly digest](WNN/WNN-weekly-digest.md)
+
+## Themes & Patterns
+What recurring topics dominated meetings this month? What shifted from last month? 2–3 paragraphs of high-level synthesis.
+
+## Brain Updates
+- L2/file.md: ACTION description (aggregated from weekly digests, deduplicated)
+```
+
+Save as `src/gmeet/YYYY/MM-monthly-digest.md`. This is the executive summary — readable in 2 minutes, capturing what someone who missed the whole month needs to know.
+
+### Year-to-date digest
+
+After monthly digests are complete, update the YTD digest — a living document tracking the full year's trajectory. Read all monthly digests and the previous YTD digest (if it exists):
+
+```markdown
+# Year-to-Date Meeting Digest: YYYY
+
+## YTD Stats
+- N meetings across M months
+- N had notes, M had recordings
+
+## Decision Tracker
+
+### Active Decisions (still in effect)
+| Decision | Made | Week | Status |
+|----------|------|------|--------|
+| Google Login as primary auth | Jan | W02 | Active |
+
+### Resolved / Completed
+| Decision | Made | Resolved | Outcome |
+|----------|------|----------|---------|
+| Zero deposit launch for DE/.COM | Jan W03 | Jan W03 | Launched Jan 19 |
+
+### Superseded / Changed
+| Original Decision | Made | Changed | New Direction |
+|-------------------|------|---------|---------------|
+| (decisions that were reversed or modified) |
+
+## Action Item Tracker
+
+### Open (still pending)
+- [ ] @person: action (from Month/Week) — status update if known
+
+### Completed
+- [x] @person: action (from Month/Week) — completed Month/Week
+
+### Dropped / Deprioritized
+- [~] @person: action (from Month/Week) — reason
+
+## Monthly Arc
+One paragraph per month describing the narrative arc: focus, what shifted, what carried forward.
+
+## Emerging Themes
+Threads that span multiple months. What's accelerating? What stalled?
+```
+
+Save as `src/gmeet/YYYY/YYYY-ytd-digest.md`. Cumulative: each run preserves and updates the decision/action trackers from prior runs — marking items resolved when later meetings show completion, and superseded when direction changed.
