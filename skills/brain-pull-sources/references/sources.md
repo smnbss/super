@@ -9,3 +9,5 @@ linear_to_md https://linear.app/<your-org>/projects/all                         
 linear_issues_to_md https://linear.app/<your-org>/team/<TEAM_KEY>/projects/all                                   # Team issues
 
 metabase_index https://metabase.<your-domain>.io/                                                            # Metabase
+
+personio_to_md                                                                                               # Staff roster (Personio API v1) — needs PERSONIO_CLIENT/PERSONIO_SECRET in .env.local

@@ -22,7 +22,7 @@ All paths below are relative to the repo root (`git rev-parse --show-toplevel`).
 | Reference templates | `references/` (relative to this skill) |
 | Source manifests | `sources.md` + `sources.github.md` (repo root) |
 | Secrets | `.env.local` (repo root, gitignored) |
-| Export output | non-GitHub → `src/clickup/`, `src/confluence/`, `src/gdrive/`, `src/linear/`, `src/medium/`, `src/metabase/`; GitHub → `github/<owner>/<repo>/` |
+| Export output | non-GitHub → `src/clickup/`, `src/confluence/`, `src/gdrive/`, `src/linear/`, `src/medium/`, `src/metabase/`, `src/personio/`; GitHub → `github/<owner>/<repo>/` |
 | Last export manifest | `src/.last_export.json` |
 
 **Resolving the skill path at runtime:**
@@ -58,6 +58,8 @@ Only proceed to the pipeline once all keys are present and non-empty.
 | `METABASE_URL` | `metabase_index` | Metabase instance URL |
 | `METABASE_API_KEY` | `metabase_index` | Metabase API key |
 | `GITHUB_TOKEN` | `github_clone` | GitHub PAT (optional — public repos work without) |
+| `PERSONIO_CLIENT` | `personio_to_md` | Personio API client id (Settings → Integrations → API credentials) |
+| `PERSONIO_SECRET` | `personio_to_md` | Personio API client secret |
 | `GCP_PROJECT_ID` | general | GCP project for BigQuery/logging |
 
 ---
@@ -73,6 +75,7 @@ Source commands (the `github_clone` command lives in `sources.github.md`; all th
 - `linear_issues_to_md <url>` — export ALL issues for a Linear team or project (including triage). **Incremental**: keeps a per-issue `updatedAt` map in `.issues-registry.json` and re-fetches the full description + rewrites the file only for issues that changed since the last run (the index is always rebuilt from the cheap bulk query). `--force` re-fetches everything. (A no-change run of a ~120-issue project drops from ~85s to ~2s.)
 - `metabase_index <url>` — export full Metabase index
 - `gmeet_to_md <email>` — harvest meeting notes/agendas/recordings/attachments the email is invited to (Google Calendar + Drive) into `src/gmeet/`; deterministic Steps 1–5 of `brain-pull-my-meeting-notes`, no LLM digests. Incremental via `src/gmeet/.registry.json`; `--since` / `--day` / `--days` / `--force` / `--list`. Assumes `email` == the authenticated gws user.
+- `personio_to_md` — export the staff roster from the Personio API (v1 `/company/employees`) into `src/personio/personio-staff.tsv` (canonical columns — ID, name, email, position, department, team, office, hire date, status, supervisor, contract end, occupation type). Takes no URL; authenticates with `PERSONIO_CLIENT`/`PERSONIO_SECRET` from `.env.local`. Attributes are flattened **by label**, so company-specific dynamic attributes (Team, Office) are picked up automatically and the export survives Personio attribute-id changes. Flags: `--list`, `--limit N` (page size, default 200), `--base-url`, `--verbose`. If a canonical column comes back empty it prints a NOTE — usually the credential's readable-attributes scope in Personio needs widening. The bearer token used is read-only on persons/employees. (Replaces the retired `brain-personio-staff-sync` browser-scrape skill.)
 
 GitHub repos are full clones (~48 repos from the IDP service catalog).
 

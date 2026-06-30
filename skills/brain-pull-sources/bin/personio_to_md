@@ -1,0 +1,9 @@
+#!/bin/bash
+# Personio staff roster exporter wrapper
+# Usage: personio_to_md [--base-url URL] [--limit N] [--list] [--verbose]
+# Creds: PERSONIO_CLIENT / PERSONIO_SECRET in .env.local
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+python3 "$PROJECT_ROOT/utils/personio_to_md.py" "$@"
