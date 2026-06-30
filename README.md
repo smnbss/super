@@ -157,7 +157,6 @@ Skills for building and syncing a personal knowledge brain (formerly the `smnbss
 | **brain-prepare-my-one-on-one** | Prepare 1:1 agendas from Linear + brain context |
 | **brain-prepare-my-deep-dives** | Prepare deep-dive agendas per team |
 | **brain-morning-start** | Daily bootstrap (sync + meeting notes + agendas) |
-| **brain-push-reports** | Push agent outputs back to ClickUp |
 | **brain-weekly-review** | Weekly summary from Workflowy + X + Linear |
 | **brain-git-sync** | Commit and push brain changes |
 | **brain-linear-create-project-context** / **-process-ideas** / **-process-tasks** | Linear workflows |
