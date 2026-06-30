@@ -279,6 +279,9 @@ def main():
     ap.add_argument("--client", default="", help="API client id (else PERSONIO_CLIENT env).")
     ap.add_argument("--secret", default="", help="API client secret (else PERSONIO_SECRET env).")
     ap.add_argument("--limit", type=int, default=200, help="Page size (default 200).")
+    ap.add_argument("--include-inactive", action="store_true",
+                    help="Keep inactive/ex-employees (default: active staff only — "
+                         "active, leave, onboarding).")
     ap.add_argument("--list", action="store_true",
                     help="Print current export status and exit.")
     ap.add_argument("--verbose", action="store_true")
@@ -315,6 +318,14 @@ def main():
 
     rows = [employee_to_row(e) for e in employees]
     rows.sort(key=lambda r: (r.get("Last Name", "").lower(), r.get("First Name", "").lower()))
+
+    total_fetched = len(rows)
+    if not args.include_inactive:
+        rows = [r for r in rows if r.get("Status", "").strip().lower() != "inactive"]
+        dropped = total_fetched - len(rows)
+        if dropped:
+            print(f"Filtered out {dropped} inactive employees "
+                  f"(use --include-inactive to keep them).")
 
     write_tsv(rows)
 
