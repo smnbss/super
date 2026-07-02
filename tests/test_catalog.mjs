@@ -1,6 +1,6 @@
 // tests/test_catalog.mjs — Tests for catalog module
 import { strict as assert } from 'assert';
-import { isInstalled, installedClis, computeYoloSettingsUpdate } from '../lib/catalog.mjs';
+import { isInstalled, installedClis, computeYoloSettingsUpdate, CLI_BINARY, buildMcpEntry } from '../lib/catalog.mjs';
 
 let passed = 0, failed = 0;
 
@@ -29,11 +29,40 @@ test('installedClis returns array of strings', () => {
 });
 
 test('installedClis only returns valid CLI names', () => {
-  const valid = ['claude', 'gemini', 'codex'];
+  const valid = ['claude', 'gemini', 'codex', 'antigravity'];
   const clis = installedClis();
   for (const cli of clis) {
     assert.ok(valid.includes(cli), `Unexpected CLI: ${cli}`);
   }
+});
+
+// ─── Antigravity CLI (agy) ───────────────────────────────────────────────
+console.log('\nAntigravity (agy)');
+
+test('CLI_BINARY maps antigravity → agy', () => {
+  assert.strictEqual(CLI_BINARY.antigravity, 'agy');
+  assert.strictEqual(CLI_BINARY.claude, 'claude');
+});
+
+test('buildMcpEntry(antigravity) uses serverUrl for HTTP servers', () => {
+  const entry = buildMcpEntry({ url: 'https://mcp.example/mcp', headers: { Authorization: 'Bearer x' } }, 'antigravity');
+  assert.strictEqual(entry.serverUrl, 'https://mcp.example/mcp');
+  assert.strictEqual(entry.url, undefined, 'must not emit a `url` field');
+  assert.deepStrictEqual(entry.headers, { Authorization: 'Bearer x' });
+});
+
+test('buildMcpEntry(antigravity) keeps command/args for stdio servers', () => {
+  const entry = buildMcpEntry({ command: 'npx', args: ['-y', 'some-mcp'], env: { K: 'v' } }, 'antigravity');
+  assert.strictEqual(entry.command, 'npx');
+  assert.deepStrictEqual(entry.args, ['-y', 'some-mcp']);
+  assert.deepStrictEqual(entry.env, { K: 'v' });
+  assert.strictEqual(entry.serverUrl, undefined);
+});
+
+test('buildMcpEntry(gemini) still uses url (regression)', () => {
+  const entry = buildMcpEntry({ url: 'https://mcp.example/mcp' }, 'gemini');
+  assert.strictEqual(entry.url, 'https://mcp.example/mcp');
+  assert.strictEqual(entry.serverUrl, undefined);
 });
 
 // ─── computeYoloSettingsUpdate ───────────────────────────────────────────

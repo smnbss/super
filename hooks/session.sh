@@ -84,6 +84,7 @@ _cli_icon() {
     claude|claude-code|claude\ code)    echo "🟠" ;;
     gemini|gemini\ cli)                 echo "🔵" ;;
     codex|codex\ cli)                   echo "🟢" ;;
+    antigravity|antigravity\ cli|agy)   echo "🪽" ;;
     *)                                  echo "⚪" ;;
   esac
 }

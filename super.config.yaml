@@ -118,6 +118,12 @@ clis:
     install: "sh -c 'npm install -g @openai/codex 2>/dev/null || sudo -n npm install -g @openai/codex'"
     check: "command -v codex"
     enabled: true
+  antigravity:
+    # Google's Go-based agent CLI (`agy`) — replaces the Gemini CLI. The
+    # official installer is SHA512-verified and drops the binary in ~/.local/bin.
+    install: "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+    check: "command -v agy"
+    enabled: true
 
 security:
   yoloMode: true

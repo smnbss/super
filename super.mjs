@@ -44,6 +44,7 @@ const CLI = {
   claude: { cmd: 'claude', icon: '🟠', label: 'Claude Code', ctx: 'CLAUDE.md' },
   gemini: { cmd: 'gemini', icon: '🔵', label: 'Gemini CLI', ctx: 'GEMINI.md' },
   codex:  { cmd: 'codex',  icon: '🟢', label: 'Codex CLI',  ctx: 'AGENTS.md' },
+  antigravity: { cmd: 'agy', icon: '🪽', label: 'Antigravity CLI', ctx: 'AGENTS.md' },
 };
 
 function die(msg) { ui.error(msg); process.exit(1); }
@@ -156,6 +157,7 @@ function cmdDoctor() {
     claude: join(root, '.claude', 'settings.json'),
     gemini: join(root, '.gemini', 'settings.json'),
     codex:  join(root, '.codex', 'hooks.json'),
+    antigravity: join(root, '.agents', 'hooks.json'),
   };
   for (const [name, path] of Object.entries(hookFiles)) {
     const c = CLI[name];
@@ -281,11 +283,35 @@ function installHooksCodex() {
   else { writeFileSync(hf, JSON.stringify(data, null, 2) + '\n'); ui.success(`Created ${hf}`); }
 }
 
+function installHooksAntigravity() {
+  const root = config.findRoot();
+  const dir = join(root, '.agents'); mkdirSync(dir, { recursive: true });
+  const hf = join(dir, 'hooks.json');
+  const template = join(SUPER_HOME, 'hooks', 'antigravity', 'hooks.json.template');
+  // agy requires ABSOLUTE command paths (relative → exit 127) and does not
+  // shell-expand $SUPER_HOME, so resolve the placeholder to the real path here
+  // rather than via expandTemplate (which emits a literal $SUPER_HOME).
+  const raw = readFileSync(template, 'utf8')
+    .replace(/\{\{SUPER_HOME\}\}/g, SUPER_HOME)
+    .replace(/\$SUPER_HOME/g, SUPER_HOME);
+  const data = JSON.parse(raw);
+  const existed = existsSync(hf);
+  const existing = existed ? JSON.parse(readFileSync(hf, 'utf8')) : {};
+  const merged = catalog.mergeAgyHooks(existing, data);
+  writeFileSync(hf, JSON.stringify(merged, null, 2) + '\n');
+  ui.success(`${existed ? 'Updated' : 'Created'} ${hf}`);
+}
+
 function installHooks(target) {
-  const installers = { claude: installHooksClaude, gemini: installHooksGemini, codex: installHooksCodex };
+  const installers = {
+    claude: installHooksClaude,
+    gemini: installHooksGemini,
+    codex: installHooksCodex,
+    antigravity: installHooksAntigravity,
+  };
   if (target === 'all') { Object.values(installers).forEach(fn => fn()); }
   else if (installers[target]) { installers[target](); }
-  else die(`Unknown CLI: ${target}. Use: all|claude|gemini|codex`);
+  else die(`Unknown CLI: ${target}. Use: all|claude|gemini|codex|antigravity`);
 }
 
 function setupContextFiles() {
@@ -893,7 +919,7 @@ async function cmdResume(input) {
 
     // Build recovery options
     const modelInfo = originalModel ? ` [${originalModel}]` : '';
-    const cliIcon = { claude: '🟠', gemini: '🔵', codex: '🟢' }[originalCli] || '⚪';
+    const cliIcon = { claude: '🟠', gemini: '🔵', codex: '🟢', antigravity: '🪽' }[originalCli] || '⚪';
 
     const options = [
       `↩️  Resume with same settings (${cliIcon} ${originalCli}${modelInfo})`,
@@ -1004,7 +1030,7 @@ function cmdSessions() {
   ui.section('Sessions');
   sessions.forEach((s, i) => {
     const marker = s.isActive ? ` ${ui.colors.success(ui.icons.active)}` : '';
-    const cliIcon = { claude: '🟠', gemini: '🔵', codex: '🟢' }[s.cli] || '⚪';
+    const cliIcon = { claude: '🟠', gemini: '🔵', codex: '🟢', antigravity: '🪽' }[s.cli] || '⚪';
     const modelInfo = s.model ? ` [${s.model}]` : '';
     ui.print(`  ${ui.colors.bold(String(i + 1).padStart(2))}  ${cliIcon}  ${s.started.padEnd(20)}  ${String(s.turns).padStart(2)} turns  ${s.title.padEnd(40)}${modelInfo}${marker}`);
   });
@@ -1070,20 +1096,33 @@ function cmdConfig(args) {
 function cmdUninstall() {
   const root = config.findRoot();
   ui.brand('Removing super hooks...');
+  const stripSuperDefs = (defs) =>
+    (defs || []).filter(g => !(g.hooks || []).some(h => (h.command || h.name || '').includes('super')));
   for (const [name, hookFile] of Object.entries({
     claude: join(root, '.claude', 'settings.json'),
     gemini: join(root, '.gemini', 'settings.json'),
     codex: join(root, '.codex', 'hooks.json'),
+    antigravity: join(root, '.agents', 'hooks.json'),
   })) {
     if (!existsSync(hookFile)) continue;
     try {
       const data = JSON.parse(readFileSync(hookFile, 'utf8'));
       if (data.hooks) {
+        // claude/gemini/codex shape: { hooks: { <event>: [defs] } }
         for (const ev of Object.keys(data.hooks)) {
-          data.hooks[ev] = data.hooks[ev].filter(g =>
-            !(g.hooks || []).some(h => (h.command || h.name || '').includes('super'))
-          );
+          data.hooks[ev] = stripSuperDefs(data.hooks[ev]);
           if (data.hooks[ev].length === 0) delete data.hooks[ev];
+        }
+      } else if (name === 'antigravity') {
+        // agy shape: { <hookName>: { <event>: [defs] } }
+        for (const hookName of Object.keys(data)) {
+          const events = data[hookName];
+          if (!events || typeof events !== 'object') continue;
+          for (const ev of Object.keys(events)) {
+            events[ev] = stripSuperDefs(events[ev]);
+            if (events[ev].length === 0) delete events[ev];
+          }
+          if (Object.keys(events).length === 0) delete data[hookName];
         }
       }
       writeFileSync(hookFile, JSON.stringify(data, null, 2) + '\n');
@@ -1137,7 +1176,7 @@ const OLLAMA_MODELS = [
 
 async function launchWizard() {
   // Step 1: Pick CLI
-  const clis = ['claude', 'gemini', 'codex'].filter(c => catalog.isInstalled(c));
+  const clis = ['claude', 'gemini', 'codex', 'antigravity'].filter(c => catalog.isInstalled(c));
   if (clis.length === 0) { die('No CLI tools installed. Run: super install'); return; }
 
   const cliOptions = clis.map(c => `${CLI[c].icon}  ${CLI[c].label}`);
@@ -1184,9 +1223,9 @@ USAGE
   super [command] [options]
 
 COMMANDS
-  install [target]     Full install — hooks, CLIs, system prereqs, built-in + external skills, plugins, MCPs, context files (all|claude|gemini|codex)
+  install [target]     Full install — hooks, CLIs, system prereqs, built-in + external skills, plugins, MCPs, context files (all|claude|gemini|codex|antigravity)
   onboard              One-shot post-install: runs install, walks CLI + service logins, launches /super-setup
-  claude|gemini|codex  Launch CLI with session tracking
+  claude|gemini|codex|antigravity  Launch CLI with session tracking (alias: agy)
   resume [session]     Resume a previous session
   switch <cli>         Continue session in different CLI
   sessions             List all sessions
@@ -1238,6 +1277,7 @@ async function cmdQuickActive() {
   let cli = 'claude';
   if (lastTurn.includes('🔵')) cli = 'gemini';
   else if (lastTurn.includes('🟢')) cli = 'codex';
+  else if (lastTurn.includes('🪽')) cli = 'antigravity';
   cmdLaunch(cli, ['--resume', active]);
 }
 
@@ -1270,6 +1310,7 @@ function cliDefaultArgs(cli) {
       claude: '--dangerously-skip-permissions',
       gemini: '--yolo',
       codex:  '--yolo',
+      antigravity: '--dangerously-skip-permissions',
     }[cli];
     if (yoloFlag) args.push(yoloFlag);
   }
@@ -1308,7 +1349,8 @@ async function main() {
     case '--version': case '-v': console.log(`super v${VERSION}`); break;
     case 'help': case '--help': case '-h': cmdHelp(); break;
     case 'menu': await cmdMenu(); break;
-    case 'claude': case 'gemini': case 'codex': cmdLaunch(cmd, rest); break;
+    case 'claude': case 'gemini': case 'codex': case 'antigravity': cmdLaunch(cmd, rest); break;
+    case 'agy': cmdLaunch('antigravity', rest); break;
     default: die(`Unknown command: ${cmd}. Run: super help`);
   }
 }

@@ -1,6 +1,6 @@
 # super
 
-Cross-CLI session bridge for **Claude Code**, **Gemini CLI**, and **Codex CLI**.
+Cross-CLI session bridge for **Claude Code**, **Gemini CLI**, **Codex CLI**, and **Antigravity CLI** (`agy`).
 
 Work in one CLI, switch to another, and your conversation follows you. Sessions are plain Markdown files tracked in git.
 
@@ -55,6 +55,8 @@ Re-running `super install` without `--debug` removes those symlinks again.
 super claude                # Launch Claude Code (default: opus)
 super gemini                # Launch Gemini CLI
 super codex                 # Launch Codex CLI
+super antigravity           # Launch Antigravity CLI (alias: super agy)
+super agy                   # Same as: super antigravity
 
 # Launch with specific model (Claude Code only)
 super claude --model sonnet # Launch Claude with Sonnet model
@@ -177,14 +179,21 @@ Plugins (Claude Code only) and MCP servers are declared in `super.config.yaml`. 
 
 ### Hooks coverage
 
-| Event | Claude | Gemini | Codex |
-|-------|:------:|:------:|:-----:|
-| Session start | yes | yes | yes |
-| User prompt | yes | yes | yes |
-| AI response | yes | yes | partial |
-| Shell commands | yes | yes | Bash only |
-| File writes | yes | yes | no |
-| Session end | yes | yes | no |
+| Event | Claude | Gemini | Codex | Antigravity† |
+|-------|:------:|:------:|:-----:|:-----------:|
+| Session start | yes | yes | yes | SessionStart |
+| User prompt | yes | yes | yes | PreInvocation |
+| AI response | yes | yes | partial | PostInvocation |
+| Shell commands | yes | yes | Bash only | PostToolUse |
+| File writes | yes | yes | no | PostToolUse |
+| Session end | yes | yes | no | Stop |
+
+Antigravity (`agy`) hooks live in `.agents/hooks.json` (named-hook shape,
+absolute command paths, second-based timeouts) and are trust-gated via
+`~/.gemini/trustedFolders.json`. † The event wiring matches Google's documented
+`agy` hook contract; hooks fire in interactive `agy` sessions (not `--print`
+mode). Hook stdin payload field names for the user/assistant message text are
+parsed defensively pending a byte-for-byte live capture.
 
 ## Ubuntu setup
 
