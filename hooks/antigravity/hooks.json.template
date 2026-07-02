@@ -1,0 +1,40 @@
+{
+  "super": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{SUPER_HOME}}/hooks/antigravity/session_start.sh", "timeout": 10 }
+        ]
+      }
+    ],
+    "PreInvocation": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{SUPER_HOME}}/hooks/antigravity/pre_invocation.sh", "timeout": 10 }
+        ]
+      }
+    ],
+    "PostInvocation": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{SUPER_HOME}}/hooks/antigravity/post_invocation.sh", "timeout": 15 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "{{SUPER_HOME}}/hooks/antigravity/post_tool_use.sh", "timeout": 10 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{SUPER_HOME}}/hooks/antigravity/stop.sh", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

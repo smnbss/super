@@ -684,6 +684,22 @@ test('returns a new array, does not mutate input', () => {
   assert.deepStrictEqual(args, ['agents']);
 });
 
+console.log('\nAntigravity (agy) subcommands');
+
+test('antigravity subcommands are recognised', () => {
+  for (const sub of ['install', 'plugin', 'plugins', 'models', 'update', 'changelog']) {
+    assert.strictEqual(isCliSubcommand('antigravity', [sub]), true, `${sub} should be recognised`);
+  }
+});
+
+test('antigravity: a plain prompt is not a subcommand', () => {
+  assert.strictEqual(isCliSubcommand('antigravity', ['fix the bug']), false);
+});
+
+test('antigravity banner label includes model + no provider', () => {
+  assert.strictEqual(buildBannerLabel('Antigravity CLI', '', ['--model', 'gpt-oss']), 'Antigravity CLI (gpt-oss)');
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
