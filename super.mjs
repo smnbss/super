@@ -1299,7 +1299,9 @@ async function cmdQuickSearch() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function which(cli) {
-  try { return execSync(`command -v ${cli}`, { encoding: 'utf8' }).trim(); } catch { return ''; }
+  // Resolve the CLI key to its actual binary (e.g. antigravity → agy).
+  const bin = catalog.CLI_BINARY[cli] || cli;
+  try { return execSync(`command -v ${bin}`, { encoding: 'utf8' }).trim(); } catch { return ''; }
 }
 
 // Build CLI-specific default args (e.g. yolo mode)
