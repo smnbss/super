@@ -183,7 +183,27 @@ super install --all
 
 Skip this step if nothing in `.env.local` changed during Q&A (e.g. the user only toggled source flags but didn't paste any new secrets). When in doubt, run it — it's idempotent.
 
-Also suggest at this point: substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders still in `.env.local` using the values already collected in Steps 4–7 where unambiguous, via targeted `Edit` calls. Leave placeholders alone when in doubt.
+Also substitute any `<your-org>` / `<your-gcp-project>` / `<your-domain>` placeholders still in `.env.local` using the values already collected in Steps 4–7 where unambiguous. Leave placeholders alone when in doubt.
+
+**⚠️ `.env.local` edits are value-only — never touch key names.** `.env.local` is a dense `KEY=value` file; a fuzzy `Edit` that grazes an adjacent line silently corrupts a key name (observed real breakage: `CLICKUP_TOKEN`→`_TOKENCLICKUP_TOKEN`, `LINEAR_TOKEN`→`LINEAR`), which makes the brain source exports fail en masse on the next run. So:
+
+1. **Back up first**, then substitute only the text to the *right* of `=` with a key-anchored `sed` (never a freeform `Edit`, which can clip the key or `=`):
+
+   ```bash
+   cp "<project>/.env.local" "<project>/.env.local.bak"
+   # one line per placeholder actually being filled, e.g.:
+   sed -i '' -E 's|^(CONFLUENCE_SUBDOMAIN=).*|\1acme|' "<project>/.env.local"
+   ```
+   The `^(KEY=)` anchor guarantees the key name and `=` are preserved verbatim — only the value changes.
+
+2. **Validate key names are intact** against the template, then drop the backup (or restore it if a key went missing):
+
+   ```bash
+   comm -23 \
+     <(grep -oE '^[A-Z_][A-Z0-9_]*=' "$SUPER_HOME/references/env.example" | sort) \
+     <(grep -oE '^[A-Z_][A-Z0-9_]*=' "<project>/.env.local" | sort)
+   ```
+   Empty output = every template key still present → `rm <project>/.env.local.bak`. Any output = a key was renamed/dropped → restore (`mv <project>/.env.local.bak <project>/.env.local`), report it, and do not retry blind.
 
 ### Step 12 — Recap + next steps
 
