@@ -100,7 +100,8 @@ run_lane() {
   while IFS= read -r cmd; do
     [[ -z "$cmd" ]] && continue
     local tool="${cmd%% *}"
-    local args="${cmd#* }"
+    local args=""
+    [[ "$cmd" == *" "* ]] && args="${cmd#* }"
     echo ">>> $cmd"
     if "$SCRIPT_DIR/$tool" $args > "$res_file.log" 2>&1; then
       echo "OK" >> "$res_file"
