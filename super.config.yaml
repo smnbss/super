@@ -180,6 +180,16 @@ plugins:
     source: weroad/ai
     description: WeRoad AI — dbt-modeling, presentations, devops, data-analyst, codex
     enabled: true
+  weroad-cli:
+    # Bundles 11 read-mostly infra CLIs (bigquery, postgres, gcloud, kubernetes,
+    # helm, wr-linear, linear, wrcli, slack, litellm, fusionauth) + /cli-setup,
+    # /cli-create. All skill scripts import one shared plugins/cli/lib/env.mjs via
+    # `../../../lib/env.mjs`; the plugin harvester copies that lib/ to .agents/lib/
+    # so the import resolves on Gemini/Codex/Antigravity too (not just Claude's
+    # native install). Per-project secrets are seeded by running /cli-setup.
+    source: weroad/cli
+    description: WeRoad infra CLIs — bigquery, postgres, gcloud, kubernetes, helm, linear, wrcli, slack, litellm, fusionauth
+    enabled: true
   marketing-skills:
     source: coreyhaines31/marketingskills
     description: Marketing skills — copy, SEO, ads, CRO, email, social

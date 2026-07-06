@@ -1,6 +1,9 @@
 // tests/test_catalog.mjs — Tests for catalog module
 import { strict as assert } from 'assert';
-import { isInstalled, installedClis, computeYoloSettingsUpdate, CLI_BINARY, buildMcpEntry } from '../lib/catalog.mjs';
+import { isInstalled, installedClis, computeYoloSettingsUpdate, CLI_BINARY, buildMcpEntry, discoverPluginContents } from '../lib/catalog.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 let passed = 0, failed = 0;
 
@@ -154,6 +157,65 @@ test('does not mutate the input object', () => {
   const before = JSON.stringify(existing);
   computeYoloSettingsUpdate(existing, true, true);
   assert.strictEqual(JSON.stringify(existing), before);
+});
+
+// ─── discoverPluginContents (shared lib/ harvesting) ─────────────────────
+console.log('\ndiscoverPluginContents');
+
+function makeCliPluginRepo() {
+  const repo = mkdtempSync(join(tmpdir(), 'super-plugin-'));
+  // plugins/cli/{lib/env.mjs, skills/bigquery-cli/{SKILL.md,scripts/x.mjs}, commands/cli-setup.md}
+  const skillScripts = join(repo, 'plugins', 'cli', 'skills', 'bigquery-cli', 'scripts');
+  mkdirSync(skillScripts, { recursive: true });
+  writeFileSync(join(repo, 'plugins', 'cli', 'skills', 'bigquery-cli', 'SKILL.md'), '---\nname: bigquery-cli\n---\n');
+  writeFileSync(join(skillScripts, 'bigquery.mjs'), "import { loadEnv } from '../../../lib/env.mjs';\n");
+  mkdirSync(join(repo, 'plugins', 'cli', 'lib'), { recursive: true });
+  writeFileSync(join(repo, 'plugins', 'cli', 'lib', 'env.mjs'), 'export function loadEnv() {}\n');
+  mkdirSync(join(repo, 'plugins', 'cli', 'commands'), { recursive: true });
+  writeFileSync(join(repo, 'plugins', 'cli', 'commands', 'cli-setup.md'), '# cli-setup\n');
+  return repo;
+}
+
+test('discoverPluginContents finds skills, commands, and the plugin-domain shared lib/', () => {
+  const repo = makeCliPluginRepo();
+  try {
+    const { skills, commands, sharedLibs } = discoverPluginContents(repo);
+    assert.deepStrictEqual(skills.map(s => s.name), ['bigquery-cli']);
+    assert.deepStrictEqual(commands.map(c => c.name), ['cli-setup']);
+    assert.strictEqual(sharedLibs.length, 1, 'should surface exactly one shared lib/');
+    assert.ok(sharedLibs[0].endsWith(join('plugins', 'cli', 'lib')), `unexpected lib path: ${sharedLibs[0]}`);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('discoverPluginContents surfaces a root-level lib/ for repo-root skills', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'super-plugin-'));
+  try {
+    mkdirSync(join(repo, 'skills', 'foo'), { recursive: true });
+    writeFileSync(join(repo, 'skills', 'foo', 'SKILL.md'), '---\nname: foo\n---\n');
+    mkdirSync(join(repo, 'lib'), { recursive: true });
+    writeFileSync(join(repo, 'lib', 'env.mjs'), '\n');
+    const { skills, sharedLibs } = discoverPluginContents(repo);
+    assert.deepStrictEqual(skills.map(s => s.name), ['foo']);
+    assert.strictEqual(sharedLibs.length, 1);
+    assert.ok(sharedLibs[0].endsWith(join(repo, 'lib')) || sharedLibs[0].endsWith('lib'));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('discoverPluginContents omits sharedLibs when there is no lib/', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'super-plugin-'));
+  try {
+    mkdirSync(join(repo, 'plugins', 'x', 'skills', 's'), { recursive: true });
+    writeFileSync(join(repo, 'plugins', 'x', 'skills', 's', 'SKILL.md'), '---\nname: s\n---\n');
+    const { skills, sharedLibs } = discoverPluginContents(repo);
+    assert.deepStrictEqual(skills.map(s => s.name), ['s']);
+    assert.deepStrictEqual(sharedLibs, []);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 console.log(`\n${'═'.repeat(50)}`);
