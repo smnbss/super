@@ -549,49 +549,59 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
         artifacts = {"notes": None, "transcript": None, "recording": None, "attachments": []}
         produced = []
 
-        # 2a — event attachments (with stale + content-date guards)
+        # 2a — event attachments (with stale + content-date guards).
+        # Each attachment is isolated: a single malformed file (e.g. a corrupt
+        # PDF that trips markitdown, or a Drive fetch that fails) must never
+        # abort a multi-day harvest — log it and move on to the next one.
         for att in m["attachments"]:
-            mime = att.get("mimeType", "")
-            fid = att.get("fileId", "")
-            if not fid:
-                continue
-            title_l = (att.get("title", "") or "").lower()
-            if mime == GOOGLE_DOC_MIME and any(
-                    n.lower() in title_l for n in GEMINI_NOTES_NEEDLES + TRANSCRIPT_NEEDLES):
-                # The Gemini notes/transcript doc is often attached to the event
-                # itself. Skip it here — 2b/2d export it as notes.md/transcript.md.
-                continue
-            if mime == GOOGLE_DOC_MIME:
-                meta = _safe_drive_get(fid, "id,name,modifiedTime")
-                if meta and _attachment_too_stale(meta.get("modifiedTime", ""), d):
-                    print(f"    Skipping stale attachment {att.get('title','')} "
-                          f"(modified {meta.get('modifiedTime','')}, meeting {d})", file=sys.stderr)
+            try:
+                mime = att.get("mimeType", "")
+                fid = att.get("fileId", "")
+                if not fid:
                     continue
-                os.makedirs(m_dir, exist_ok=True)
-                agenda_path = os.path.join(m_dir, "agenda.md")
-                if export_google_doc_md(fid, att.get("title", "Agenda"), agenda_path):
-                    if _content_date_mismatch(agenda_path, d):
-                        print(f"    Discarding attachment {att.get('title','')} — "
-                              f"content date != meeting date {d}", file=sys.stderr)
-                        os.remove(agenda_path)
-                    else:
-                        produced.append("agenda")
+                title_l = (att.get("title", "") or "").lower()
+                if mime == GOOGLE_DOC_MIME and any(
+                        n.lower() in title_l for n in GEMINI_NOTES_NEEDLES + TRANSCRIPT_NEEDLES):
+                    # The Gemini notes/transcript doc is often attached to the event
+                    # itself. Skip it here — 2b/2d export it as notes.md/transcript.md.
+                    continue
+                if mime == GOOGLE_DOC_MIME:
+                    meta = _safe_drive_get(fid, "id,name,modifiedTime")
+                    if meta and _attachment_too_stale(meta.get("modifiedTime", ""), d):
+                        print(f"    Skipping stale attachment {att.get('title','')} "
+                              f"(modified {meta.get('modifiedTime','')}, meeting {d})", file=sys.stderr)
+                        continue
+                    os.makedirs(m_dir, exist_ok=True)
+                    agenda_path = os.path.join(m_dir, "agenda.md")
+                    if export_google_doc_md(fid, att.get("title", "Agenda"), agenda_path):
+                        if _content_date_mismatch(agenda_path, d):
+                            print(f"    Discarding attachment {att.get('title','')} — "
+                                  f"content date != meeting date {d}", file=sys.stderr)
+                            os.remove(agenda_path)
+                        else:
+                            produced.append("agenda")
+                            artifacts["attachments"].append(
+                                {"name": att.get("title", ""), "fileId": fid,
+                                 "localFile": "agenda.md", "kind": "google-doc"})
+                elif mime.startswith("video/"):
+                    # The Meet recording is attached to the event as a video. Never
+                    # download it — it's handled as a link by the recording step (2c).
+                    continue
+                else:
+                    os.makedirs(m_dir, exist_ok=True)
+                    res = convert_attachment(att, mime, m_dir)
+                    if res:
+                        md_name, status = res
+                        produced.append("attachment")
                         artifacts["attachments"].append(
                             {"name": att.get("title", ""), "fileId": fid,
-                             "localFile": "agenda.md", "kind": "google-doc"})
-            elif mime.startswith("video/"):
-                # The Meet recording is attached to the event as a video. Never
-                # download it — it's handled as a link by the recording step (2c).
+                             "localFile": md_name, "status": status})
+            except CalendarAccessError:
+                raise  # structural (auth/permission) — must surface, not per-attachment
+            except Exception as e:
+                print(f"    WARN: skipping attachment {att.get('title','')} — "
+                      f"{type(e).__name__}: {str(e).splitlines()[0][:140]}", file=sys.stderr)
                 continue
-            else:
-                os.makedirs(m_dir, exist_ok=True)
-                res = convert_attachment(att, mime, m_dir)
-                if res:
-                    md_name, status = res
-                    produced.append("attachment")
-                    artifacts["attachments"].append(
-                        {"name": att.get("title", ""), "fileId": fid,
-                         "localFile": md_name, "status": status})
 
         # 2b — Gemini notes
         note = best_match(m, note_candidates)
