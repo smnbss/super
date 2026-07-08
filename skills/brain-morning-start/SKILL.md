@@ -85,14 +85,21 @@ gws calendar events list --params '{"calendarId":"primary","timeMin":"<TODAY_STA
 
 **4d/4e.** Spawn one `Agent` per meeting, **all in parallel**, each invoking `brain-prepare-my-deep-dives` (→ `outputs/agents/my-deep-dives/<team>.md`) or `brain-prepare-my-one-on-one` (→ `outputs/agents/my-one-on-one/<person>.md`) with `LOOKAHEAD_DAYS: 1`. The skills carry their own logic; just pass the meeting and collect the output path.
 
-## Part 5 — gbrain reindex (`gbrain sync`, LIVE, runs LAST)
+## Part 5 — commit, THEN gbrain reindex (`gbrain sync`, LIVE, runs LAST)
 
-Every file is now written — src exports, gmeet, service docs, memory, today's agendas. Refresh the index with **one incremental `gbrain sync`**: it git-diffs the repo, imports only changed files, embeds them, and extracts links/timeline — all in a single command. It runs live alongside the always-on server and the `io.weroad.gbrain.jobs` worker. The repo is the system of record (`gbrain.yml` at the root); pages are repo-relative-slugged (`memory/l1/hub`).
+Every file is now written — src exports, gmeet, service docs, memory, today's agendas.
+
+**Commit first — this ordering is mandatory.** `gbrain sync` is **commit-based**: it git-diffs the repo against its last bookmark and imports only *committed* changes. Everything Parts 2–4 wrote is still in the working tree, so if you sync before committing it indexes **nothing new**. Run `brain-git-sync` (stage + commit + push) *before* the sync command, never after.
+
+Then refresh the index with **one incremental `gbrain sync`**: it git-diffs the repo, imports only changed files, embeds them, and extracts links/timeline — all in a single command. It runs live alongside the always-on server and the `io.weroad.gbrain.jobs` worker. The repo is the system of record (`gbrain.yml` at the root); pages are repo-relative-slugged (`memory/l1/hub`).
 
 Delegate to a subagent (returns the sync delta):
 
 ```bash
 cd <brain-root> && set -a && source .env.local && set +a            # OPENAI_API_KEY + OPENAI_BASE_URL
+# 1) COMMIT FIRST — gbrain sync only indexes committed files (prefer brain-git-sync, or inline:)
+git add -A && git commit -m "chore(brain): morning-start sync $(date +%F)" && git push
+# 2) Then reindex the just-committed changes
 gbrain sync --repo "$(pwd)" --skip-failed --no-pull --yes           # incremental: import changed + embed + extract
 # Scope the link graph to curated pages: raw src/ exports are basename-resolved
 # into a huge hairball by global_basename, so drop links ORIGINATING from non-
@@ -135,12 +142,12 @@ Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional �
 Part 3 harvest ────────┘  (3 runs parallel to 2a)                        ↓
                                                           Part 4 prep agents (parallel)
                                                                          ↓
-                                       Part 5 gbrain reindex — single `gbrain sync` (server stays up)
+                                       Part 5 commit (brain-git-sync) → gbrain reindex — single `gbrain sync`
                                                                          ↓
                                                                   Part 6 report
 ```
 
-The reindex is intentionally **last**: it depends on every prior write (including the agendas). On Postgres it runs concurrently with the always-on server, so it never blocks — and the Part 4 agents' `mcp__gbrain__query` calls keep working throughout.
+The reindex is intentionally **last**: it depends on every prior write (including the agendas). Because `gbrain sync` only indexes *committed* files, the commit (`brain-git-sync`) must run immediately **before** it — commit-then-reindex, never the reverse. On Postgres the sync runs concurrently with the always-on server, so it never blocks — and the Part 4 agents' `mcp__gbrain__query` calls keep working throughout.
 
 ## Skill References
 
