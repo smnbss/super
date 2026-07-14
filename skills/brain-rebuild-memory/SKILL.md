@@ -125,7 +125,7 @@ Record all counts — they go in the Phase 5 digest.
 
 Regenerate only the L2 targets marked dirty in Phase 1.5. For each dirty target:
 1. Read its declared inputs.
-2. Synthesize.
+2. Synthesize. For accretive targets, then apply "Size Caps & Archive Rotation" (section below): the live window of dated sections stays, older sections move verbatim to `memory/L2/archive/`.
 3. Compute new content. **Compare against the existing file's content_hash** — if identical, leave the file untouched (don't churn mtime / git), but still refresh the state file's `max_mtime` for this target.
 4. If content changed: write the file, set frontmatter `updated: <today>`, refresh `verified:` markers only on fact blocks whose source actually changed.
 
@@ -198,6 +198,7 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 - Count meetings per month
 - Date range covered
 - Note the structure (transcript files, attendees)
+- Live window: current + previous ISO week of `## WNN update` sections; older harvests rotate to `meetings-YYYY-MM` archives (see "Size Caps & Archive Rotation")
 
 ### 2i. workflowy.md
 
@@ -283,7 +284,7 @@ Each source MOC contains:
 | `tone-of-voice.md` | `src/medium/smnbss/` — Simone's writing voice analysis |
 | `skills.md` | `.claude/skills/*/SKILL.md` — enumerate all skills |
 | `system-map.md` | `.claude/agents/`, `.claude/skills/`, `.claude/commands/` — full system index |
-| `hub.md` | **Last** — reads all other L1 files, builds the top-level nav with counts |
+| `hub.md` | **Last** — reads all other L1 files, builds the top-level nav with counts. Keep only the last **7** "What changed" entries live; older entries rotate to `hub-changelog-YYYY-MM` archives (see "Size Caps & Archive Rotation") |
 
 #### `memory/L1/teams.md`
 
@@ -341,7 +342,7 @@ Dirty when `hub.md` is dirty, when `src/` top-level structure changed, when Phas
 Content (assemble from Phase 1 inventory + the just-rebuilt L1 files):
 
 1. **Intro paragraph** — who the brain belongs to (read `<brain_root>/.super/brain.config.yml` for owner + org), one-line purpose.
-2. **Repository Layout** — code fence showing `memory/`, `src/`, `outputs/` with live counts from Phase 1 (subdirs + file counts). L1 and L2 counts come from `ls memory/L1 | wc -l` and `ls memory/L2 | wc -l` after rebuild.
+2. **Repository Layout** — code fence showing `memory/`, `src/`, `outputs/` with live counts from Phase 1 (subdirs + file counts). L1 and L2 counts come from `ls memory/L1 | wc -l` and `ls memory/L2 | wc -l` after rebuild. Once `memory/L2/archive/` exists, list it as its own layout line with its file count (rolled-out dated sections; see "Size Caps & Archive Rotation").
 3. **How to Navigate** — 4-step path starting at `memory/L1/hub.md` + a `Quick Access` list pointing at the highest-signal L1 files (`entities.md`, `data-model.md`, `product-areas.md`, `teams.md`, `system-map.md`) plus `outputs/services/<repo>.AGENT.MD`. Then a **`### Knowledge Map`** subsection: a complete index of every L1 MOC grouped (Entry & cross-cutting · People & org · Product & business · Data & analytics · Engineering & systems · Sources · Content & voice), each L1 showing the L2 pages it connects to as `[[wikilinks]]`. Derive the groupings + L1→L2 edges from the just-rebuilt files (the Phase 3 derivation table + each L2's `Topics:` footer). This is the agent's traversal spine — it must stay accurate to the actual link graph.
 4. **Freshness Tracking** — explain `verified:` fact blocks, `staleness_threshold:` frontmatter, and the `superseded:` marker convention.
 5. **Searching** — always use the gbrain MCP tools (`mcp__gbrain__query`, `mcp__gbrain__search`, `mcp__gbrain__get_page`); the HTTP server is always-on so they're always available. Grep is for exact matches only.
@@ -376,8 +377,10 @@ Record final symlink status (`created` / `already-correct` / `skipped: gemini no
 1. **Broken links**: grep all `[[wikilinks]]` in `memory/`, check each target exists
 2. **Timestamps on rewritten files**: every `<!-- verified: -->` block on a file rebuilt this run must reflect today's date (or the date the underlying source changed). **Do not enforce this on skipped files** — their old dates are correct.
 3. **Frontmatter on rewritten files**: `updated:` = today. Skipped files keep their prior `updated:`.
-4. **Orphans**: memory files with no corresponding source → flag (don't delete)
+4. **Orphans**: memory files with no corresponding source → flag (don't delete). `memory/L2/archive/` pages are exempt — their source is the `archive_of:` parent.
 5. **Symlink health**: `<brain_root>/CLAUDE.md` resolves to `AGENTS.md`; `GEMINI.md` resolves to `AGENTS.md` if gemini is installed.
+6. **Size caps**: every file rewritten this run is ≤ 40 KB; additionally flag any `memory/` file > 50 KB (gbrain's warn threshold) in the digest. If an over-cap file is an accretive target, rotate it before finishing (see "Size Caps & Archive Rotation").
+7. **Archive integrity**: closed-period archives were not touched this run (mtimes unchanged); every archive page has a `Topics:` footer linking its parent; every rotated parent has an `## Archive` section with one `[[wikilink]]` bullet per archive page.
 
 ---
 
@@ -408,6 +411,7 @@ Write `outputs/agents/brain-sync/YYYY-MM-DD-rebuild.md` with:
 - Service docs inventory (service docs count, cross-cutting count)
 - Memory stats (files before/after per layer, created/updated/skipped/flagged)
 - **Incremental summary**: count of L2 skipped vs rebuilt, count of L1 skipped vs rebuilt, wall-clock savings vs full rebuild estimate
+- **Rotation summary**: archives created / appended-to, sections moved per live file, live-file sizes before → after, any file still over the 40 KB cap (with reason)
 - Top-level nav: `AGENTS.md` regenerated y/n; symlink status for `CLAUDE.md` and `GEMINI.md`
 - Changes summary (what was added, updated, removed)
 - Broken links found
@@ -429,6 +433,67 @@ The whole point of L1/L2 is a navigable graph: gbrain materializes every `[[wiki
 6. **Self-contained section headings.** gbrain chunks by heading; a heading + its block should make sense out of context (name the entity/date), so a retrieved chunk is interpretable on its own.
 
 After Phase 4's broken-link check, the graph should be strictly denser than the prior run with **zero** broken links and zero empty `[[]]`/`-  —` bullets.
+
+## Size Caps & Archive Rotation (retrieval optimization)
+
+gbrain warns above ~50 KB per page; oversized pages chunk poorly and dilute retrieval (observed 2026-07-14: `meetings.md` 129 KB, `hub.md` 107 KB, `workflowy.md` 80 KB, `technologies.md` 68 KB, `team-tium.md` 63 KB, `releases.md` 62 KB, `exco.md` 53 KB, `x-content.md` 48 KB). The cause is accretion: dated update sections prepended on every harvest/rebuild and never rolled out. The fix is **rotation into archive pages** — content moves verbatim; it is never summarized away or deleted.
+
+**Hard cap: every live file under `memory/` must land ≤ 40 KB after a rewrite.** Two mechanisms enforce it, in order:
+
+1. **Window rotation (primary, deterministic).** Each accretive target keeps only its recent window of dated sections in the live file; everything older moves to archive pages:
+
+   | Live file | Dated-section window kept live | Archive page basename |
+   |-----------|-------------------------------|----------------------|
+   | `L2/meetings.md` | current + previous ISO week (`## WNN update …` sections) | `meetings-YYYY-MM` |
+   | `L1/hub.md` | last **7** "What changed" entries | `hub-changelog-YYYY-MM` |
+   | `L2/releases.md` | current + previous quarter | `releases-YYYY-QN` |
+   | `L2/technologies.md` | dated refresh sections from the last **30 days** | `technologies-log-YYYY-MM` |
+   | `L2/exco.md` | dated sections from the last **45 days** | `exco-log-YYYY-QN` |
+   | `L2/team-<slug>.md` | dated sections from the last **45 days** | `team-<slug>-log-YYYY-QN` |
+   | `L2/workflowy.md` | digest sections from the last **30 days** | `workflowy-log-YYYY-MM` |
+   | `L2/x-content.md` | digest sections from the last **30 days** | `x-content-log-YYYY-MM` |
+
+   A section's own date (from its heading or `verified:` marker) decides whether it is in-window and which archive period it belongs to — not today's date. Durable reference sections (velocity tables, "How to Use", coverage, member lists, IDP snapshots) are not dated update sections and always stay live.
+
+2. **Cap backstop (any file).** If a just-synthesized file still exceeds 40 KB, keep rotating its oldest dated sections out until it fits. If a file exceeds the cap and has no dated sections left to rotate, write it anyway and flag it in the Phase 5 digest for restructuring — never drop content silently.
+
+### Rotation procedure (applied whenever a listed target is rewritten)
+
+1. Synthesize the live file as usual (new dated sections at top).
+2. Partition dated sections: in-window stays live; out-of-window moves. Moved sections go **verbatim** — heading, body, `<!-- verified: -->` / `<!-- superseded: -->` markers, and inline `[[wikilinks]]` all intact. The link edges migrate with them: archives live under `memory/`, so they are indexed and survive the Phase 4.5 link cleanup — graph density is preserved, not lost.
+3. Write/append the archive page at `memory/L2/archive/<basename>.md` (create the directory on first use). Keep sections newest-first inside each archive. **An archive whose period has closed (a past month or quarter) is immutable — never rewrite it on later runs.** Only the current period's archive may receive appends, and the content-hash short-circuit applies to it like any other write.
+4. In the live file, maintain an `## Archive` section directly above the `Topics:` footer: one bullet per archive page, newest first, each with a single-line retrieval summary — e.g. `- [[meetings-2026-06]] — June 2026 (12 harvests, W23–W26: Q3 zero-based roadmap, WeMeet payments live, ExCo org reveal)`.
+5. Rewrite the live file's frontmatter `description:` to the concise ≤ ~220-char form (Linking rule 5). Dated digest text accumulated in `description:` is the same bloat in a second location — it belongs in body sections, which rotation now bounds.
+
+### Archive page template
+
+```markdown
+---
+type: archive
+archive_of: meetings
+period: 2026-06
+description: "Archive — meetings dated sections for June 2026, rolled out of the live [[meetings]] page."
+updated: 2026-07-15
+staleness_threshold: 365d
+---
+
+# Meetings — Archive 2026-06
+
+Dated sections rolled verbatim out of [[meetings]]; newest first.
+
+<moved sections, unmodified>
+
+---
+Topics: [[meetings]], [[hub]]
+```
+
+Bare-basename wikilinks (`[[meetings]]`, `[[hub]]`) are correct in archives — `global_basename` resolves them. Archive basenames are globally unique by construction (`<parent>-<period>`).
+
+### Bookkeeping
+
+- Archives are **side outputs of rotating their parent**, not synthesis targets: no `.rebuild-state.json` entries, no dirty tracking, no input globs. They are only touched when their parent rotates.
+- **Backlog on first rotation:** create one archive per period for *all* out-of-window sections in one pass (e.g. the first `meetings.md` rotation produces `meetings-2026-05` and `meetings-2026-06` together).
+- `releases.md` is updated via harvest "Brain Updates" rather than a dedicated Phase 2 step — the rotation rules still apply every time this skill rewrites it, and the Phase 4 size check catches it regardless of who wrote it.
 
 ## Execution Order
 
@@ -452,6 +517,8 @@ Phase 1   (inventory src + outputs/services)
 - **Timestamp everything**: `<!-- verified: YYYY-MM-DD | source: ... -->` on every fact block.
 - **Cite gdrive files by their Drive URL, not the local path**: any `.md` file under `src/gdrive/` is a converted-from-Drive export carrying YAML frontmatter with `gdrive_url`. When a fact derives from such a file, the `source:` field must be the `gdrive_url` value — not `src/gdrive/<path>.md`. The local path is an implementation detail; the Drive URL is what lets a human click through. For non-gdrive sources, continue to use the local path as before. When the input is a per-folder `INDEX.md` (index-only mode), cite the folder's Drive URL (the `Drive link:` line inside the INDEX) rather than the INDEX itself.
 - **Preserve `<!-- superseded: -->` markers**: Keep them even in a rebuild.
+- **Cap live files at 40 KB — rotate, never delete**: apply "Size Caps & Archive Rotation" to every accretive target; out-of-window dated sections move verbatim to `memory/L2/archive/` with bidirectional links (parent `## Archive` section ↔ archive `Topics:` footer).
+- **Closed-period archives are immutable**: never rewrite an archive whose month/quarter has ended — only the current period's archive may receive appends.
 - **Conservative on entities**: 2+ source appearances required for `entities.md`.
 - **Maximize correct link density**: follow the "Linking & Connection Rules (gbrain optimization)" section above on every rewritten file — no empty/text-only see-also entries, wikilink (not code-path) every page reference, bidirectional Topics footers, inline first-mention links, concise `description:`.
 - **Use `mcp__gbrain__query`** for semantic searches across the brain (the always-on HTTP server). Use Grep only for exact string/regex matches.
