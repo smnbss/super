@@ -10,6 +10,10 @@ description: >-
 
 Rebuild the memory layers L2 and L1 from `outputs/` and `src/`.
 
+## Execution discipline
+
+If you parallelize target generation across worker agents (waves of L2 workers, then cascade L1s), you MUST **block on every worker and verify its file writes before moving on or returning** — check the target files exist on disk with fresh mtimes. Never dispatch a wave and return "dispatched": detached workers die with your context and write nothing (observed 2026-07-14: "Wave 1 dispatched" → 0 files on disk). The rebuild is only done when Phases 4–5 have run against files that actually exist.
+
 ## Mode
 
 **Incremental by default.** Only targets whose inputs changed since the last run are regenerated. The state file `memory/.rebuild-state.json` records per-output inputs + max input mtime + content hash.
