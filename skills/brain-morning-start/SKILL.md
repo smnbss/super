@@ -17,6 +17,12 @@ Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs
 
 Each sub-skill carries its own detailed instructions — do **not** restate them here; just dispatch and collect.
 
+**Never trust a subagent's "done" — verify by filesystem state.** The sub-skills (`brain-pull-sources`, `brain-rebuild-services`, `brain-rebuild-memory`) spawn their own worker processes, and wrapper subagents routinely return *before* those workers finish (observed 3× on 2026-07-14: pull_sources still exporting, service regen mid-batch, memory "Wave 1 dispatched" with 0 files written). Rules:
+
+1. Tell every phase subagent explicitly: *do the work inline/sequentially in your own context; do NOT dispatch detached background workers and return — orphaned workers write nothing.* If it must spawn helpers, it must block on them and verify their file writes before returning.
+2. On any ambiguous/early return, check ground truth before re-dispatching: output-file **mtimes** (`find <outdir> -newermt 'today 00:00' | wc -l`) and live worker processes. Match workers by **command + start time**, never by generic name — long-`etime` `claude` processes are unrelated pre-existing sessions.
+3. Completion signal = expected outputs exist with today's mtime AND nothing written in the last ~90s. Only then advance the chain. Never launch a duplicate export/rebuild while the previous one is still running.
+
 ## Part 0 — First-run bootstrap
 
 Check whether `agents/morning-start-additional/SKILL.md` exists (relative to the brain repo root). If it does, continue. If not, copy `resources/morning-start-additional.template.md` (relative to this skill's directory) to that path first — a one-time seed for extra per-morning agent runs.
@@ -28,8 +34,10 @@ Run the independent updaters **concurrently in the background**, then collect:
 - `brew update && brew upgrade` (background)
 - `npm update -g` (background)
 - `uv sync --upgrade` (background)
-- `/gstack-upgrade`
-- `git pull --rebase`
+- `/gstack-upgrade` — don't skip this one; it's cheap and easy to forget once the heavy phases start
+- `git pull --rebase --autostash` — `--autostash` is required: leftover working-tree WIP from prior sessions otherwise aborts the pull ("cannot pull with rebase: You have unstaged changes")
+
+Note: `brew upgrade` may fail on casks that need interactive sudo (e.g. `windows-app`) — non-fatal in a scheduled run; report and move on.
 
 There is **no gbrain step here.** The reindex happens once at the very end (Part 5), after all new content has been written — running it now would index nothing new.
 
@@ -64,7 +72,7 @@ Reconstruct `YYYY-MM-DD` from the `YYYY/WNN/MM-DD` path. If none found, use yest
 bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"   # from skills/brain-pull-sources/
 ```
 
-**3b — Generate digests (LLM synthesis).** For each harvested day, generate the daily digest, then roll up the weekly / monthly / YTD digests, following the [Meeting digest generation](#meeting-digest-generation) appendix. These are the LLM rollups `gmeet_to_md` deliberately does not produce.
+**3b — Generate digests (LLM synthesis).** For each harvested day, generate the daily digest, then roll up the weekly / monthly / YTD digests, following the [Meeting digest generation](#meeting-digest-generation) appendix. Weekly rollups target the **ISO week each harvested day actually belongs to** (a Monday opens a new `WNN` folder — don't assume the span stays in `LAST_HARVESTED`'s week). These are the LLM rollups `gmeet_to_md` deliberately does not produce.
 
 ## Part 4 — Prepare today's meetings
 
@@ -73,6 +81,8 @@ bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"   # from skills/brain-pull
 ```bash
 gws calendar events list --params '{"calendarId":"primary","timeMin":"<TODAY_START_UTC>","timeMax":"<TODAY_END_UTC>","singleEvents":true,"orderBy":"startTime"}'
 ```
+
+`gws` prints a `Using keyring backend: …` line before the JSON — strip it (`grep -v '^Using keyring'`) before piping to a JSON parser.
 
 **4b. Classify** (skip `status:"cancelled"`):
 
@@ -115,7 +125,24 @@ Notes:
 
 One chunk fails embedding with `Forbidden` (a permanently 403-filtered page) — that's expected; `embed --stale` still exits 0. Don't pipe it through `| tail`. The server stays up throughout.
 
-**Fire-and-forget option:** to avoid blocking Part 6 on embedding, run `gbrain sync --repo "$(pwd)" --no-embed --skip-failed --no-pull --yes` then `gbrain embed --stale --background` (the `io.weroad.gbrain.jobs` worker drains the embed). Still run the link-scoping `DELETE` after.
+**Large-sync deferral — read the sync output.** When the day's diff is big (hundreds of files), `gbrain sync` **defers embed and extract** and says so ("Large sync: deferring link/timeline extraction… Run 'gbrain embed --stale'"). In that case you must run both explicitly, in this order (extract before the link-scoping `DELETE`, since extract is what creates the edges):
+
+```bash
+gbrain extract --stale --source-id default
+gbrain embed --stale                      # foreground — see caveat below
+# then the link-scoping DELETE from above
+```
+
+⚠️ `gbrain embed --stale --background` returned a job id but the jobs worker **did not drain it** (2026-07-14: queue showed empty, chunks stayed unembedded). Until that's fixed, run the embed in the **foreground**.
+
+**Verify, don't assume.** After embed, confirm coverage before writing the final report:
+
+```bash
+psql "$(gbrain config show 2>/dev/null | sed -n 's/^ *database_url: *//p')" -tAc \
+  "SELECT count(*), count(embedding), count(*)-count(embedding) FROM content_chunks;"
+```
+
+Missing should be ~0 (a couple dozen permanently-unembeddable oversized/403 chunks are normal). Also sanity-check that a freshly-rewritten page has outgoing links (`gbrain backlinks memory/l1/hub` non-empty).
 
 ## Part 6 — Final report
 
