@@ -308,6 +308,40 @@ def best_match(meeting, candidates: list[dict]) -> dict | None:
     return scored[0][2]
 
 
+def assign_matches(meetings: list[dict], candidates: list[dict]) -> dict[int, dict]:
+    """Globally assign each candidate Drive doc to AT MOST ONE meeting, and each
+    meeting to at most one doc. Returns {meeting_index: doc}.
+
+    Unlike calling best_match() per meeting against the full pool (which lets a
+    single Gemini doc be claimed by several same-day meetings with similar titles
+    — e.g. "Simon / Risso" and "Simon / Matteo (Risso)" — duplicating one note
+    across folders and starving the folder that owned a distinct note), this does
+    a greedy one-to-one match: score every (meeting, candidate) pair over the
+    title threshold, then walk them best-first (ratio desc, creation-time
+    proximity desc) assigning each doc and each meeting only once."""
+    triples = []  # (ratio, -delta, meeting_idx, cand_idx)
+    for mi, m in enumerate(meetings):
+        mt = normalize_title(m["title"])
+        if not mt:
+            continue
+        for ci, c in enumerate(candidates):
+            cand_title = normalize_title(strip_gemini_suffix(c.get("name", "")))
+            ratio = difflib.SequenceMatcher(None, mt, cand_title).ratio()
+            if ratio >= TITLE_MATCH_THRESHOLD:
+                created = c.get("createdTime", "")
+                delta = abs(_iso_to_epoch(created) - m["_start_epoch"]) if created else 1e18
+                triples.append((ratio, -delta, mi, ci))
+    triples.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    assigned: dict[int, dict] = {}
+    used_docs: set[int] = set()
+    for _ratio, _negdelta, mi, ci in triples:
+        if mi in assigned or ci in used_docs:
+            continue
+        assigned[mi] = candidates[ci]
+        used_docs.add(ci)
+    return assigned
+
+
 def _iso_to_epoch(s: str) -> float:
     try:
         return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
@@ -532,9 +566,15 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
     transcript_candidates = drive_search(transcript_q, doc_fields)
     recording_candidates = drive_search(rec_q, rec_fields)
 
+    # Globally assign each note/transcript/recording doc to a single meeting so a
+    # shared doc can't be duplicated across same-day meetings with similar titles.
+    note_assign = assign_matches(meetings, note_candidates)
+    transcript_assign = assign_matches(meetings, transcript_candidates)
+    recording_assign = assign_matches(meetings, recording_candidates)
+
     rows = []
     folders_written = 0
-    for m in meetings:
+    for mi, m in enumerate(meetings):
         slug = slugify(m["title"])
         # Collision: append start HHMM.
         existing = {r["slug"] for r in rows}
@@ -604,7 +644,7 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
                 continue
 
         # 2b — Gemini notes
-        note = best_match(m, note_candidates)
+        note = note_assign.get(mi)
         if note:
             os.makedirs(m_dir, exist_ok=True)
             if export_google_doc_md(note["id"], m["title"], os.path.join(m_dir, "notes.md")):
@@ -613,7 +653,7 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
                                       "driveLink": note.get("webViewLink", "")}
 
         # 2d — transcript docs (best-effort)
-        tr = best_match(m, transcript_candidates)
+        tr = transcript_assign.get(mi)
         if tr:
             os.makedirs(m_dir, exist_ok=True)
             if export_google_doc_md(tr["id"], f"Transcript: {m['title']}",
@@ -623,7 +663,7 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
                                            "driveLink": tr.get("webViewLink", "")}
 
         # 2c — recordings (link only)
-        rec = best_match(m, recording_candidates)
+        rec = recording_assign.get(mi)
         if rec:
             os.makedirs(m_dir, exist_ok=True)
             write_recording_md(rec, os.path.join(m_dir, "recording.md"))
