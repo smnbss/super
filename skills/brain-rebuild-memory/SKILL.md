@@ -75,9 +75,9 @@ Verify these match reality — discover any new directories that appeared since 
 
 ### 1b. Service docs inventory
 
-Count `.AGENT.MD` files in `outputs/services/` and list `outputs/services/cross/` entries:
+Count `.AGENT.MD` files under `outputs/services/**` (owner subdirs — `weroad/`, `weroad/jungle/`, `smnbss/`, …) and list `outputs/services/weroad/jungle/cross/` entries:
 
-- ~77 service docs: `<org>-<service>.AGENT.MD` (code/stack) + `<org>-<service>.DB.AGENT.MD` (database schema)
+- ~77 service docs, nested by owner: `<owner>/<service>.AGENT.MD` (code/stack) + `<owner>/<service>.DB.AGENT.MD` (database schema). Filenames are de-prefixed (`weroad/community.AGENT.MD`, not `weroad-community.AGENT.MD`); the basename stays globally unique for `global_basename` resolution.
 - 3 cross-cutting: `<org>-rabbitmq-topology.md`, `<org>-rabbitmq-schema.md`, `<org>-rabbitmq-producers-consumers.md`
 
 Record all counts — they go in the Phase 5 digest.
@@ -95,7 +95,7 @@ Record all counts — they go in the Phase 5 digest.
      "run_at": "2026-04-19T08:00:00Z",
      "targets": {
        "memory/L2/team-buktu.md": {
-         "inputs": ["src/personio/staff-roster.tsv", "src/clickup/Docs BUKTU/**", "outputs/services/*.AGENT.MD"],
+         "inputs": ["src/personio/staff-roster.tsv", "src/clickup/Docs BUKTU/**", "outputs/services/**/*.AGENT.MD"],
          "max_mtime": 1713398400,
          "content_hash": "sha256:..."
        }
@@ -135,7 +135,7 @@ Each L2 file draws from specific inputs. Read those inputs, synthesize, write th
 
 ### 2a. Team files (`team-*.md`)
 
-**Inputs:** `src/personio/staff-roster.tsv` + `src/clickup/Docs {TeamName}/` + `src/linear/<org>/` + `outputs/services/*.AGENT.MD` (ownership)
+**Inputs:** `src/personio/staff-roster.tsv` + `src/clickup/Docs {TeamName}/` + `src/linear/<org>/` + `outputs/services/**/*.AGENT.MD` (ownership)
 
 For each team, produce `memory/L2/team-<name>.md`:
 - **Members** — from `staff-roster.tsv` + any org config in github repos
@@ -147,7 +147,7 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2b. technologies.md
 
-**Inputs:** `outputs/services/*.AGENT.MD` (stack sections) + `github/<org>/` (repo languages/frameworks)
+**Inputs:** `outputs/services/**/*.AGENT.MD` (stack sections) + `github/<org>/` (repo languages/frameworks)
 
 - Aggregate tech stacks from all service docs (language, framework, DB, messaging)
 - Group by layer: frontend, backend, data, infra
@@ -279,7 +279,7 @@ Each source MOC contains:
 | `team-members.md` | `src/personio/staff-roster.tsv` + `memory/L2/team-*.md` members sections |
 | `product-areas.md` | Team L2 files (group features by product area) |
 | `business-domains.md` | `memory/L2/exco.md` + `memory/L2/intranet.md` + `memory/L2/one-pagers.md` |
-| `data-model.md` | `outputs/services/<org>-dbt.AGENT.MD` + `outputs/services/<org>-dashboards.AGENT.MD` + BigQuery metadata |
+| `data-model.md` | `outputs/services/weroad/dbt.AGENT.MD` + `outputs/services/weroad/dashboards.AGENT.MD` + BigQuery metadata |
 | `entities.md` | Full scan of all L2 files — anything appearing in 2+ sources gets an entry |
 | `tone-of-voice.md` | `src/medium/smnbss/` — Simone's writing voice analysis |
 | `skills.md` | `.claude/skills/*/SKILL.md` — enumerate all skills |
@@ -343,7 +343,7 @@ Content (assemble from Phase 1 inventory + the just-rebuilt L1 files):
 
 1. **Intro paragraph** — who the brain belongs to (read `<brain_root>/.super/brain.config.yml` for owner + org), one-line purpose.
 2. **Repository Layout** — code fence showing `memory/`, `src/`, `outputs/` with live counts from Phase 1 (subdirs + file counts). L1 and L2 counts come from `ls memory/L1 | wc -l` and `ls memory/L2 | wc -l` after rebuild. Once `memory/L2/archive/` exists, list it as its own layout line with its file count (rolled-out dated sections; see "Size Caps & Archive Rotation").
-3. **How to Navigate** — 4-step path starting at `memory/L1/hub.md` + a `Quick Access` list pointing at the highest-signal L1 files (`entities.md`, `data-model.md`, `product-areas.md`, `teams.md`, `system-map.md`) plus `outputs/services/<repo>.AGENT.MD`. Then a **`### Knowledge Map`** subsection: a complete index of every L1 MOC grouped (Entry & cross-cutting · People & org · Product & business · Data & analytics · Engineering & systems · Sources · Content & voice), each L1 showing the L2 pages it connects to as `[[wikilinks]]`. Derive the groupings + L1→L2 edges from the just-rebuilt files (the Phase 3 derivation table + each L2's `Topics:` footer). This is the agent's traversal spine — it must stay accurate to the actual link graph.
+3. **How to Navigate** — 4-step path starting at `memory/L1/hub.md` + a `Quick Access` list pointing at the highest-signal L1 files (`entities.md`, `data-model.md`, `product-areas.md`, `teams.md`, `system-map.md`) plus `outputs/services/<owner>/<repo>.AGENT.MD`. Then a **`### Knowledge Map`** subsection: a complete index of every L1 MOC grouped (Entry & cross-cutting · People & org · Product & business · Data & analytics · Engineering & systems · Sources · Content & voice), each L1 showing the L2 pages it connects to as `[[wikilinks]]`. Derive the groupings + L1→L2 edges from the just-rebuilt files (the Phase 3 derivation table + each L2's `Topics:` footer). This is the agent's traversal spine — it must stay accurate to the actual link graph.
 4. **Freshness Tracking** — explain `verified:` fact blocks, `staleness_threshold:` frontmatter, and the `superseded:` marker convention.
 5. **Searching** — always use the gbrain MCP tools (`mcp__gbrain__query`, `mcp__gbrain__search`, `mcp__gbrain__get_page`); the HTTP server is always-on so they're always available. Grep is for exact matches only.
 6. **External Tools** — only include sections for tools the user actually has (detect via `command -v`): `gws` CLI, Chrome DevTools, etc. Skip sections whose CLI isn't installed.
@@ -426,7 +426,7 @@ Finally, write the updated `memory/.rebuild-state.json` with fresh `max_mtime` +
 The whole point of L1/L2 is a navigable graph: gbrain materializes every `[[wikilink]]` into an edge (Phase 4.5) and uses those edges for backlink-boost ranking and `graph`/`graph-query` traversal. Maximize *correct* connection density. Apply these rules to every file written in Phases 2/3/3.5:
 
 1. **Never emit an empty or text-only "see also" entry.** Every `## Related` bullet and every cell in an `L3 References`-style table MUST contain a resolvable `[[link]]`. If there is no target, omit the bullet/row entirely — do NOT write `-  — description` (the historical bug that left dead bullets in `technologies.md`).
-2. **Reference pages as wikilinks, not code paths.** When a file points at another brain page, write `[[basename]]` — including service docs (`[[weroad-community.AGENT.MD]]`, resolves by `global_basename`) and DB docs (`[[weroad-unison.DB.AGENT.MD]]`). A bare `` `outputs/services/x.AGENT.MD` `` code-span produces NO edge. Reserve code-spans for paths you are *not* linking (raw `src/` exports without wikilink syntax).
+2. **Reference pages as wikilinks, not code paths.** When a file points at another brain page, write `[[basename]]` — including service docs (`[[community.AGENT.MD]]`, resolves by `global_basename` regardless of the `outputs/services/<owner>/` subdir) and DB docs (`[[unison.DB.AGENT.MD]]`). A bare `` `outputs/services/x.AGENT.MD` `` code-span produces NO edge. Reserve code-spans for paths you are *not* linking (raw `src/` exports without wikilink syntax).
 3. **Bidirectional completeness.** Every L2 `Topics:` footer must link UP to **every L1 file that cites it** (the Phase 3 derivation table is the citation map) plus any obvious see-also L1s. Conversely every L1 must link DOWN (in a `## Related` block + body) to **every L2 it derives from**. Source MOCs (`github.md`, `metabase.md`, …) are the usual offenders — give each a `## Related` block pointing at the L2/L1 pages it feeds (e.g. `github → [[technologies]] · [[services]] · [[teams]]`; `metabase → [[data-model]] · [[team-data]]`). Footers are additive: when refreshing, never drop an existing valid link.
 4. **Inline first-mention links.** In body prose, the first mention of another team, domain, service, source, or person that owns its own page gets a `[[wikilink]]`. This produces far more edges than footers alone. Example: in `technologies.md`, "AI/ML stack" → `[[team-data]]`, "main platform" → `[[team-rocket]]`, "data & analytics" → `[[data-model]]`.
 5. **Concise frontmatter `description:`.** Keep `description:` a single topical sentence (≤ ~220 chars) naming the domain + its key entities — this is the page's summary vector. Put dated change-log detail in **body** sections under `<!-- verified: -->` blocks (which become chunks + timeline entries), not crammed into `description:`. Do not duplicate long WBR digests into the description.

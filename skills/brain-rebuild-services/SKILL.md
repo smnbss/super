@@ -12,11 +12,18 @@ without reading every source file.
 
 ## Input
 
-The user provides a repo name. Resolve it:
-- `community` → `github/<org>/community/`
-- `<org>/repo-name` → `github/<org>/repo-name/`
+The user provides a repo name. Resolve it, checking these locations in order and
+using the first that exists:
+- `github/weroad/jungle/<repo>/`  ← jungle-managed repos (the local dev stack) live nested here
+- `github/<org>/<repo>/`          ← brain-only repos cloned flat (default `<org>` is `weroad`)
 
-If the repo directory doesn't exist in `github/`, stop and tell the user.
+So `community` → try `github/weroad/jungle/community/` first, then `github/weroad/community/`.
+A `<org>/repo-name` input maps to `github/<org>/repo-name/` (and, for weroad, its jungle nesting).
+
+Prefer the jungle-nested copy when both exist (it's the one pull_sources keeps fresh).
+Record the actual resolved path in the doc's `Source:`/`source:` fields.
+
+If the repo directory exists in neither location, stop and tell the user.
 
 ## Process
 
@@ -78,7 +85,8 @@ Read these files in this order (skip any that don't exist):
 
 ### 2. Check existing service doc
 
-Read `outputs/services/{owner}-{repo}.AGENT.MD` if it exists. Compare against what you found.
+Read the existing service doc if it exists (at the path defined in **Output Format** below —
+jungle-managed repos live under `outputs/services/weroad/jungle/`). Compare against what you found.
 Preserve any manually-added context (marked with comments or clearly editorial) unless
 it's now wrong.
 
@@ -89,9 +97,32 @@ Also check CODEOWNERS if present.
 
 ## Output Format
 
-Write to `outputs/services/{owner}-{repo}.AGENT.MD` using this structure. Every section that
-has data MUST be included. Skip sections only if the repo genuinely doesn't have that
-concept (e.g., no DB for a stateless service).
+**A doc goes under `outputs/services/weroad/jungle/` when the service is part of the jungle
+local dev stack; everything else goes under `outputs/services/{owner}/`.** A service is
+"jungle" if EITHER:
+
+- it's listed in `github/weroad/jungle/bin/repos.sh` (cloned into `github/weroad/jungle/{repo}/`), OR
+- `github/weroad/jungle/compose.*.yaml` defines a `{svc}.weroad.wr` service for it — this
+  catches **workspace services** whose code is a subdir of another jungle repo rather than a
+  standalone clone (e.g. `api-rooming` builds from `context: ./buynana` → jungle, even though
+  it has no `repos.sh` entry of its own).
+
+Everything else is non-jungle: `outputs/services/weroad/wemeet.AGENT.MD` (mobile app, not a
+compose service), `outputs/services/smnbss/super.AGENT.MD`, etc. The **jungle repo itself**
+(the dev-env container) lives at `outputs/services/weroad/jungle/jungle.AGENT.MD` — the
+package's own doc, alongside the services it runs. Create the target subdir if it doesn't
+exist. Cross-cutting docs live in `outputs/services/weroad/jungle/cross/`.
+
+**Filename & uniqueness rule:** the filename is the de-prefixed repo name
+(`{repo}.AGENT.MD`), NOT `{owner}-{repo}.AGENT.MD` — the owner is the directory. gbrain
+resolves wikilinks by **basename** (`global_basename: true`), so the basename MUST be
+globally unique across ALL owners. This holds today (no repo-name collisions across
+weroad/smnbss/NikolaiGoMedicus). If you ever add a repo whose name already exists under
+another owner, keep the `{owner}-` prefix on BOTH colliding files (e.g.
+`acme/{owner}-foo.AGENT.MD`) and update the wikilinks that reference them.
+
+Every section that has data MUST be included. Skip sections only if the repo genuinely
+doesn't have that concept (e.g., no DB for a stateless service).
 
 ```markdown
 # {owner}/{repo}
@@ -164,17 +195,26 @@ concept (e.g., no DB for a stateless service).
 
 ## Owner
 {Team name}
+
+Topics: [[services]] · [[{owner-team}]] · [[technologies]] · [[github]]{ · [[{repo}.DB.AGENT.MD]] if a DB doc exists}
 ```
+
+**Footer rules:** the `Topics:` footer links back UP into the graph using **bare unique
+basenames** (`global_basename` resolution) — never invent MOC names. Valid targets:
+`[[services]]` (the service catalog — NOT `[[repos]]`, which does not exist), the owning
+team L2 (`[[team-buktu]]`, …), `[[technologies]]`, `[[github]]`, `[[data-model]]` for
+data services, and this service's own `[[{repo}.DB.AGENT.MD]]` when present. Do not emit
+path-qualified links (`[[L1/…]]`, `[[../../…]]`) — the bare basename always resolves.
 
 ## 4. Update cross-cutting RabbitMQ Topology Files (if service has messaging)
 
 If the service produces or consumes RabbitMQ events, you MUST also update the central
-RabbitMQ documentation files in `outputs/services/cross/`:
+RabbitMQ documentation files in `outputs/services/weroad/jungle/cross/`:
 
 ### Files to update:
-- `outputs/services/cross/<org>-rabbitmq-producers-consumers.md` — Add/update events in the reference table
-- `outputs/services/cross/<org>-rabbitmq-schema.md` — Add/update payload schemas for new events
-- `outputs/services/cross/<org>-rabbitmq-topology.md` — Update the mermaid diagram and matrices
+- `outputs/services/weroad/jungle/cross/<org>-rabbitmq-producers-consumers.md` — Add/update events in the reference table
+- `outputs/services/weroad/jungle/cross/<org>-rabbitmq-schema.md` — Add/update payload schemas for new events
+- `outputs/services/weroad/jungle/cross/<org>-rabbitmq-topology.md` — Update the mermaid diagram and matrices
 
 ### Process:
 
@@ -200,7 +240,8 @@ RabbitMQ documentation files in `outputs/services/cross/`:
 ## 5. Optional: Generate Deep Database Schema Doc (.DB.AGENT.MD)
 
 If the service uses PostgreSQL, also generate a dedicated deep-dive database schema file at
-`outputs/services/{owner}-{repo}.DB.AGENT.MD`.
+`{repo}.DB.AGENT.MD` in the **same directory as the service's `.AGENT.MD`** (so
+`outputs/services/weroad/jungle/{repo}.DB.AGENT.MD` for jungle repos).
 
 ### 5.1 Detect PostgreSQL usage
 
@@ -244,7 +285,7 @@ Check these indicators **in order** (stop at first match):
 - Check for generated TypeScript interfaces
 - Read seed files if `seeds/` exists
 
-### 5.3 Write `outputs/services/{owner}-{repo}.DB.AGENT.MD`
+### 5.3 Write `{repo}.DB.AGENT.MD` (same directory as the `.AGENT.MD`)
 
 ```markdown
 # {owner}/{repo} — Database Schema
@@ -309,6 +350,8 @@ STATE_A → STATE_B → STATE_C
 ## Owner
 
 <Team name>
+
+Topics: [[{repo}.AGENT.MD]] · [[data-model]] · [[services]] · [[{owner-team}]]
 ```
 
 **Formatting rules:**
