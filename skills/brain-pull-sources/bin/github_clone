@@ -1,9 +1,13 @@
 #!/bin/bash
 # Full-clone or update a GitHub repo into github/<owner>/<repo>/
-# Usage: github_clone <github_repo_url>
+# Usage: github_clone <github_repo_url> [target_reldir]
 #
 # If the repo already exists locally, pulls latest changes.
 # If not, does a full clone.
+#
+# Optional [target_reldir] (relative to the project root) overrides the default
+# github/<owner>/<repo> destination — used to nest jungle repos under
+# github/weroad/jungle/<repo>/ (see bin/pull_sources).
 #
 # Auth: uses local git/gh credential helper (no separate token needed).
 
@@ -12,8 +16,9 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 OUTPUT_BASE="$PROJECT_ROOT/github"
 
 URL="$1"
+TARGET_RELDIR="$2"
 if [[ -z "$URL" ]]; then
-  echo "Usage: github_clone <github_repo_url>"
+  echo "Usage: github_clone <github_repo_url> [target_reldir]"
   exit 1
 fi
 
@@ -29,7 +34,11 @@ if [[ -z "$OWNER" || -z "$REPO" ]]; then
   exit 1
 fi
 
-TARGET="$OUTPUT_BASE/$OWNER/$REPO"
+if [[ -n "$TARGET_RELDIR" ]]; then
+  TARGET="$PROJECT_ROOT/$TARGET_RELDIR"
+else
+  TARGET="$OUTPUT_BASE/$OWNER/$REPO"
+fi
 CLONE_URL="https://github.com/$OWNER/$REPO.git"
 
 if [[ -d "$TARGET/.git" ]]; then

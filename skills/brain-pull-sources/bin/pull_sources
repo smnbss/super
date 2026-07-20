@@ -145,6 +145,36 @@ echo ""
 echo "Done. $success succeeded, $failed failed."
 echo "Manifest written to src/.last_export.json"
 
+# --- Jungle-managed repos ----------------------------------------------------
+# The local dev stack (jungle) owns its own repo list: github/weroad/jungle/
+# bin/repos.sh. Rather than duplicate those repos in sources.github.md, we
+# clone them NESTED under github/weroad/jungle/<repo>/ so the brain mirror
+# matches the real jungle layout. We clone over HTTPS via github_clone (NOT
+# jungle's own bin/repo.init.sh, which hardcodes git@github.com SSH and fails
+# in non-interactive/scheduled contexts like morning-start). repos.sh stays the
+# single source of truth — we only parse it, never copy the list.
+JUNGLE_REPOS="$REPO_ROOT/github/weroad/jungle/bin/repos.sh"
+if [[ -f "$JUNGLE_REPOS" ]]; then
+  echo ""
+  echo "Jungle repos (nested under github/weroad/jungle/, per jungle/bin/repos.sh)…"
+  j_ok=0; j_fail=0
+  # extract unique weroad/<name> from the REPOS=() array (handles .git suffix)
+  jungle_names="$(grep -oE 'weroad/[a-z0-9-]+\.git' "$JUNGLE_REPOS" | sed -E 's#weroad/##; s#\.git$##' | sort -u)"
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if "$SCRIPT_DIR/github_clone" "https://github.com/weroad/$name" "github/weroad/jungle/$name" >/dev/null 2>&1; then
+      j_ok=$((j_ok + 1))
+    else
+      j_fail=$((j_fail + 1))
+      echo "  FAIL: jungle/$name"
+    fi
+  done <<< "$jungle_names"
+  echo "Jungle repos: $j_ok ok, $j_fail failed (github/weroad/jungle/)."
+else
+  echo ""
+  echo "Jungle repos: skipped — github/weroad/jungle/bin/repos.sh not present yet."
+fi
+
 # --- Scope the gbrain link graph to curated pages ---------------------------
 # The raw exports carry local-navigation markdown links (e.g. `[..](../INDEX.md)`,
 # `[file](file.md)`) — kept intentionally so src/ stays browsable. But gbrain's
