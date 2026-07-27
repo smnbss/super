@@ -18,25 +18,43 @@ TIMEZONE: Europe/Rome
 OUTPUT_DIR: outputs/agents/my-one-on-one
 LOOKAHEAD_DAYS: 7
 TODAY: (compute dynamically)
+ROSTER: memory/L1/team-members.md
 ```
 
-### Person resolution
+### Person resolution → canonical slug
 
-Do NOT use a hardcoded mapping file. Resolve each person's identity from `memory/L1/team-members.md`, with brain search as a fallback.
+**The filename is derived from the resolved person, never from the calendar text.** Resolve identity FIRST; pick the filename LAST, from the roster. A calendar invite can say `Mattia`, `Mattia Riva`, `Simone / Mattia 1:1`, or `Mattia / Simone 1:1` for the same human — all four must land on the same file.
+
+**Canonical slug = the `File slug` column of `memory/L1/team-members.md`.** That column is the single source of truth. It is full-name based (`mattia-riva`, `elena-giombelli`, `matteo-risso`) because first names collide badly in this roster — 27 first names are shared by 2+ people (6 Alessandros, 5 Lucas, 5 Francescas, 4 Simones, 3 Elenas, 2 Mattias, 2 Matteos). Never invent a slug, never shorten one, never slugify the calendar summary.
 
 For every 1:1 calendar event:
-1. **Extract the identifier** from the summary: strip "1:1", "Simone Basso", "/", " - ", separators. The remaining text is the raw identifier (e.g., `Bera`, `Alex`, `Cass`). Also inspect `attendees[]` for email and full-name hints.
-2. **Read `memory/L1/team-members.md`**. Look for a row where the **Name patterns** column matches the identifier (case-insensitive). If found, use that row for:
-   - `full_name`: from the Name patterns (prefer the full-name variant)
-   - `role`: from the **Role** column
-   - `team` / `department`: from the **Team / Department** column
-   - `email`: from the **Email** column, or fall back to calendar attendees
-   - `linear_teams`: from the **Linear teams** column (`—` means the person does not use Linear)
-3. **If not found in `memory/L1/team-members.md`**, search the brain using `mcp__gbrain__query` with `"<identifier> role position team"`. Also try `"<identifier> people hr"`. Combine results to build the person's context.
 
-**If identity still cannot be resolved** (neither `team-members.md` nor brain search returns a clear match):
+1. **Extract the identifier** from the summary: strip "1:1", "Simone Basso", "Simone", "/", " - ", separators. The remaining text is the raw identifier (e.g. `Bera`, `Alex`, `Cass`). Collect `attendees[]` emails and display names too — **the attendee email is the strongest signal and outranks the summary text**.
+
+2. **Read `memory/L1/team-members.md`** and match, in this priority order:
+   1. **Attendee email** exactly equals the row's **Email** column → unambiguous, use it.
+   2. **Full name** (2+ tokens, from the summary or an attendee display name) matches a full-name variant in the **Name patterns** column → use it.
+   3. **Single-token identifier** matches the **Name patterns** column → only accept if **exactly one row matches**.
+
+3. **Ambiguity guard.** If a single-token identifier matches 2+ rows (e.g. `Elena` → De Giuseppe / Giombelli / Solinas; `Mattia` → Frigerio / Riva), do NOT guess and do NOT fall back to the first-name slug. Disambiguate by attendee email, then by attendee display name. If still ambiguous, stop and ask the user which person it is. Picking wrong writes one person's agenda over another's file.
+
+4. From the matched row take:
+   - `slug`: the **File slug** column ← **this is the output filename, full stop**
+   - `full_name`: the full-name variant in **Name patterns**
+   - `role`: **Role** column
+   - `team` / `department`: **Team / Department** column
+   - `email`: **Email** column, or the calendar attendee email
+   - `linear_teams`: **Linear teams** column (`—` means the person does not use Linear)
+
+5. **If not found in the roster**, search the brain with `mcp__gbrain__query` for `"<identifier> role position team"` and `"<identifier> people hr"`. If that yields a confident full name, derive the slug as `lowercase(full name)` with spaces → hyphens and accents preserved (matching the roster's existing style, e.g. `abel-hernández-martín`) — i.e. **still a full-name slug**, never a first name.
+
+**Non-roster and multi-person cases:**
+- **Externals / candidates** (board members, advisors, interviewees) won't be in the roster. Use a full-name slug derived as in step 5 (`andy-owen-jones`, `paolo-ferretti`). Same rule, just no roster row.
+- **Joint 1:1s** with two attendees besides Simone are not one person and must not be written to either person's canonical file — that would clobber an individual history. Use a combined slug of both full names (`andrea-damico-mattia-riva`) and skip legacy-slug recovery for it.
+
+**If identity still cannot be resolved:**
 Stop and ask the user: *"I found a 1:1 with '<identifier>' but couldn't resolve who they are. Who is this person? (full name, role, team/department, email, Linear team names if any). Tip: update memory/L1/team-members.md or run brain-rebuild-memory so next time the lookup works automatically."*
-Do NOT skip the event silently — ask for clarification so the brain can be updated.
+Do NOT skip the event silently, and do NOT write a file under a provisional first-name slug — that is exactly how history gets split.
 
 ---
 
@@ -65,7 +83,7 @@ Filter results:
    - `attendees[]` (names/emails — use to confirm person identity)
    - `description` (may contain WorkFlowy or other links)
 
-**Person slug extraction:** From the summary, strip "1:1", "Simone Basso", "/", " - ", separators. The remaining identifier becomes the file slug (lowercased, spaces → hyphens). Example: `Bera` → `bera`, `Alex` → `alex`. Use this slug for `outputs/agents/my-one-on-one/<slug>.md`.
+**Person slug:** Do NOT slugify the summary. Run the identifier and the attendee emails through **Person resolution → canonical slug** above and use the roster's **File slug** for `outputs/agents/my-one-on-one/<slug>.md`. Example: summary `Simone / Mattia 1:1` + attendee `mattia.riva@weroad.com` → roster row `Mattia | Mattia Riva` → slug `mattia-riva` → `outputs/agents/my-one-on-one/mattia-riva.md`. The slug depends only on who the person is, so the same person always resolves to the same file no matter how the invite is worded.
 
 ---
 
@@ -79,6 +97,24 @@ If it exists:
 3. Mark items that look like they need a status check (questions asked, deadlines set, actions requested)
 
 This previous agenda is KEY context. Many items will carry forward with an updated status check.
+
+### Legacy-slug recovery (run before writing)
+
+Historically this skill sometimes slugged on the first name instead of the full name, so a person's history may sit in a file under a different convention. **Before generating, look for that file** — otherwise the old history is silently orphaned and its open follow-ups vanish from every future agenda.
+
+For each resolved person, `ls outputs/agents/my-one-on-one/` and check for any of these variants beyond the canonical `<slug>.md`:
+- **First-name slug** — the first token of the full name (`mattia.md` for `mattia-riva`)
+- **Last-name / nickname slug** — the last token, or a nickname in the roster's **Name patterns** (`risso.md` for `matteo-risso`, `lampe.md` for `andrea-lamperini`, `cass.md` for `cassiano-vailati-canta`)
+
+Confirm the match by reading the candidate file's `# 1:1 <Full Name>` H1 — **match on the H1 name, not the filename**. `matteo.md` held Matteo *Diana*, not Matteo *Risso*; a filename guess would have merged the wrong person.
+
+When a legacy file is confirmed for this person:
+1. Read it and fold its unresolved items into Section 1 (Follow-ups) of the new agenda, same as a normal previous agenda.
+2. Append its full text to the bottom of the canonical file under `## Archive — <week> (generated <date>, from \`<old file>\`)`, with heading levels demoted one step (`#`/`##` → `###`) so the outline stays intact.
+3. Delete the legacy file, so the split does not recur.
+4. Report the merge in Step 7.
+
+Never write two files for one person. If both a canonical and a legacy file exist, the canonical one wins and absorbs the other.
 
 ---
 
@@ -222,15 +258,18 @@ Examples:
 
 ## Step 6 — Write the output files
 
-Write one file per person to `outputs/agents/my-one-on-one/<slug>.md`.
+Write **exactly one file per person**, to `outputs/agents/my-one-on-one/<slug>.md`, where `<slug>` is the roster **File slug** resolved in Person resolution. Never write to a slug derived from the calendar summary.
 
-**If the file already exists, overwrite it completely** — each run produces a fresh file.
+**If the file already exists, overwrite it completely** — each run produces a fresh agenda. Two exceptions, both additive:
+- Any `## Archive — …` sections already at the bottom of the file are **preserved verbatim**; re-append them below the fresh agenda. They are the only long-term history this directory keeps.
+- A legacy-slug file found in Step 2 is archived into this file and then deleted.
 
 Format:
 
 ```markdown
 # 1:1 <Full Name> — W<NN> (<Day>, <Mon DD>, <HH:MM>)
 <!-- generated: YYYY-MM-DD -->
+<!-- canonical-slug: <slug> (memory/L1/team-members.md) -->
 
 ## Follow-ups from last 1:1
 - **<Topic>** — <what changed since last agenda, with source>
@@ -265,8 +304,9 @@ Format:
 
 Print a summary:
 - How many 1:1s found in the next LOOKAHEAD_DAYS
-- For each: person name, date/time, number of active projects, number of follow-ups from last agenda, number of flags
+- For each: person name, resolved canonical slug, date/time, number of active projects, number of follow-ups from last agenda, number of flags
 - Path to each generated file
+- **Any legacy-slug file merged and deleted** (`merged mattia.md → mattia-riva.md`), and **any identifier that needed disambiguation** — both are signals the roster or the calendar invite wording could be tidied up.
 
 ---
 
@@ -288,3 +328,5 @@ Print a summary:
 ```
 
 Override LOOKAHEAD_DAYS or filter to a single person accordingly.
+
+A person argument is an *identifier*, not a filename — push it through **Person resolution → canonical slug** exactly like a calendar identifier, ambiguity guard included. `/my-one-on-one alex` resolves to Alex Gibertoni and writes `alex-gibertoni.md`; `/my-one-on-one elena` matches three people and must ask which one rather than writing `elena.md`.
