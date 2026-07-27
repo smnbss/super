@@ -40,7 +40,7 @@ the seam explicit up front saves the model from re-deriving it mid-task.
 
 Each name may match:
 - A repo under `github/<org>/<name>` (exact match preferred, then substring)
-- A service doc at `outputs/services/<name>.AGENT.MD` or `*<name>*.AGENT.MD`
+- A service doc at `outputs/services/<name>.agent.md` or `*<name>*.agent.md`
 - A project workspace at `outputs/projects/<name>/`
 
 If no name is provided, stop and ask:
@@ -119,10 +119,10 @@ it's worth one disambiguation question to avoid starting the wrong way.
 
 Look in `outputs/services/` for architecture docs:
 
-1. Exact match: `outputs/services/<name>.AGENT.MD` or
-   `outputs/services/weroad-<name>.AGENT.MD`.
-2. Fuzzy match: any `*.AGENT.MD` whose filename contains the input.
-3. If the repo includes a database, also look for `*.DB.AGENT.MD`.
+1. Exact match: `outputs/services/<name>.agent.md` or
+   `outputs/services/weroad-<name>.agent.md`.
+2. Fuzzy match: any `*.agent.md` whose filename contains the input.
+3. If the repo includes a database, also look for `*.db.agent.md`.
 4. Check `outputs/services/cross/` for cross-cutting docs that mention the
    capability (RabbitMQ topology, event flows, etc.) — use `mcp__gbrain__query`
    if scanning filenames is not enough.

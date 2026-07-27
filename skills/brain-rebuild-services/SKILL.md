@@ -1,12 +1,12 @@
 ---
 name: brain-rebuild-services
 description: >-
-  Generate deep technical `.AGENT.MD` service documentation from cloned GitHub
+  Generate deep technical `.agent.md` service documentation from cloned GitHub
   repos. Use when service architecture docs need to be created or updated.
 ---
 
 You are a platform architect generating deep technical documentation for a service.
-Your output is a `.AGENT.MD` file that lives in `outputs/services/` and serves as the definitive
+Your output is a `.agent.md` file that lives in `outputs/services/` and serves as the definitive
 architecture reference for the repo — used by AI agents and developers to understand the service
 without reading every source file.
 
@@ -107,19 +107,31 @@ local dev stack; everything else goes under `outputs/services/{owner}/`.** A ser
   standalone clone (e.g. `api-rooming` builds from `context: ./buynana` → jungle, even though
   it has no `repos.sh` entry of its own).
 
-Everything else is non-jungle: `outputs/services/weroad/wemeet.AGENT.MD` (mobile app, not a
-compose service), `outputs/services/smnbss/super.AGENT.MD`, etc. The **jungle repo itself**
-(the dev-env container) lives at `outputs/services/weroad/jungle/jungle.AGENT.MD` — the
+Everything else is non-jungle: `outputs/services/weroad/wemeet.agent.md` (mobile app, not a
+compose service), `outputs/services/smnbss/super.agent.md`, etc. The **jungle repo itself**
+(the dev-env container) lives at `outputs/services/weroad/jungle/jungle.agent.md` — the
 package's own doc, alongside the services it runs. Create the target subdir if it doesn't
 exist. Cross-cutting docs live in `outputs/services/weroad/jungle/cross/`.
 
+**Extension MUST be lowercase `.agent.md` / `.db.agent.md`.** Never `.AGENT.MD`. gbrain's
+sync classifier (`isMarkdownFilePath` in `src/core/sync.ts`) tests `path.endsWith('.md')`
+**case-sensitively** — unlike its `isCodeFilePath` / `isImageFilePath` siblings, which
+lowercase first. An uppercase `.MD` file is rejected with reason `strategy` and never
+imported, so the doc becomes invisible to `gbrain query`/`search` and every
+`[[{repo}.agent.md]]` wikilink pointing at it dangles. (Worse, uppercase can't be rescued
+by a wikilink rewrite either: link extraction strips only a lowercase `.md` suffix, and
+`normalizeBasename` deletes dots, so `[[cms.AGENT.MD]]` normalizes to `cmsagentmd` while
+the page's index key is `cmsagent` — they can never meet.) This bit us on 2026-07-27, when
+all 108 service docs turned out to be absent from the index. Verify after any rebuild:
+`psql "$(gbrain config show | sed -n 's/^ *database_url: *//p')" -tAc "SELECT count(*) FROM pages WHERE slug LIKE 'outputs/services%';"`
+
 **Filename & uniqueness rule:** the filename is the de-prefixed repo name
-(`{repo}.AGENT.MD`), NOT `{owner}-{repo}.AGENT.MD` — the owner is the directory. gbrain
+(`{repo}.agent.md`), NOT `{owner}-{repo}.agent.md` — the owner is the directory. gbrain
 resolves wikilinks by **basename** (`global_basename: true`), so the basename MUST be
 globally unique across ALL owners. This holds today (no repo-name collisions across
 weroad/smnbss/NikolaiGoMedicus). If you ever add a repo whose name already exists under
 another owner, keep the `{owner}-` prefix on BOTH colliding files (e.g.
-`acme/{owner}-foo.AGENT.MD`) and update the wikilinks that reference them.
+`acme/{owner}-foo.agent.md`) and update the wikilinks that reference them.
 
 Every section that has data MUST be included. Skip sections only if the repo genuinely
 doesn't have that concept (e.g., no DB for a stateless service).
@@ -196,14 +208,14 @@ doesn't have that concept (e.g., no DB for a stateless service).
 ## Owner
 {Team name}
 
-Topics: [[services]] · [[{owner-team}]] · [[technologies]] · [[github]]{ · [[{repo}.DB.AGENT.MD]] if a DB doc exists}
+Topics: [[services]] · [[{owner-team}]] · [[technologies]] · [[github]]{ · [[{repo}.db.agent.md]] if a DB doc exists}
 ```
 
 **Footer rules:** the `Topics:` footer links back UP into the graph using **bare unique
 basenames** (`global_basename` resolution) — never invent MOC names. Valid targets:
 `[[services]]` (the service catalog — NOT `[[repos]]`, which does not exist), the owning
 team L2 (`[[team-buktu]]`, …), `[[technologies]]`, `[[github]]`, `[[data-model]]` for
-data services, and this service's own `[[{repo}.DB.AGENT.MD]]` when present. Do not emit
+data services, and this service's own `[[{repo}.db.agent.md]]` when present. Do not emit
 path-qualified links (`[[L1/…]]`, `[[../../…]]`) — the bare basename always resolves.
 
 ## 4. Update cross-cutting RabbitMQ Topology Files (if service has messaging)
@@ -237,11 +249,11 @@ RabbitMQ documentation files in `outputs/services/weroad/jungle/cross/`:
 - Mark unknown consumers/producers as `TBD` or `_source TBD_` — do not guess
 - Update the `<!-- verified: -->` comment with today's date
 
-## 5. Optional: Generate Deep Database Schema Doc (.DB.AGENT.MD)
+## 5. Optional: Generate Deep Database Schema Doc (.db.agent.md)
 
 If the service uses PostgreSQL, also generate a dedicated deep-dive database schema file at
-`{repo}.DB.AGENT.MD` in the **same directory as the service's `.AGENT.MD`** (so
-`outputs/services/weroad/jungle/{repo}.DB.AGENT.MD` for jungle repos).
+`{repo}.db.agent.md` in the **same directory as the service's `.agent.md`** (so
+`outputs/services/weroad/jungle/{repo}.db.agent.md` for jungle repos).
 
 ### 5.1 Detect PostgreSQL usage
 
@@ -285,7 +297,7 @@ Check these indicators **in order** (stop at first match):
 - Check for generated TypeScript interfaces
 - Read seed files if `seeds/` exists
 
-### 5.3 Write `{repo}.DB.AGENT.MD` (same directory as the `.AGENT.MD`)
+### 5.3 Write `{repo}.db.agent.md` (same directory as the `.agent.md`)
 
 ```markdown
 # {owner}/{repo} — Database Schema
@@ -351,7 +363,7 @@ STATE_A → STATE_B → STATE_C
 
 <Team name>
 
-Topics: [[{repo}.AGENT.MD]] · [[data-model]] · [[services]] · [[{owner-team}]]
+Topics: [[{repo}.agent.md]] · [[data-model]] · [[services]] · [[{owner-team}]]
 ```
 
 **Formatting rules:**
@@ -363,15 +375,15 @@ Topics: [[{repo}.AGENT.MD]] · [[data-model]] · [[services]] · [[{owner-team}]
 - Omit "Status Lifecycles" if no status enums
 - Omit "Multi-tenancy" if not applicable
 
-### 5.4 Quality gate for .DB.AGENT.MD
+### 5.4 Quality gate for .db.agent.md
 
 After writing the file, run these checks:
 
-1. **Table count match:** count models/entities in source vs `### ` headings in `.DB.AGENT.MD`
+1. **Table count match:** count models/entities in source vs `### ` headings in `.db.agent.md`
 2. **No placeholders:** grep for `TODO`, `TBD`, `PLACEHOLDER`, `...`, or empty table cells
 3. **Relationship completeness:** every FK column in a table must appear in the Relationships table
 4. **Enum completeness:** every enum in source must appear in the Enums section
-5. **Cross-reference with `.AGENT.MD`:** if the `.AGENT.MD` mentions tables/entities not in `.DB.AGENT.MD`, investigate and add them
+5. **Cross-reference with `.agent.md`:** if the `.agent.md` mentions tables/entities not in `.db.agent.md`, investigate and add them
 
 If any check fails, re-read the source, fix the file, and re-run the check (max 3 iterations).
 
@@ -386,8 +398,8 @@ If any check fails, re-read the source, fix the file, and re-run the check (max 
   Messaging bugs are the hardest to debug — complete docs here save hours.
 - **Always update cross-cutting RabbitMQ files when the service has messaging** — keep the topology
   documentation in sync with the service-level documentation.
-- **Generate `.DB.AGENT.MD` for every PostgreSQL service** — the deep schema doc complements
-  the architecture overview in `.AGENT.MD`.
+- **Generate `.db.agent.md` for every PostgreSQL service** — the deep schema doc complements
+  the architecture overview in `.agent.md`.
 - For dependencies: be specific. Not "calls catalog API" but "calls api-catalog via
   GraphQL at `API_CATALOG_INTERNAL_URL` for travel data".
 - Keep the file under 1000 lines. Compress tables, use abbreviations in table cells.

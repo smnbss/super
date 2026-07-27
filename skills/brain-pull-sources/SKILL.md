@@ -152,7 +152,7 @@ Apply these updates during reconciliation. REMOVE marks facts as `<!-- supersede
 **Step 6: Per-service docs**
 
 For each `github/` repo that changed since last sync:
-- Check if `outputs/services/<service>.AGENT.MD` exists and compare `verified:` date against `git log -1`
+- Check if `outputs/services/<service>.agent.md` exists and compare `verified:` date against `git log -1`
 - Stale service docs: re-read repo source and update stack, schema, messaging, auth, APIs sections
 - New repos without service docs: flag in the digest as candidates for doc creation
 

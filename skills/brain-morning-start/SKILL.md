@@ -48,7 +48,7 @@ Report what was updated; flag errors or notable version bumps.
 Dispatch each as a subagent invoking the named skill; collect a short summary.
 
 - **2a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 3 in parallel with this.**
-- **2b `brain-rebuild-services`** — regenerate `.AGENT.MD` service docs from changed repos → `outputs/services/`. *After 2a.*
+- **2b `brain-rebuild-services`** — regenerate `.agent.md` service docs from changed repos → `outputs/services/`. *After 2a.*
 - **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its `run <path>` directives in order. *After 2b, before 2c.*
 - **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. It only **writes markdown**; the gbrain index (chunks, embeddings, wikilink edges, timeline) is refreshed by the single `gbrain sync` in Part 5. **No gbrain step inside 2c.** *After 2b.5.*
 
