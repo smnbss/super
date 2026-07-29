@@ -100,6 +100,27 @@ TRANSCRIPT_NEEDLES = ["Transcript", "Trascrizione"]
 
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 TITLE_MATCH_THRESHOLD = 0.55
+# A Gemini notes/transcript doc is created when the meeting happens. The Drive
+# candidate query filters on modifiedTime (so a doc merely *opened* on the
+# meeting day qualifies), which let a recurring series' OLD instance doc attach
+# to a later occurrence — e.g. the Jun 26 "Team Leader Session" notes landing in
+# the 07-24 folder because someone opened them that day. createdTime is the
+# honest signal, so bound it. Generous enough for overnight/timezone skew.
+DOC_CREATED_MAX_DAYS = 2
+# When a candidate's title introduces a distinctive word that belongs to a
+# DIFFERENT meeting the same day, a loose fuzzy ratio is not enough evidence —
+# that is exactly how a "Simone / Matteo" transcript got attached to the
+# "Simone / Laura" folder (ratio ≈0.72, comfortably over 0.55). Demand near
+# certainty in that case only; unrelated titles keep the normal threshold.
+TITLE_MATCH_STRICT = 0.90
+# Words too generic to identify a meeting, so they never count as a "distinctive
+# word owned by another meeting" above.
+TITLE_STOPWORDS = {
+    "the", "and", "with", "for", "meeting", "call", "sync", "weekly", "biweekly",
+    "fortnightly", "monthly", "daily", "session", "review", "deep", "dive", "1on1",
+    "standup", "catch", "chat", "team", "notes", "transcript", "trascrizione",
+    "appunti", "gemini", "riunione", "settimanale", "con", "per",
+}
 MARKITDOWN_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".html"}
 EXT_MAP = {
     "application/pdf": ".pdf",
@@ -289,8 +310,16 @@ def strip_gemini_suffix(doc_name: str) -> str:
 
 
 def best_match(meeting, candidates: list[dict]) -> dict | None:
-    """Pick the Drive doc whose name best matches the meeting title; tie-break by
-    creation-time proximity to the meeting start."""
+    """DEPRECATED — currently unused; do not call. Use assign_matches().
+
+    Pick the Drive doc whose name best matches the meeting title; tie-break by
+    creation-time proximity to the meeting start.
+
+    Kept only for reference. It lacks BOTH correctness guards that assign_matches
+    grew (creation-date bound and cross-meeting word conflict), so it will happily
+    attach a recurring meeting's older instance doc, or another person's 1:1
+    transcript, to the wrong folder. It also has no one-to-one constraint, so one
+    doc can be claimed by several same-day meetings."""
     mt = normalize_title(meeting["title"])
     if not mt:
         return None
@@ -308,9 +337,30 @@ def best_match(meeting, candidates: list[dict]) -> dict | None:
     return scored[0][2]
 
 
-def assign_matches(meetings: list[dict], candidates: list[dict]) -> dict[int, dict]:
+def title_tokens(s: str) -> set[str]:
+    """Distinctive lowercase words in a title — the bits that actually identify
+    *which* meeting (and *whose*) it is. Drops stopwords, digits and short noise."""
+    return {t for t in normalize_title(s).split()
+            if len(t) >= 3 and not t.isdigit() and t not in TITLE_STOPWORDS}
+
+
+def doc_created_days_off(created_iso: str, meeting_day: date) -> float | None:
+    """How many days a Drive doc's creation is from the meeting day.
+    None when the doc reports no creation time (unknown → never used to reject)."""
+    if not created_iso:
+        return None
+    epoch = _iso_to_epoch(created_iso)
+    if not epoch:
+        return None
+    created_day = datetime.fromtimestamp(epoch, tz=TIMEZONE).date()
+    return abs((created_day - meeting_day).days)
+
+
+def assign_matches(meetings: list[dict], candidates: list[dict],
+                   meeting_day: date | None = None) -> dict[int, dict]:
     """Globally assign each candidate Drive doc to AT MOST ONE meeting, and each
-    meeting to at most one doc. Returns {meeting_index: doc}.
+    meeting to at most one doc. Returns {meeting_index: doc}, where the returned
+    doc is a shallow copy carrying `_matchRatio` / `_createdDaysOff` provenance.
 
     Unlike calling best_match() per meeting against the full pool (which lets a
     single Gemini doc be claimed by several same-day meetings with similar titles
@@ -318,26 +368,65 @@ def assign_matches(meetings: list[dict], candidates: list[dict]) -> dict[int, di
     across folders and starving the folder that owned a distinct note), this does
     a greedy one-to-one match: score every (meeting, candidate) pair over the
     title threshold, then walk them best-first (ratio desc, creation-time
-    proximity desc) assigning each doc and each meeting only once."""
-    triples = []  # (ratio, -delta, meeting_idx, cand_idx)
+    proximity desc) assigning each doc and each meeting only once.
+
+    Two correctness guards on top of the title score:
+
+    1. **Creation-date bound.** The candidate query filters on `modifiedTime`, so
+       merely *opening* an old doc on the meeting day makes it a candidate. A
+       Gemini artifact is created when its meeting happens, so a doc created more
+       than DOC_CREATED_MAX_DAYS away is rejected outright rather than merely
+       ranked lower. Docs with no createdTime are never rejected on this basis.
+
+    2. **Cross-meeting word conflict.** If a candidate's title introduces a
+       distinctive word that belongs to a *different* meeting the same day, the
+       loose threshold is not enough evidence and TITLE_MATCH_STRICT is required.
+       This is the "Simone / Laura" vs "Simone / Matteo" confusion; it stays off
+       for titles that merely differ from the event name."""
+    tokens_per_meeting = [title_tokens(m["title"]) for m in meetings]
+    triples = []  # (ratio, -delta, meeting_idx, cand_idx, created_days_off)
     for mi, m in enumerate(meetings):
         mt = normalize_title(m["title"])
         if not mt:
             continue
+        # Distinctive words owned by some OTHER meeting today, not by this one.
+        others = set().union(*(t for j, t in enumerate(tokens_per_meeting) if j != mi)) \
+            if len(tokens_per_meeting) > 1 else set()
+        others -= tokens_per_meeting[mi]
         for ci, c in enumerate(candidates):
-            cand_title = normalize_title(strip_gemini_suffix(c.get("name", "")))
+            cand_name = c.get("name", "")
+            cand_title = normalize_title(strip_gemini_suffix(cand_name))
             ratio = difflib.SequenceMatcher(None, mt, cand_title).ratio()
-            if ratio >= TITLE_MATCH_THRESHOLD:
-                created = c.get("createdTime", "")
-                delta = abs(_iso_to_epoch(created) - m["_start_epoch"]) if created else 1e18
-                triples.append((ratio, -delta, mi, ci))
+            if ratio < TITLE_MATCH_THRESHOLD:
+                continue
+            days_off = None
+            if meeting_day is not None:
+                days_off = doc_created_days_off(c.get("createdTime", ""), meeting_day)
+                if days_off is not None and days_off > DOC_CREATED_MAX_DAYS:
+                    print(f"    Rejecting '{cand_name}' for '{m['title']}' — created "
+                          f"{days_off:.0f}d from {meeting_day} (likely another "
+                          f"occurrence of a recurring meeting)", file=sys.stderr)
+                    continue
+            stolen = (title_tokens(strip_gemini_suffix(cand_name))
+                      - tokens_per_meeting[mi]) & others
+            if stolen and ratio < TITLE_MATCH_STRICT:
+                print(f"    Rejecting '{cand_name}' for '{m['title']}' — names "
+                      f"{sorted(stolen)}, which belong to another meeting today "
+                      f"(ratio {ratio:.2f} < {TITLE_MATCH_STRICT})", file=sys.stderr)
+                continue
+            created = c.get("createdTime", "")
+            delta = abs(_iso_to_epoch(created) - m["_start_epoch"]) if created else 1e18
+            triples.append((ratio, -delta, mi, ci, days_off))
     triples.sort(key=lambda x: (x[0], x[1]), reverse=True)
     assigned: dict[int, dict] = {}
     used_docs: set[int] = set()
-    for _ratio, _negdelta, mi, ci in triples:
+    for ratio, _negdelta, mi, ci, days_off in triples:
         if mi in assigned or ci in used_docs:
             continue
-        assigned[mi] = candidates[ci]
+        doc = dict(candidates[ci])
+        doc["_matchRatio"] = round(ratio, 3)
+        doc["_createdDaysOff"] = days_off
+        assigned[mi] = doc
         used_docs.add(ci)
     return assigned
 
@@ -568,9 +657,9 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
 
     # Globally assign each note/transcript/recording doc to a single meeting so a
     # shared doc can't be duplicated across same-day meetings with similar titles.
-    note_assign = assign_matches(meetings, note_candidates)
-    transcript_assign = assign_matches(meetings, transcript_candidates)
-    recording_assign = assign_matches(meetings, recording_candidates)
+    note_assign = assign_matches(meetings, note_candidates, d)
+    transcript_assign = assign_matches(meetings, transcript_candidates, d)
+    recording_assign = assign_matches(meetings, recording_candidates, d)
 
     rows = []
     folders_written = 0
@@ -643,24 +732,64 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
                       f"{type(e).__name__}: {str(e).splitlines()[0][:140]}", file=sys.stderr)
                 continue
 
-        # 2b — Gemini notes
+        # 2b — Gemini notes. The exported body carries its own date header
+        # ("giu 26, 2026"), which is the last line of defence against a
+        # recurring series' older doc: if it disagrees with the meeting day,
+        # discard it rather than misdate every fact downstream. (A misdated note
+        # silently misdates the daily digest, the weekly/monthly rollups and the
+        # L2 memory facts derived from them, with a healthy-looking source trail.)
         note = note_assign.get(mi)
         if note:
             os.makedirs(m_dir, exist_ok=True)
-            if export_google_doc_md(note["id"], m["title"], os.path.join(m_dir, "notes.md")):
-                produced.append("notes")
-                artifacts["notes"] = {"source": "drive-search", "docId": note["id"],
-                                      "driveLink": note.get("webViewLink", "")}
+            notes_path = os.path.join(m_dir, "notes.md")
+            if export_google_doc_md(note["id"], m["title"], notes_path):
+                if _content_date_mismatch(notes_path, d):
+                    print(f"    Discarding notes '{note.get('name','')}' for "
+                          f"'{m['title']}' — content date != meeting date {d}",
+                          file=sys.stderr)
+                    os.remove(notes_path)
+                else:
+                    produced.append("notes")
+                    artifacts["notes"] = {
+                        "source": "drive-search", "docId": note["id"],
+                        "driveLink": note.get("webViewLink", ""),
+                        "docName": note.get("name", ""),
+                        "docCreatedTime": note.get("createdTime", ""),
+                        "matchRatio": note.get("_matchRatio"),
+                        "createdDaysOff": note.get("_createdDaysOff"),
+                    }
 
-        # 2d — transcript docs (best-effort)
+        # 2d — transcript docs (best-effort), same content-date guard.
+        #
+        # A pre-existing transcript.md is a Meet-API transcript that this CLI does
+        # not own or reproduce; the day-level cleanup above deliberately preserves
+        # it. It MUST therefore count as a produced artifact even when no Drive
+        # candidate matches this meeting — otherwise the "no artifacts" branch at
+        # the end of this loop rmtree's the folder and destroys the preserved file.
         tr = transcript_assign.get(mi)
-        if tr:
+        tr_path = os.path.join(m_dir, "transcript.md")
+        if os.path.exists(tr_path):
+            produced.append("transcript")
+            artifacts["transcript"] = {"source": "preserved-existing",
+                                       "localFile": "transcript.md"}
+        elif tr:
             os.makedirs(m_dir, exist_ok=True)
-            if export_google_doc_md(tr["id"], f"Transcript: {m['title']}",
-                                    os.path.join(m_dir, "transcript.md")):
-                produced.append("transcript")
-                artifacts["transcript"] = {"source": "drive-search", "docId": tr["id"],
-                                           "driveLink": tr.get("webViewLink", "")}
+            if export_google_doc_md(tr["id"], f"Transcript: {m['title']}", tr_path):
+                if _content_date_mismatch(tr_path, d):
+                    print(f"    Discarding transcript '{tr.get('name','')}' for "
+                          f"'{m['title']}' — content date != meeting date {d}",
+                          file=sys.stderr)
+                    os.remove(tr_path)
+                else:
+                    produced.append("transcript")
+                    artifacts["transcript"] = {
+                        "source": "drive-search", "docId": tr["id"],
+                        "driveLink": tr.get("webViewLink", ""),
+                        "docName": tr.get("name", ""),
+                        "docCreatedTime": tr.get("createdTime", ""),
+                        "matchRatio": tr.get("_matchRatio"),
+                        "createdDaysOff": tr.get("_createdDaysOff"),
+                    }
 
         # 2c — recordings (link only)
         rec = recording_assign.get(mi)
