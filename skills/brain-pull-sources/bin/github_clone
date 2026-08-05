@@ -15,6 +15,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 OUTPUT_BASE="$PROJECT_ROOT/github"
 
+# --- Deviation reporting -----------------------------------------------------
+# Anything other than a clean mirror update has to be surfaced in the daily
+# update, and stdout cannot carry it: each repo runs in its own process
+# (pull_sources fans out with `xargs -P`), and the jungle loop redirects this
+# script's output to /dev/null. So deviations are appended to a report file that
+# pull_sources truncates at the start of a run and prints at the end.
+# One `printf` per line keeps concurrent appends from interleaving on a local FS.
+REPORT="${GITHUB_CLONE_REPORT:-$PROJECT_ROOT/.github-clone-report.md}"
+
+report_line() {
+  printf -- '- **%s** — %s\n' "$1" "$2" >> "$REPORT" 2>/dev/null || true
+}
+
 URL="$1"
 TARGET_RELDIR="$2"
 if [[ -z "$URL" ]]; then
@@ -57,18 +70,77 @@ if [[ -d "$TARGET/.git" ]]; then
     DEFAULT_BRANCH="main"
   fi
 
-  if git fetch origin 2>/dev/null && git reset --hard "origin/$DEFAULT_BRANCH" 2>/dev/null; then
-    echo "✓ $OWNER/$REPO (updated)"
-  else
-    # Fetch failed — re-clone from scratch
-    echo "⚠ $OWNER/$REPO (fetch failed, re-cloning)"
-    cd "$PROJECT_ROOT"
-    rm -rf "$TARGET"
-    if git clone "$CLONE_URL" "$TARGET" 2>/dev/null; then
-      echo "✓ $OWNER/$REPO (re-cloned)"
+  # --- Local work detection --------------------------------------------------
+  # These clones are mirrors, but people do real work in them (a spec committed
+  # on a branch, a repair in progress). A blind `reset --hard origin/<default>`
+  # silently destroys that: it discards uncommitted changes AND moves the current
+  # branch pointer, so committed work on a feature branch disappears too. So:
+  # look before overwriting, and prefer merging to resetting whenever there is
+  # anything local to lose.
+  DIRTY=""
+  [[ -n "$(git status --porcelain 2>/dev/null)" ]] && DIRTY="yes"
+  CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+
+  if git fetch origin 2>/dev/null; then
+    # Commits reachable from HEAD but not from the remote default branch. Counted
+    # after the fetch so the comparison is against the freshly-updated remote.
+    AHEAD="$(git rev-list --count "origin/$DEFAULT_BRANCH..HEAD" 2>/dev/null || echo 0)"
+
+    if [[ -n "$DIRTY" ]]; then
+      # Uncommitted changes: touch nothing at all. Merging would refuse or
+      # clobber, and stashing on someone's behalf hides work where they will not
+      # look for it.
+      echo "⚠ $OWNER/$REPO (uncommitted changes — left untouched)"
+      report_line "$OWNER/$REPO" "skipped — uncommitted changes on \`$CURRENT_BRANCH\`, not updated"
+
+    elif [[ "$AHEAD" -gt 0 ]]; then
+      # Local commits: merge the remote in rather than resetting over them.
+      if git merge --no-edit "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+        echo "✓ $OWNER/$REPO (merged origin/$DEFAULT_BRANCH into $CURRENT_BRANCH, $AHEAD local commit(s) kept)"
+        report_line "$OWNER/$REPO" "merged \`origin/$DEFAULT_BRANCH\` into \`$CURRENT_BRANCH\` — $AHEAD local commit(s) preserved"
+      else
+        # Leave the tree exactly as it was and say so; a half-merged mirror is
+        # worse than a stale one.
+        git merge --abort >/dev/null 2>&1
+        echo "⚠ $OWNER/$REPO (merge conflict — left at $CURRENT_BRANCH, not updated)"
+        report_line "$OWNER/$REPO" "**merge conflict** — \`origin/$DEFAULT_BRANCH\` could not be merged into \`$CURRENT_BRANCH\`; $AHEAD local commit(s) intact, needs a manual merge"
+      fi
+
+    elif [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+      # On a branch with nothing of its own — fast-forwardable, so just move it.
+      if git merge --ff-only "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+        echo "✓ $OWNER/$REPO (fast-forwarded $CURRENT_BRANCH)"
+      else
+        echo "⚠ $OWNER/$REPO (on $CURRENT_BRANCH, cannot fast-forward — not updated)"
+        report_line "$OWNER/$REPO" "skipped — on \`$CURRENT_BRANCH\` and not fast-forwardable"
+      fi
+
     else
-      echo "✗ $OWNER/$REPO (clone failed)"
-      exit 1
+      # The ordinary mirror case: pristine clone on the default branch.
+      if git reset --hard "origin/$DEFAULT_BRANCH" 2>/dev/null; then
+        echo "✓ $OWNER/$REPO (updated)"
+      else
+        echo "✗ $OWNER/$REPO (reset failed)"
+        exit 1
+      fi
+    fi
+  else
+    # Fetch failed. Re-cloning means `rm -rf`, so it is only ever safe on a clone
+    # with nothing local in it — otherwise the recovery is more destructive than
+    # the problem it fixes.
+    if [[ -n "$DIRTY" || "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+      echo "⚠ $OWNER/$REPO (fetch failed — has local work, NOT re-cloned)"
+      report_line "$OWNER/$REPO" "fetch failed and local work present (\`$CURRENT_BRANCH\`${DIRTY:+, uncommitted changes}) — left as-is instead of re-cloning"
+    else
+      echo "⚠ $OWNER/$REPO (fetch failed, re-cloning)"
+      cd "$PROJECT_ROOT"
+      rm -rf "$TARGET"
+      if git clone "$CLONE_URL" "$TARGET" 2>/dev/null; then
+        echo "✓ $OWNER/$REPO (re-cloned)"
+      else
+        echo "✗ $OWNER/$REPO (clone failed)"
+        exit 1
+      fi
     fi
   fi
 else

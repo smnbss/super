@@ -43,6 +43,15 @@ RES="$TMP/res"         # one file per lane; "OK" / "FAIL: <cmd>" lines
 mkdir -p "$LANES" "$RES"
 trap 'rm -rf "$TMP"' EXIT
 
+# --- Clone-health report -----------------------------------------------------
+# `github_clone` appends a line here whenever it does anything other than a clean
+# mirror update — merged local commits, skipped a dirty tree, hit a conflict.
+# Truncated per run so the report always describes this run only; printed at the
+# end so the daily update can quote it. Exported so every parallel lane writes to
+# the same file.
+export GITHUB_CLONE_REPORT="${GITHUB_CLONE_REPORT:-$REPO_ROOT/.github-clone-report.md}"
+: > "$GITHUB_CLONE_REPORT" 2>/dev/null || true
+
 # --- Parse all sources files into lanes -------------------------------------
 # (No associative arrays — macOS /bin/bash is 3.2. Counts are derived from the
 #  lane files after parsing.)
@@ -190,4 +199,17 @@ if command -v gbrain >/dev/null 2>&1 && command -v psql >/dev/null 2>&1; then
       echo "Scoped gbrain link graph to curated pages (memory/ + outputs/)."
     fi
   fi
+fi
+
+# --- Clone health: surface anything that was not a clean mirror update -------
+# github_clone never resets over local work; it merges instead, or leaves the
+# clone alone. Whatever it decided is reported here so the daily update can say
+# so out loud — a silently skipped repo is how a stale mirror gets mistaken for a
+# fresh one.
+if [[ -s "$GITHUB_CLONE_REPORT" ]]; then
+  echo ""
+  echo "Clone health — repos with local work (not reset):"
+  cat "$GITHUB_CLONE_REPORT"
+  echo ""
+  echo "  (report file: $GITHUB_CLONE_REPORT)"
 fi

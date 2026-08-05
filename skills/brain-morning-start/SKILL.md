@@ -151,6 +151,7 @@ Morning start complete:
 
 Tools:    brew <N> upgraded · npm/gstack/python <status> · git <status>
 Sources:  <N> exported (X ok, Y failed)
+Clones:   <N> repos with local work — <merged | skipped | CONFLICT> (else "all clean mirrors")
 Services: <N> docs refreshed
 Memory:   L2 <N> files, L1 <N> MOCs · gbrain graph: <N> edges, <N> timeline
 Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet/
@@ -159,6 +160,13 @@ Prep:
   ✓ 1:1 Alex          → outputs/agents/my-one-on-one/alex.md
 gbrain reindex: <N> chunks embedded
 ```
+
+**The `Clones:` line comes from `.github-clone-report.md`** (repo root), written by `github_clone` during Part 2a and truncated at the start of each run. Read it directly rather than relying on the subagent's stdout — `pull_sources` sends the jungle loop's output to `/dev/null`, so the file is the only reliable record.
+
+- File absent or empty → `all clean mirrors`.
+- Otherwise list each repo and what happened, and **call out any line containing `merge conflict` explicitly** — that clone is stuck on a branch that could not take the remote's changes, and it stays stale until someone merges by hand.
+
+This exists because a hard reset used to discard local commits in these clones silently. It no longer does, but a clone carrying local work is by definition **not** a faithful mirror of the remote, so anything reading it (service docs, `technologies.md`, freshness checks) may be describing your branch rather than `main`. That is worth one line a day.
 
 ## Dependency chain
 
