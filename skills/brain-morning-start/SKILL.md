@@ -176,10 +176,17 @@ One chunk fails embedding with `Forbidden` (a permanently 403-filtered page) —
 **Large-sync deferral — read the sync output.** When the day's diff is big (hundreds of files), `gbrain sync` **defers embed and extract** and says so ("Large sync: deferring link/timeline extraction… Run 'gbrain embed --stale'"). In that case you must run both explicitly, in this order (extract before the link-scoping `DELETE`, since extract is what creates the edges):
 
 ```bash
-gbrain extract --stale --source-id default
+gbrain extract links --source db --source-id default --since $(date +%F)
 gbrain embed --stale                      # foreground — see caveat below
 # then the link-scoping DELETE from above
 ```
+
+⚠️ **Do NOT use the `gbrain extract --stale` form the sync output suggests** — it silently
+creates **zero** `wikilink_basename` edges (`extractStaleFromDB` still passes `nullResolver` and
+no `globalBasename` opt, so bare `[[name]]` refs are dropped twice over) while still stamping
+`links_extracted_at`, so the pages look done. Confirmed again 2026-08-05: `--stale` returned
+0 links; the `--source db` form above created 153 edges over the same 314 pages. Because the
+deferral path is exactly where the large-sync diff lands, this is the case that matters most.
 
 ⚠️ `gbrain embed --stale --background` returned a job id but the jobs worker **did not drain it** (2026-07-14: queue showed empty, chunks stayed unembedded). Until that's fixed, run the embed in the **foreground**.
 
