@@ -73,6 +73,27 @@ For each top-level directory in `src/`, count files and list immediate children:
 
 Verify these match reality — discover any new directories that appeared since last run.
 
+**Never carry an inventory count forward from the previous `AGENTS.md` / `CLAUDE.md`.** Every number written in Phase 3.5 must be re-measured from the filesystem this run. Stale counts have survived multiple rebuilds by being copied from the prior output instead of recomputed.
+
+#### 1a-i. Monorepo clone counts (`github/weroad/jungle/`)
+
+A subdirectory count is **not** the clone count and must never be reported as one. Compute it from the monorepo's own authoritative repo list:
+
+```bash
+# authoritative tracked-clone count
+grep -oE 'weroad/[a-zA-Z0-9._-]+\.git' github/weroad/jungle/bin/repos.sh | sort -u | wc -l
+# everything on disk that is NOT in that list = stale clones + monorepo working dirs
+comm -13 <(grep -oE 'weroad/[a-zA-Z0-9._-]+\.git' github/weroad/jungle/bin/repos.sh \
+            | sed 's|weroad/||; s|\.git$||' | sort) \
+         <(ls -d github/weroad/jungle/*/ | xargs -n1 basename | sort)
+```
+
+`repos.sh` is the list `/brain-pull-sources` actually clones and refreshes. Directories on disk but absent from it fall into two kinds, and the generated text must distinguish them:
+- **stale clones** — real git repos that were dropped from `repos.sh` and are therefore never refreshed again (report them by name; they are a freshness trap);
+- **monorepo working dirs** — not clones at all (`_data`, `bin`, `bin-yodata`, `node_modules`, `resources`, `scripts`).
+
+Also re-check each clone's HEAD resolves; report any that don't (`git -C <dir> rev-parse HEAD`), with the date re-confirmed this run.
+
 ### 1b. Service docs inventory
 
 Count `.agent.md` files under `outputs/services/**` (owner subdirs — `weroad/`, `weroad/jungle/`, `smnbss/`, …) and list `outputs/services/weroad/jungle/cross/` entries:
@@ -343,6 +364,7 @@ Content (assemble from Phase 1 inventory + the just-rebuilt L1 files):
 
 1. **Intro paragraph** — who the brain belongs to (read `<brain_root>/.super/brain.config.yml` for owner + org), one-line purpose.
 2. **Repository Layout** — code fence showing `memory/`, `src/`, `outputs/` with live counts from Phase 1 (subdirs + file counts). L1 and L2 counts come from `ls memory/L1 | wc -l` and `ls memory/L2 | wc -l` after rebuild. Once `memory/L2/archive/` exists, list it as its own layout line with its file count (rolled-out dated sections; see "Size Caps & Archive Rotation").
+   **Every count here is re-measured from disk this run — never copied from the AGENTS.md already on disk.** The `github/` line in particular must use the Phase 1a-i figures: the `repos.sh` tracked-clone count for the jungle monorepo (not the subdirectory count), the stale clones named, and any clone with an unresolvable HEAD called out with the date it was last re-confirmed.
 3. **How to Navigate** — 4-step path starting at `memory/L1/hub.md` + a `Quick Access` list pointing at the highest-signal L1 files (`entities.md`, `data-model.md`, `product-areas.md`, `teams.md`, `system-map.md`) plus `outputs/services/<owner>/<repo>.agent.md`. Then a **`### Knowledge Map`** subsection: a complete index of every L1 MOC grouped (Entry & cross-cutting · People & org · Product & business · Data & analytics · Engineering & systems · Sources · Content & voice), each L1 showing the L2 pages it connects to as `[[wikilinks]]`. Derive the groupings + L1→L2 edges from the just-rebuilt files (the Phase 3 derivation table + each L2's `Topics:` footer). This is the agent's traversal spine — it must stay accurate to the actual link graph.
 4. **Freshness Tracking** — explain `verified:` fact blocks, `staleness_threshold:` frontmatter, and the `superseded:` marker convention.
 5. **Searching** — always use the gbrain MCP tools (`mcp__gbrain__query`, `mcp__gbrain__search`, `mcp__gbrain__get_page`); the HTTP server is always-on so they're always available. Grep is for exact matches only. **Always include the lowercase-extension warning:** gbrain's sync classifier (`isMarkdownFilePath`, `src/core/sync.ts`) tests `path.endsWith('.md')` case-sensitively, so an uppercase `.MD` file is rejected with reason `strategy` and silently never imported; there is no config surface for it (`gbrain.yml` include/exclude globs are applied *after* the extension gate). This is why service docs are `<repo>.agent.md` / `<repo>.db.agent.md` — the old `.AGENT.MD` form kept all 108 of them out of the index until 2026-07-27, and it couldn't be rescued by a wikilink rewrite either (link extraction strips only a lowercase `.md`, and `normalizeBasename` drops dots, so `[[cms.AGENT.MD]]` → `cmsagentmd` can never meet the page key `cmsagent`). Never introduce an uppercase-extension page.
