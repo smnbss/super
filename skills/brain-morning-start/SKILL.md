@@ -17,6 +17,26 @@ Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs
 
 Each sub-skill carries its own detailed instructions — do **not** restate them here; just dispatch and collect.
 
+**Cost discipline: gate every phase on a deterministic signal before spending a model on it.**
+Measured over 2026-07-06→08-05 the routine averaged **464 model requests per morning** and
+peaked at 1,034, and the split says exactly where it goes:
+
+| Phase | 30d requests | Share |
+|---|---:|---:|
+| `brain-rebuild-services` | 6,881 | 55% |
+| this orchestrator | 2,335 | 19% |
+| `gstack-upgrade` | 1,589 | 13% |
+| `brain-rebuild-memory` | 1,327 | 11% |
+| `brain-git-sync` | 309 | 2% |
+| **`brain-pull-sources`** | **7** | **~0%** |
+
+`brain-pull-sources` moves thousands of files across 113 sources for ~zero requests, because
+it is a deterministic script. Everything expensive is an LLM re-deriving what a `git rev-parse`,
+a `wc -l` or a cached version check answers for free. Before any heavy phase, run the cheap
+check and skip on a negative: `.github-changed-repos.tsv` for services (Part 2b),
+`gstack-update-check` for tools (Part 1). A phase that reports "nothing to do" for zero cost is
+the goal, not a sign the routine misfired.
+
 **Never trust a subagent's "done" — verify by filesystem state.** The sub-skills (`brain-pull-sources`, `brain-rebuild-services`, `brain-rebuild-memory`) spawn their own worker processes, and wrapper subagents routinely return *before* those workers finish (observed 3× on 2026-07-14: pull_sources still exporting, service regen mid-batch, memory "Wave 1 dispatched" with 0 files written). Rules:
 
 1. Tell every phase subagent explicitly: *do the work inline/sequentially in your own context; do NOT dispatch detached background workers and return — orphaned workers write nothing.* If it must spawn helpers, it must block on them and verify their file writes before returning.
@@ -34,7 +54,20 @@ Run the independent updaters **concurrently in the background**, then collect:
 - `brew update && brew upgrade` (background)
 - `npm update -g` (background)
 - `uv sync --upgrade` (background)
-- `/gstack-upgrade` — don't skip this one; it's cheap and easy to forget once the heavy phases start
+- **gstack — check first, invoke the skill only if there's something to install.** Run the
+  purpose-built version check; **empty output means up to date, and then this phase is
+  done at zero model cost:**
+
+  ```bash
+  ~/.claude/skills/gstack/bin/gstack-update-check   # prints UPGRADE_AVAILABLE <old> <new>, or nothing
+  ```
+
+  Only on `UPGRADE_AVAILABLE` (or `JUST_UPGRADED`, which wants the migration steps) invoke
+  `/gstack-upgrade`. Do **not** invoke it unconditionally: measured over 2026-07-06→08-05 it
+  cost **1,589 model requests (13% of the whole morning routine)** — ~72 per run with spikes
+  of 217 and 420 — because the skill re-runs install-type detection and an interactive
+  `AskUserQuestion` every single morning, almost always to conclude nothing needed doing.
+  Consider `gstack-config set auto_upgrade true` so the real upgrades don't stop to ask.
 - `git pull --rebase --autostash` — `--autostash` is required: leftover working-tree WIP from prior sessions otherwise aborts the pull ("cannot pull with rebase: You have unstaged changes")
 
 Note: `brew upgrade` may fail on casks that need interactive sudo (e.g. `windows-app`) — non-fatal in a scheduled run; report and move on.
@@ -48,7 +81,22 @@ Report what was updated; flag errors or notable version bumps.
 Dispatch each as a subagent invoking the named skill; collect a short summary.
 
 - **2a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 3 in parallel with this.**
-- **2b `brain-rebuild-services`** — regenerate `.agent.md` service docs from changed repos → `outputs/services/`. *After 2a.*
+- **2b `brain-rebuild-services`** — regenerate `.agent.md` service docs → `outputs/services/`. *After 2a.*
+  **Read the work-list before dispatching anything:**
+
+  ```bash
+  wc -l < .github-changed-repos.tsv   # written by 2a; one line per repo whose HEAD moved
+  cut -f1 .github-changed-repos.tsv
+  ```
+
+  **Zero lines → skip the phase entirely.** Report `Services: 0 docs (no repos moved)` and go
+  straight to 2b.5. Do not dispatch a subagent "just to check" — that check is what the ledger
+  already is. Otherwise dispatch with the explicit repo list; the skill's own Step 0 gate
+  re-confirms each one's recorded `head:` before reading source.
+
+  This phase was **55% of the entire morning routine** (6,881 model requests over 30 days,
+  peaking at 684 in one day) because nothing ever told it which repos to look at, so it
+  re-derived that itself every morning across 136 clones.
 - **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its `run <path>` directives in order. *After 2b, before 2c.*
 - **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. It only **writes markdown**; the gbrain index (chunks, embeddings, wikilink edges, timeline) is refreshed by the single `gbrain sync` in Part 5. **No gbrain step inside 2c.** *After 2b.5.*
 
@@ -149,10 +197,11 @@ Missing should be ~0 (a couple dozen permanently-unembeddable oversized/403 chun
 ```
 Morning start complete:
 
-Tools:    brew <N> upgraded · npm/gstack/python <status> · git <status>
+Tools:    brew <N> upgraded · npm/python <status> · gstack <up to date | vA→vB> · git <status>
 Sources:  <N> exported (X ok, Y failed)
 Clones:   <N> repos with local work — <merged | skipped | CONFLICT> (else "all clean mirrors")
-Services: <N> docs refreshed
+Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
+Services: <N> docs refreshed, <M> repos skipped (HEAD unchanged)
 Memory:   L2 <N> files, L1 <N> MOCs · gbrain graph: <N> edges, <N> timeline
 Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet/
 Prep:
@@ -161,7 +210,7 @@ Prep:
 gbrain reindex: <N> chunks embedded
 ```
 
-**The `Clones:` line comes from `.github-clone-report.md`** (repo root), written by `github_clone` during Part 2a and truncated at the start of each run. Read it directly rather than relying on the subagent's stdout — `pull_sources` sends the jungle loop's output to `/dev/null`, so the file is the only reliable record.
+**The `Clones:` and `Changed:` lines come from two files written by `github_clone` during Part 2a** (repo root), both truncated at the start of each run: `.github-clone-report.md` (anything that wasn't a clean mirror update) and `.github-changed-repos.tsv` (one line per repo whose HEAD moved). Read them directly rather than relying on the subagent's stdout — `pull_sources` sends the jungle loop's output to `/dev/null`, so the files are the only reliable record.
 
 - File absent or empty → `all clean mirrors`.
 - Otherwise list each repo and what happened, and **call out any line containing `merge conflict` explicitly** — that clone is stuck on a branch that could not take the remote's changes, and it stays stale until someone merges by hand.

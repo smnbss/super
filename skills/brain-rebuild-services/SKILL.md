@@ -25,9 +25,135 @@ Record the actual resolved path in the doc's `Source:`/`source:` fields.
 
 If the repo directory exists in neither location, stop and tell the user.
 
+## Step 0 — Change gate (MANDATORY, before you read a single source file)
+
+**A repo whose HEAD has not moved gets no work at all.** Not a re-read, not a
+re-count, not a bumped `verified:` date. This gate is the difference between a
+morning that costs a few hundred model requests and one that costs a few
+thousand, and it must be run *before* the "read the repo thoroughly" step below —
+which, taken unconditionally, re-reads every migration and controller in the repo
+to rediscover what the existing doc already says.
+
+### 0.1 Prefer the ledger over guessing
+
+`pull_sources` writes `.github-changed-repos.tsv` at the brain root — one TSV line
+per repo whose HEAD moved during that export, truncated per run:
+
+```
+<owner>/<repo>	<reldir>	<before_sha>	<after_sha>
+```
+
+- Invoked **without** a repo name (a full refresh wave): read the ledger and
+  process exactly the repos listed, using each line's `before_sha` as the delta
+  base. **An empty ledger is a complete answer** — report "no repos moved, 0 docs
+  regenerated" and stop. Do not fall back to scanning all clones.
+- Invoked **with** a repo name: honour it even if it isn't in the ledger (the user
+  asked), but still run 0.2 — the answer is usually "unchanged, nothing to do".
+- Ledger absent (a standalone run, or `pull_sources` predates it): fall back to
+  0.2 per repo. Never treat a missing ledger as "everything changed".
+
+### 0.2 Compare recorded HEAD against actual HEAD
+
+Every doc records the commit it was generated from, in its `verified:` comment:
+
+```markdown
+<!-- verified: 2026-08-05 | source: github/weroad/jungle/airflow/ | head: 015f2dd2 -->
+```
+
+Resolve **both sides to full SHAs before comparing** — the doc stamps a short sha,
+the ledger carries a full one, and a bare string compare of the two forms reports a
+change that isn't there (harmless but pays for a full pass every single day, which
+is exactly the cost this gate exists to avoid):
+
+```bash
+REPO=github/weroad/jungle/<repo>
+DOC=outputs/services/weroad/jungle/<repo>.agent.md
+RECORDED=$(sed -n 's/.*| head: \([0-9a-f]\{7,\}\).*/\1/p' "$DOC" | head -1)
+RECORDED_FULL=$(git -C "$REPO" rev-parse -q --verify "${RECORDED:-none}^{commit}" 2>/dev/null || echo unknown)
+ACTUAL_FULL=$(git -C "$REPO" rev-parse HEAD)
+```
+
+| Situation | What to do |
+|---|---|
+| `RECORDED_FULL` == `ACTUAL_FULL` | **Stop. Write nothing.** Report `<repo>: unchanged at <sha> — skipped`. Do **not** touch the `verified:` date: a bumped date on unexamined content is a lie the freshness system then trusts. |
+| Both resolve, and differ | Incremental pass — go to 0.3. |
+| No doc yet | First generation — full read (the `## Process` below as written). |
+| `RECORDED_FULL` == `unknown` (no `head:` stamped, or the commit is gone after a force-push / re-clone) | Full read once, and emit `head:` this time so the next run can gate. |
+
+### 0.3 Read the diff, not the repo
+
+```bash
+git -C <repo-path> log  --oneline "$RECORDED..HEAD"
+git -C <repo-path> diff --name-only "$RECORDED..HEAD"
+```
+
+Those two outputs define the entire input for an incremental pass, alongside the
+existing doc. **Read only files in the changed set**, plus any file you must open
+to explain a changed one (the entity a new migration alters, the module a new
+controller registers into).
+
+**Inventory claims are carried forward, not recounted.** A count or list in the
+doc ("312 database table configs", "36 gsheet configs", "9 CI workflows", "96
+consumer classes", "0 AMQP usages") may only be restated or changed when the diff
+touched the paths that produce it. If `git diff --name-only` shows nothing under
+`database_configs/`, then the config count *cannot* have changed — copy the number
+through and say nothing about it. Do not write "re-verified, unchanged": that
+sentence is only earned by a re-read, so it invites one, and the re-read is the
+single most expensive thing this skill does. Verify by absence-in-diff instead.
+
+Then follow `## Process` for the changed surfaces only, and write the doc with the
+new `head:`, today's `verified:` date, and the changelog discipline in
+[Changelog & size discipline](#changelog--size-discipline).
+
+## Step 0.5 — Is this a docs-first repo?
+
+Teams now maintain first-party documentation **inside their repos** under
+`docs/domain/`, which `doc-sync` mirrors to an Outline collection on
+docs.weroad.com (and which lands in the brain twice over: in the clone, and in
+`src/outline/<Collection>/`, gbrain-indexed). Where that tree exists it is
+better than anything this skill can generate — it is written by the people who
+own the code, it carries a Feature map, a Glossary and per-feature pages, and it
+is reviewed. Duplicating it here is both waste and a second version to go stale.
+
+```bash
+find <repo-path>/docs/domain -name '*.md' 2>/dev/null | wc -l
+```
+
+**≥ 10 pages → docs-first repo.** (Verified 2026-08-05: 36 jungle repos qualify —
+api-catalog 63, coordinators 53, kaioh 48, api-partner 48, booking 41, buynana 37,
+…. The in-repo tree is byte-authoritative; the Outline copy only reformats
+markdown, so read the clone, never the export.)
+
+For a docs-first repo, **do not generate the narrative sections.** Drop
+`## Architecture`, `## Domain Model` and `## Request Flows` from the output and
+replace them with a pointer:
+
+```markdown
+## Documentation
+
+Domain, feature and glossary documentation is maintained by the owning team in
+`<repo-path>/docs/domain/` (<N> pages) and mirrored to Outline as
+*<Collection Name> Wiki* → `src/outline/<Collection Name> Wiki/`. Read that for
+what the service *does* and why; this doc covers only what is derived from code.
+
+- Feature map: `<repo-path>/docs/domain/tech/features/_features.md`
+- Glossary: `<repo-path>/docs/domain/tech/glossary.md`
+```
+
+Keep every remaining section — they are the machine-derived facts the wiki does
+*not* carry: Stack, Source Structure, API Surface, Messaging, Inter-Service
+Dependencies, Auth Patterns, Background Jobs, Configuration, Testing, Key Files,
+Commands, Owner. Keep `.db.agent.md` in full: the wikis do not document columns.
+
+If the repo has **no** `docs/domain/` tree (or fewer than 10 pages), generate the
+narrative sections as before — that knowledge exists nowhere else.
+
 ## Process
 
 ### 1. Read the repo thoroughly
+
+*(Full read — for first generation and non-docs-first repos. On an incremental
+pass, Step 0.3 has already narrowed this to the changed files.)*
 
 Read these files in this order (skip any that don't exist):
 
@@ -142,7 +268,7 @@ doesn't have that concept (e.g., no DB for a stateless service).
 > {One-line description — what the service does in the ecosystem}
 **Source:** `github/{owner}/{repo}/`
 
-<!-- verified: {today YYYY-MM-DD} | source: github/{owner}/{repo}/ -->
+<!-- verified: {today YYYY-MM-DD} | source: github/{owner}/{repo}/ | head: {short sha of the commit this doc was generated from} -->
 
 ## Stack
 {Bullet list: framework, language, runtime, DB, ORM, cache, messaging, auth, key libs, version}
@@ -305,7 +431,7 @@ Check these indicators **in order** (stop at first match):
 > <one-line description of what this database stores>
 **Source:** `github/{owner}/{repo}/`
 
-<!-- verified: {today YYYY-MM-DD} | source: github/{owner}/{repo}/ -->
+<!-- verified: {today YYYY-MM-DD} | source: github/{owner}/{repo}/ | head: {short sha} -->
 
 ## Overview
 
@@ -387,6 +513,29 @@ After writing the file, run these checks:
 
 If any check fails, re-read the source, fix the file, and re-run the check (max 3 iterations).
 
+## Changelog & size discipline
+
+These docs accrete. Each incremental pass wants to add a dated `<!-- YYYY-MM-DD:
+HEAD … -->` note and a fresh "Recent / Earlier — shipped in vX" block, and nothing
+ever removed one: by 2026-08-05 the 111 docs carried **172 dated comments totalling
+140 KB** (`erp-buddy.agent.md` alone had 11), all of it re-read and re-emitted on
+every regeneration of that file. `memory/` hit the same wall on 2026-07-14 and
+solved it with a size cap plus verbatim archive rotation. Same rule here.
+
+- **Keep at most 2 dated `<!-- YYYY-MM-DD: HEAD … -->` comments**: the current pass
+  and the one before it. Rotate the rest **verbatim** (never summarized, never
+  deleted) into `outputs/services/archive/<repo>-<YYYY-MM>.md`, appending in date
+  order, and link it once from the doc: `<!-- earlier passes: [[<repo>-<YYYY-MM>]] -->`.
+- **Keep at most 2 release blocks** in the body: the current unreleased set and the
+  most recent released version. Older per-release narrative is already in
+  `src/linear/` (441 release-note exports) and in the repo's own CHANGELOG —
+  rotate it to the same archive page rather than carrying it forward.
+- **40 KB hard cap** per doc, matching the `memory/` cap and for the same reason:
+  oversized pages chunk badly in gbrain and dilute retrieval. If a doc is over
+  after rotation, compress tables before dropping facts.
+- The archive pages are ordinary curated pages — give each a `Topics:` footer
+  (`[[<repo>.agent.md]] · [[services]]`) so the graph still reaches them.
+
 ## Rules
 
 - Read the actual source code. Do not guess or infer from file names alone.
@@ -402,6 +551,14 @@ If any check fails, re-read the source, fix the file, and re-run the check (max 
   the architecture overview in `.agent.md`.
 - For dependencies: be specific. Not "calls catalog API" but "calls api-catalog via
   GraphQL at `API_CATALOG_INTERNAL_URL` for travel data".
-- Keep the file under 1000 lines. Compress tables, use abbreviations in table cells.
-- Set today's date in the `<!-- verified: -->` comment.
+- Keep the file under 1000 lines **and under 40 KB**. Compress tables, use
+  abbreviations in table cells, rotate old changelog entries (see
+  [Changelog & size discipline](#changelog--size-discipline)).
+- Set today's date **and the source commit** in the `<!-- verified: … | head: <sha> -->`
+  comment. The `head:` field is not decoration — [Step 0](#step-0--change-gate-mandatory-before-you-read-a-single-source-file)
+  reads it to decide whether this repo can be skipped entirely tomorrow. A doc
+  written without it forces a full re-read on every future run.
+- **Never bump `verified:` on a doc you did not actually re-derive.** Skipping is
+  reported, not recorded — the whole freshness system downstream assumes a
+  `verified:` date means someone looked.
 - If updating an existing file, show a summary of what changed before writing.

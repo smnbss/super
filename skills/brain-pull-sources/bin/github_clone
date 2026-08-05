@@ -28,6 +28,24 @@ report_line() {
   printf -- '- **%s** — %s\n' "$1" "$2" >> "$REPORT" 2>/dev/null || true
 }
 
+# --- Changed-repo ledger -----------------------------------------------------
+# Everything downstream of the clone (service docs, technologies.md, freshness
+# checks) only ever needs the repos whose HEAD actually MOVED. Deriving that
+# later means re-walking 136 clones with an LLM in the loop; deriving it here is
+# two `rev-parse` calls we are already paying for. So record it: one TSV line per
+# repo that moved, written at the point where the before/after SHAs are both
+# known. Same append-per-line discipline as the report (parallel lanes).
+#
+#   <owner>/<repo>\t<reldir>\t<before_sha>\t<after_sha>
+#
+# `before_sha` is `NEW` for a fresh or re-clone. A repo that did not move writes
+# NOTHING — an empty ledger is the signal that a consumer can skip entirely.
+CHANGED="${GITHUB_CLONE_CHANGED:-$PROJECT_ROOT/.github-changed-repos.tsv}"
+
+changed_line() {
+  printf -- '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$CHANGED" 2>/dev/null || true
+}
+
 URL="$1"
 TARGET_RELDIR="$2"
 if [[ -z "$URL" ]]; then
@@ -53,6 +71,11 @@ else
   TARGET="$OUTPUT_BASE/$OWNER/$REPO"
 fi
 CLONE_URL="https://github.com/$OWNER/$REPO.git"
+
+# Path as the brain refers to it, and the SHA before we touch anything — both
+# needed for the changed-repo ledger written at the end.
+TARGET_REL="${TARGET#$PROJECT_ROOT/}"
+BEFORE_SHA="$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo NEW)"
 
 if [[ -d "$TARGET/.git" ]]; then
   # Repo exists — pull latest
@@ -153,4 +176,13 @@ else
     echo "✗ $OWNER/$REPO (clone failed — may not exist or no access)"
     exit 1
   fi
+fi
+
+# --- Record whether this repo moved -----------------------------------------
+# Reached only on success (every failure path above exits non-zero), so a line
+# here always means "this working tree is at a new commit". Skipped repos and
+# no-op updates deliberately write nothing.
+AFTER_SHA="$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo '')"
+if [[ -n "$AFTER_SHA" && "$AFTER_SHA" != "$BEFORE_SHA" ]]; then
+  changed_line "$OWNER/$REPO" "$TARGET_REL" "$BEFORE_SHA" "$AFTER_SHA"
 fi

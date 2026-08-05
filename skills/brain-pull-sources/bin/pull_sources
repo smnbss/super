@@ -52,6 +52,15 @@ trap 'rm -rf "$TMP"' EXIT
 export GITHUB_CLONE_REPORT="${GITHUB_CLONE_REPORT:-$REPO_ROOT/.github-clone-report.md}"
 : > "$GITHUB_CLONE_REPORT" 2>/dev/null || true
 
+# --- Changed-repo ledger -----------------------------------------------------
+# `github_clone` appends one TSV line per repo whose HEAD actually moved. This is
+# the work-list for every downstream consumer that would otherwise re-derive
+# "what changed" by re-reading all 136 clones — above all `brain-rebuild-services`
+# (its Step 0 gate). Truncated per run, so an EMPTY file means "nothing moved,
+# skip the phase" — not "unknown". Exported so parallel lanes share it.
+export GITHUB_CLONE_CHANGED="${GITHUB_CLONE_CHANGED:-$REPO_ROOT/.github-changed-repos.tsv}"
+: > "$GITHUB_CLONE_CHANGED" 2>/dev/null || true
+
 # --- Parse all sources files into lanes -------------------------------------
 # (No associative arrays — macOS /bin/bash is 3.2. Counts are derived from the
 #  lane files after parsing.)
@@ -212,4 +221,18 @@ if [[ -s "$GITHUB_CLONE_REPORT" ]]; then
   cat "$GITHUB_CLONE_REPORT"
   echo ""
   echo "  (report file: $GITHUB_CLONE_REPORT)"
+fi
+
+# --- Changed repos: the downstream work-list --------------------------------
+# Printed last because it is the handoff. `brain-rebuild-services` reads this file
+# and regenerates ONLY these repos; an empty ledger means that whole phase costs
+# nothing. Say the count out loud either way — a silent zero is indistinguishable
+# from a broken ledger, and that is exactly the failure that would quietly stop
+# service docs from ever being refreshed again.
+changed_n=$(grep -c . "$GITHUB_CLONE_CHANGED" 2>/dev/null | tr -d ' ')
+changed_n="${changed_n:-0}"
+echo ""
+echo "Changed repos: $changed_n moved HEAD this run → $GITHUB_CLONE_CHANGED"
+if [[ "$changed_n" -gt 0 ]]; then
+  cut -f1 "$GITHUB_CLONE_CHANGED" 2>/dev/null | sort | sed 's/^/  /'
 fi
