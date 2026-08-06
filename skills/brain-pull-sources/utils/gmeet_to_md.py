@@ -43,6 +43,7 @@ Output:
 
 import argparse
 import difflib
+import glob
 import json
 import os
 import re
@@ -114,6 +115,10 @@ DOC_CREATED_MAX_DAYS = 2
 # "Simone / Laura" folder (ratio ≈0.72, comfortably over 0.55). Demand near
 # certainty in that case only; unrelated titles keep the normal threshold.
 TITLE_MATCH_STRICT = 0.90
+# Threshold for deciding a doc title names a meeting that already OWNS a folder
+# (see title_owns_folder). Near-exact on purpose: the alias pair 'GED Design
+# Sharing/Alignment' vs 'FE Alignment' is 0.55 and must stay below it.
+TITLE_OWNS_STRICT = 0.85
 # Words too generic to identify a meeting, so they never count as a "distinctive
 # word owned by another meeting" above.
 TITLE_STOPWORDS = {
@@ -337,12 +342,41 @@ def normalize_title(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", s.lower())).strip()
 
 
+_GEMINI_KIND_RE = re.compile(
+    r"\s*[–-]\s*(notes by gemini|appunti di gemini|trascrizione|transcript|recording"
+    r"|registrazione)\s*$", re.I)
+_GEMINI_DATE_RE = re.compile(
+    r"\s*[–-]\s*\d{4}[/-]\d{1,2}[/-]\d{1,2}\b.*$")
+
+
 def strip_gemini_suffix(doc_name: str) -> str:
-    """'Title – 2026/06/22 16:00 CEST – Notes by Gemini' → 'Title'."""
-    parts = re.split(r"\s[–-]\s", doc_name)
-    if len(parts) >= 2:
-        return parts[0].strip()
-    return doc_name.strip()
+    """'Title – 2026/06/22 16:00 CEST – Notes by Gemini' → 'Title'.
+
+    Strips only the trailing date/kind suffix. It must NOT simply split on the
+    first ' - ': meeting titles routinely contain one, so that truncated
+    'Zero Based - SUPPLY - 2026/06/15 … - Notes by Gemini' to just 'Zero Based'
+    and 'GED - Deep dive - …' to 'GED'.
+
+    That truncation caused real data loss, and in a way the guards could not see:
+    on 2026-06-15 the three 'Zero Based - {SUPPLY,DEMAND,Coordi}' docs all reduced
+    to the identical string 'Zero Based', so no pair looked contradictory
+    (asymmetric: meeting has {coordi}, doc has {}), every guard passed, and the
+    docs were assigned to arbitrary folders. `_content_title_mismatch` then
+    correctly discarded each one — but assignment is ONE-TO-ONE, so a discarded
+    doc is already consumed and is never offered to the meeting it belongs to.
+    Result: all three notes vanished. Same mechanism emptied 2026-06-26's
+    Team Leader Session.
+
+    So the fix belongs here, at assignment time: keep the distinguishing part of
+    the title and the wrong assignment never happens.
+    """
+    s = doc_name.strip()
+    prev = None
+    while prev != s:                      # kind marker, then the date segment
+        prev = s
+        s = _GEMINI_KIND_RE.sub("", s).strip()
+        s = _GEMINI_DATE_RE.sub("", s).strip()
+    return s or doc_name.strip()
 
 
 def best_match(meeting, candidates: list[dict]) -> dict | None:
@@ -394,6 +428,59 @@ def title_tokens(s: str) -> set[str]:
         if len(t) >= 3 or (len(t) == 2 and raw.isupper()):
             out.add(t)
     return out
+
+
+_OWNED_TITLES: dict[str, int] | None = None
+
+
+def title_owns_folder(title: str) -> int:
+    """How many harvested folders in the corpus belong to a meeting with this title.
+
+    This is the discriminator between an ALIAS and a LEAK when a doc's name
+    disagrees with the folder it is about to land in, and the day's calendar does
+    not settle it:
+
+      'GED Design Sharing/Alignment'   0 folders -> nobody's meeting is called that;
+                                       it is the organiser's name for the series that
+                                       IS this folder (FE Alignment). Keep.
+      '30 mins with Simon (Francesco…)' >=1      -> a real, separate meeting. Its notes
+                                       appearing in Jack Evans' folder is a leak, and
+                                       for 1:1s that is a confidentiality problem, not
+                                       merely an accuracy one. Reject.
+
+    Cached after the first call: this is one pass over src/gmeet/*/W*/??-??/*/
+    metadata.json, and harvest_day() would otherwise redo it per candidate.
+    Missing/unreadable tree -> empty index, which makes this check a no-op rather
+    than a source of false rejections.
+    """
+    global _OWNED_TITLES
+    if _OWNED_TITLES is None:
+        _OWNED_TITLES = {}
+        pattern = os.path.join(OUTPUT_BASE, "*", "W*", "??-??", "*", "metadata.json")
+        for mp in glob.glob(pattern):
+            try:
+                with open(mp, encoding="utf-8") as f:
+                    t = (json.load(f).get("title") or "").strip()
+            except Exception:
+                continue
+            if t:
+                k = normalize_title(t)
+                _OWNED_TITLES[k] = _OWNED_TITLES.get(k, 0) + 1
+    key = normalize_title(title)
+    hit = _OWNED_TITLES.get(key, 0)
+    if hit:
+        return hit
+    # Near-exact only (>= TITLE_OWNS_STRICT). Gemini writes the organiser's wording,
+    # which drifts from Calendar's on trivia: '30 mins with Simon (Francesco Lorenzo)'
+    # vs the folder's '30 Minutes with Simon (Francesco Lorenzo)' is ratio 0.96 but
+    # tokenises to a contradiction ({mins} vs {minutes}), so neither exact nor
+    # token matching finds it. The threshold has to stay high: the alias pair
+    # 'GED Design Sharing/Alignment' vs 'FE Alignment' scores 0.55 and MUST NOT match
+    # here, or the 7 legitimate FE Alignment notes get rejected all over again.
+    for other, n in _OWNED_TITLES.items():
+        if difflib.SequenceMatcher(None, key, other).ratio() >= TITLE_OWNS_STRICT:
+            return n
+    return 0
 
 
 def title_contradiction(meeting_title: str, cand_title: str) -> tuple[set, set]:
@@ -506,18 +593,64 @@ def assign_matches(meetings: list[dict], candidates: list[dict],
                       f"{sorted(stolen)}, which belong to another meeting today "
                       f"(ratio {ratio:.2f} < {TITLE_MATCH_STRICT})", file=sys.stderr)
                 continue
-            # Guard 3 — mutual contradiction (day-INDEPENDENT). Unlike `stolen`
-            # above, this does not need the rival meeting to be on today's calendar,
-            # which is the hole that let one dive's notes spray across every adjacent
-            # folder on back-to-back deep-dive mornings. See title_contradiction().
+            # Guard 3 — mutual contradiction, but ONLY when the doc plausibly belongs
+            # to a real rival meeting on the same day.
+            #
+            # This guard was originally day-INDEPENDENT (reject on any mutual
+            # contradiction). That deleted real data: 'FE Alignment' is legitimately
+            # served by docs named 'GED Design Sharing/Alignment' (the organiser's
+            # name for the series; ratio 0.55, contradiction {fe} vs {ged,design,
+            # sharing}), so a blanket reject destroyed 7 genuine notes across 4
+            # months — the folders then had no artifacts at all and were pruned.
+            #
+            # _content_title_mismatch()'s "suspect -> keep" rule was supposed to
+            # protect exactly that case, but it runs AFTER assignment: a doc rejected
+            # here is never assigned, never exported, and never reaches the content
+            # check. So the alias-preserving decision has to be made here too.
+            #
+            # Requiring a compatible rival keeps the original fix working — on the
+            # 2026-07-09 spray, 'SAIAN DeepDive' WAS on the calendar, so every wrong
+            # attachment is still rejected — while an unclaimed disagreeing doc is now
+            # kept and flagged `dataQuality.notesTitleSuspect` instead of deleted.
+            # Cross-day leaks stay bounded by the DOC_CREATED_MAX_DAYS guard above.
+            # Deleting a real note is worse than keeping an annotated doubtful one.
             only_meeting, only_cand = title_contradiction(
                 m["title"], strip_gemini_suffix(cand_name))
             if only_meeting and only_cand and ratio < TITLE_MATCH_STRICT:
-                print(f"    Rejecting '{cand_name}' for '{m['title']}' — distinct "
-                      f"subjects: meeting names {sorted(only_meeting)}, doc names "
-                      f"{sorted(only_cand)} (ratio {ratio:.2f} < "
-                      f"{TITLE_MATCH_STRICT})", file=sys.stderr)
-                continue
+                rival = None
+                for mj, other in enumerate(meetings):
+                    if mj == mi:
+                        continue
+                    om2, oc2 = title_contradiction(
+                        other["title"], strip_gemini_suffix(cand_name))
+                    if not (om2 and oc2):
+                        rival = other["title"]
+                        break
+                if rival is not None:
+                    print(f"    Rejecting '{cand_name}' for '{m['title']}' — distinct "
+                          f"subjects (meeting names {sorted(only_meeting)}, doc names "
+                          f"{sorted(only_cand)}) and it matches '{rival}' on {meeting_day}"
+                          f" (ratio {ratio:.2f} < {TITLE_MATCH_STRICT})",
+                          file=sys.stderr)
+                    continue
+                # No rival on today's calendar. Fall back to the corpus: if some other
+                # harvested folder is named after this doc, it is a real separate
+                # meeting and this is a LEAK (e.g. '30 mins with Simon (Francesco
+                # Lorenzo)' notes landing in '30 mins with Simon (Jack Evans)' — same
+                # template, different person, and a confidentiality problem). If no
+                # folder anywhere bears that name, it is an ALIAS for this series.
+                owned = title_owns_folder(strip_gemini_suffix(cand_name))
+                if owned:
+                    print(f"    Rejecting '{cand_name}' for '{m['title']}' — no rival on "
+                          f"{meeting_day}, but '{strip_gemini_suffix(cand_name)}' is a "
+                          f"real meeting with {owned} folder(s) of its own, so this is "
+                          f"another meeting's notes leaking in", file=sys.stderr)
+                    continue
+                print(f"    KEEPING '{cand_name}' for '{m['title']}' despite naming "
+                      f"{sorted(only_cand)} — no other meeting on {meeting_day} claims "
+                      f"it and no folder anywhere is named after it, so this is the "
+                      f"organiser's name for this series. Flagged suspect, not "
+                      f"discarded.", file=sys.stderr)
             created = c.get("createdTime", "")
             delta = abs(_iso_to_epoch(created) - m["_start_epoch"]) if created else 1e18
             triples.append((ratio, -delta, mi, ci, days_off))

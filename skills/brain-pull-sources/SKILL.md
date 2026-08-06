@@ -115,6 +115,35 @@ because its absence produced real, shipped damage.
 - **`looks_like_date_line()`**: Italian day-first dates (`19 mar 2026`) are not month-first, so
   without this they parse as a *title* and the guards reject good notes because `{mar}`
   "contradicts" `{ged}`.
+- **`strip_gemini_suffix()` must strip only the trailing date/kind segment — never split on the
+  first " - ".** WeRoad meeting titles routinely contain one, so a naive split truncated
+  `'Zero Based - SUPPLY - 2026/06/15 … - Notes by Gemini'` to just `'Zero Based'` and
+  `'GED - Deep dive - …'` to `'GED'`, destroying the only distinguishing part before any guard saw
+  it.
+- **⚠️ Known hole: a discarded doc is not re-offered.** `assign_matches()` is strictly one-to-one,
+  and `_content_title_mismatch()` runs *after* assignment — so when the content check discards a
+  note, that doc is already consumed and is **never offered to the meeting it actually belongs
+  to**. Combined with the truncation bug above this destroyed real data: on 2026-06-15 the three
+  `Zero Based - {SUPPLY,DEMAND,Coordi}` docs all reduced to the same string, were assigned to
+  arbitrary folders, each was correctly discarded — and all three notes vanished. The same
+  mechanism emptied 2026-06-26's Team Leader Session, whose plenaria content a whole month of
+  `L2/` facts had been resting on.
+  The suffix fix removes the common cause, but the hole remains. Two consequences:
+  1. Anything that makes assignment *stricter* can turn a mis-assignment into a deletion. Never
+     add a rejection rule without checking what happens to the doc afterwards.
+  2. Audit for it after a bulk re-harvest — a discard whose doc-id then appears nowhere is a
+     silent loss, not a cleanup:
+     ```bash
+     grep -c Discarding <harvest.log>          # every discard is a candidate loss
+     # for each, confirm the docId landed somewhere:
+     grep -rl "<docId>" src/gmeet --include=metadata.json
+     ```
+  The real fix is a second pass that re-offers each discarded doc to the meeting its own title
+  names, when that meeting ended with no notes. Not implemented yet.
+- **Always diff a bulk re-harvest against a pre-run manifest** (path → `docId` + content hash per
+  `notes.md`). Both the FE Alignment deletion and this one-to-one loss were invisible in the logs
+  and in the counts, and surfaced only from the diff. A falling `notes.md` count is *usually*
+  success — but it is also what data loss looks like, and only the diff tells them apart.
 - **`best_match()` is deprecated and must stay unused** — no one-to-one constraint, so one doc gets
   claimed by several same-day meetings. That is the origin of most historical damage: of the 128
   misfiles, **120 were duplicates** of a correctly-filed copy. Use `assign_matches()`.
