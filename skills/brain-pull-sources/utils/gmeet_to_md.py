@@ -120,6 +120,12 @@ TITLE_STOPWORDS = {
     "fortnightly", "monthly", "daily", "session", "review", "deep", "dive", "1on1",
     "standup", "catch", "chat", "team", "notes", "transcript", "trascrizione",
     "appunti", "gemini", "riunione", "settimanale", "con", "per",
+    # Closed-up spellings of the boilerplate above. Gemini names its doc after the
+    # organiser's spelling ("SAIAN DeepDive"), which differs from the calendar's
+    # ("SAIAN - Deep Dive"), so without these the joined form survives tokenisation
+    # and reads as a *distinctive* word — polluting the token sets that
+    # title_contradiction() relies on.
+    "deepdive", "onetoone", "oneonone", "biweeky", "allhands",
 }
 MARKITDOWN_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".html"}
 EXT_MAP = {
@@ -339,9 +345,65 @@ def best_match(meeting, candidates: list[dict]) -> dict | None:
 
 def title_tokens(s: str) -> set[str]:
     """Distinctive lowercase words in a title — the bits that actually identify
-    *which* meeting (and *whose*) it is. Drops stopwords, digits and short noise."""
-    return {t for t in normalize_title(s).split()
-            if len(t) >= 3 and not t.isdigit() and t not in TITLE_STOPWORDS}
+    *which* meeting (and *whose*) it is. Drops stopwords, digits and short noise.
+
+    Two-letter words are kept ONLY when they were uppercase in the original, i.e.
+    acronyms. WeRoad names meetings after two-letter teams and topics ("AI DeepDive",
+    "BI sync", "US launch"), and a bare length>=3 rule silently discarded exactly the
+    word that identified the meeting — 'AI DeepDive' tokenised to nothing distinctive
+    at all, which made it the single most frequent wrong-notes impostor in the corpus
+    (19 folders). Lowercase two-letter words stay dropped, since those are the
+    prepositions ("di", "in", "on", "to") this is meant to filter."""
+    out: set[str] = set()
+    for raw in re.split(r"[^\w]+", s):
+        if not raw:
+            continue
+        t = raw.lower()
+        if t.isdigit() or t in TITLE_STOPWORDS:
+            continue
+        if len(t) >= 3 or (len(t) == 2 and raw.isupper()):
+            out.add(t)
+    return out
+
+
+def title_contradiction(meeting_title: str, cand_title: str) -> tuple[set, set]:
+    """Distinctive words each side has that the other lacks.
+
+    A *contradiction* is when BOTH sides are non-empty: the meeting names something
+    the doc never mentions AND the doc names something the meeting never mentions.
+    That is two different meetings, not two spellings of one.
+
+    Why this exists — the defect it fixes (measured 2026-08-06: 164 of 455
+    `notes.md` files in the 2026 corpus, ~36%, held another meeting's notes):
+
+    A family of meetings sharing a suffix ("GED - Deep dive", "SAIAN DeepDive",
+    "AI DeepDive", "Deep Dive Tech") scores HIGH on difflib ratio because the shared
+    boilerplate dominates the string, while the only distinguishing part is a 3-5
+    character acronym that barely moves the number:
+
+        'GED - Deep dive' vs 'SAIAN DeepDive'        -> 0.667
+        'GED - Deep dive' vs 'AI DeepDive'           -> 0.750
+        'TIUM - Deep Dive' vs 'Deep Dive Tech'       -> 0.643
+        'Simon / Marina 1:1' vs 'Simon / Giovanni 1:1' -> 0.706
+
+    Every one of those clears TITLE_MATCH_THRESHOLD (0.55) and none reaches
+    TITLE_MATCH_STRICT (0.90), so the loose threshold accepted them.
+
+    assign_matches' pre-existing cross-meeting guard could not catch it: that guard
+    only fires when the stolen word belongs to *another meeting on the same day*, so
+    on a day when SAIAN's dive is not scheduled nothing stopped SAIAN's notes landing
+    in GED's folder. This check is day-independent and therefore also protects the
+    1:1 case, where one person's notes landing in another person's folder is a
+    confidentiality problem, not merely an accuracy one.
+
+    Asymmetric cases are deliberately NOT contradictions, so legitimate renames and
+    embellishments still match on the loose ratio:
+        meeting 'TIUM - Deep Dive'  doc 'TIUM Deep Dive con design'  -> ({}, {design})
+        meeting 'GED - Deep dive'   doc 'GED DeepDive'               -> ({}, {})
+    """
+    mt = title_tokens(meeting_title)
+    ct = title_tokens(cand_title)
+    return mt - ct, ct - mt
 
 
 def doc_created_days_off(created_iso: str, meeting_day: date) -> float | None:
@@ -414,6 +476,18 @@ def assign_matches(meetings: list[dict], candidates: list[dict],
                       f"{sorted(stolen)}, which belong to another meeting today "
                       f"(ratio {ratio:.2f} < {TITLE_MATCH_STRICT})", file=sys.stderr)
                 continue
+            # Guard 3 — mutual contradiction (day-INDEPENDENT). Unlike `stolen`
+            # above, this does not need the rival meeting to be on today's calendar,
+            # which is the hole that let one dive's notes spray across every adjacent
+            # folder on back-to-back deep-dive mornings. See title_contradiction().
+            only_meeting, only_cand = title_contradiction(
+                m["title"], strip_gemini_suffix(cand_name))
+            if only_meeting and only_cand and ratio < TITLE_MATCH_STRICT:
+                print(f"    Rejecting '{cand_name}' for '{m['title']}' — distinct "
+                      f"subjects: meeting names {sorted(only_meeting)}, doc names "
+                      f"{sorted(only_cand)} (ratio {ratio:.2f} < "
+                      f"{TITLE_MATCH_STRICT})", file=sys.stderr)
+                continue
             created = c.get("createdTime", "")
             delta = abs(_iso_to_epoch(created) - m["_start_epoch"]) if created else 1e18
             triples.append((ratio, -delta, mi, ci, days_off))
@@ -449,6 +523,27 @@ _MONTHS = {m: i for i, m in enumerate(
 _MONTHS.update({m: i for i, m in enumerate(
     ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"], 1)})
 _MONTH_RE = re.compile(r"\b([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b")
+# Day-first form Gemini writes in Italian exports ("19 mar 2026", "28 apr 2025").
+# _MONTH_RE above is month-first only, so without this a date line reads as a
+# meeting *title* — which would make _content_title_mismatch() reject perfectly
+# good notes because {"mar"} "contradicts" {"ged"}. Kept separate from _DATE_RES
+# so find_content_date's existing precedence order is untouched.
+_DAY_FIRST_DATE_RE = re.compile(
+    r"^\s*(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})\s*$")
+
+
+def looks_like_date_line(s: str) -> bool:
+    """True when a line is nothing but a date, in any form we emit or import."""
+    if not s.strip():
+        return False
+    if _DAY_FIRST_DATE_RE.match(s):
+        return True
+    stripped = s.strip().rstrip(",")
+    for rx in (_DATE_RES[0], _DATE_RES[1], _MONTH_RE):
+        m = rx.match(stripped)
+        if m and m.end() >= len(stripped) - 1:
+            return True
+    return False
 
 
 def find_content_date(text: str) -> date | None:
@@ -743,12 +838,29 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
             os.makedirs(m_dir, exist_ok=True)
             notes_path = os.path.join(m_dir, "notes.md")
             if export_google_doc_md(note["id"], m["title"], notes_path):
+                verdict = _content_title_mismatch(
+                    notes_path, m["title"], [x["title"] for x in meetings])
                 if _content_date_mismatch(notes_path, d):
                     print(f"    Discarding notes '{note.get('name','')}' for "
                           f"'{m['title']}' — content date != meeting date {d}",
                           file=sys.stderr)
                     os.remove(notes_path)
+                elif verdict and verdict[0] == "misfiled":
+                    print(f"    Discarding notes '{note.get('name','')}' for "
+                          f"'{m['title']}' — body is about '{verdict[1]}', another "
+                          f"meeting on {d} (the date matched, so only the in-body "
+                          f"title reveals it)", file=sys.stderr)
+                    os.remove(notes_path)
                 else:
+                    if verdict:
+                        print(f"    WARN: notes for '{m['title']}' have in-body "
+                              f"title '{verdict[1]}' — no other meeting on {d} "
+                              f"accounts for it, so KEEPING (likely the organiser's "
+                              f"name for this series). Recorded in metadata.",
+                              file=sys.stderr)
+                        artifacts.setdefault("_dataQuality", {})["notesTitleSuspect"] = {
+                            "calendarTitle": m["title"], "bodyTitle": verdict[1],
+                        }
                     produced.append("notes")
                     artifacts["notes"] = {
                         "source": "drive-search", "docId": note["id"],
@@ -775,12 +887,23 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
         elif tr:
             os.makedirs(m_dir, exist_ok=True)
             if export_google_doc_md(tr["id"], f"Transcript: {m['title']}", tr_path):
+                verdict = _content_title_mismatch(
+                    tr_path, m["title"], [x["title"] for x in meetings])
                 if _content_date_mismatch(tr_path, d):
                     print(f"    Discarding transcript '{tr.get('name','')}' for "
                           f"'{m['title']}' — content date != meeting date {d}",
                           file=sys.stderr)
                     os.remove(tr_path)
+                elif verdict and verdict[0] == "misfiled":
+                    print(f"    Discarding transcript '{tr.get('name','')}' for "
+                          f"'{m['title']}' — body is about '{verdict[1]}', another "
+                          f"meeting on {d}", file=sys.stderr)
+                    os.remove(tr_path)
                 else:
+                    if verdict:
+                        print(f"    WARN: transcript for '{m['title']}' has in-body "
+                              f"title '{verdict[1]}' — keeping (no other meeting on "
+                              f"{d} accounts for it)", file=sys.stderr)
                     produced.append("transcript")
                     artifacts["transcript"] = {
                         "source": "drive-search", "docId": tr["id"],
@@ -845,6 +968,93 @@ def _content_date_mismatch(md_path: str, meeting_day: date) -> bool:
     if not found:
         return False
     return abs((found - meeting_day).days) > 1
+
+
+def _body_meeting_title(md_path: str) -> str | None:
+    """The meeting title Gemini wrote INSIDE the exported doc, or None.
+
+    Deliberately conservative: anything it cannot confidently read returns None,
+    because an unreadable body must never be grounds to discard a document.
+    """
+    try:
+        with open(md_path, encoding="utf-8") as f:
+            head = [ln.strip().lstrip("﻿") for ln in f.read().splitlines()[:14]]
+    except OSError:
+        return None
+    for i, ln in enumerate(head):
+        if "\U0001F4DD" not in ln:
+            continue
+        for nxt in head[i + 1:i + 5]:
+            if not nxt or nxt.startswith("#"):
+                continue
+            if looks_like_date_line(nxt):       # a bare date line, not a title
+                continue
+            low = nxt.lower()
+            if low.startswith(("invitato", "invitati", "attendees", "allegati",
+                               "record delle", "meeting records", "riepilogo",
+                               "summary")):
+                continue
+            # Google Meet's generic auto-title ("Meeting May 29, 2025 at 15:11 CEST")
+            # names no subject at all, so it can never contradict anything.
+            if re.match(r"^meeting\s+\w+\s+\d{1,2},?\s+\d{4}\b", low):
+                return None
+            return nxt
+        return None
+    return None
+
+
+def _content_title_mismatch(md_path: str, meeting_title: str,
+                            sibling_titles: list[str] | None = None
+                            ) -> tuple[str, str] | None:
+    """Second line of defence: does the exported body name a DIFFERENT meeting?
+
+    Returns None when the body agrees or is silent, else a
+    ``(verdict, detail)`` pair:
+
+      ("misfiled", other_title)  the body names ANOTHER meeting on the same day.
+                                 Definite: that day's calendar proves the rival
+                                 meeting is real, so this doc belongs to it.
+                                 Caller discards.
+      ("suspect",  body_title)   the body disagrees, but no other meeting today
+                                 accounts for it. Caller KEEPS the file and records
+                                 the discrepancy.
+
+    Why "suspect" is not discarded — measured on the real corpus (2026-08-06):
+    'FE Alignment' legitimately carries bodies titled 'GED Design Sharing/Alignment'
+    across 7 different days, each with a DISTINCT docId, and no folder for that name
+    exists anywhere in 2 years of exports. It is simply the organiser's name for the
+    same recurring series. Discarding on title disagreement alone would have deleted
+    7 genuine sets of notes. Conversely 'Simon / Cass 1:1' has 10 folders of its own,
+    so when its notes surface inside 'Simon / Alex 1:1' that IS a real leak — and
+    those cases are exactly the ones where the rival meeting shows up on a calendar,
+    which is what the "misfiled" verdict keys on.
+
+    The date guard above cannot catch the common case, because the wrong meeting is
+    usually the *same day* — its date header is correct. The give-away is the title
+    Gemini writes inside the document, which the H1 we prepend does not reflect
+    (ours comes from Calendar and therefore always looks right):
+
+        # GED - Deep dive     <- our H1, from Calendar. Always correct.
+        📝 Note
+        lug 9, 2026           <- correct date, so the date guard passes
+        SAIAN DeepDive        <- the TRUE subject. Wrong meeting.
+
+    Only reacts to a mutual contradiction (see title_contradiction), so an in-body
+    title that is merely a longer or reworded form of the event name is kept.
+    """
+    body_title = _body_meeting_title(md_path)
+    if not body_title:
+        return None
+    only_meeting, only_body = title_contradiction(meeting_title, body_title)
+    if not (only_meeting and only_body):
+        return None
+    for other in (sibling_titles or []):
+        if other == meeting_title:
+            continue
+        om, ob = title_contradiction(other, body_title)
+        if not (om and ob):
+            return ("misfiled", other)
+    return ("suspect", body_title)
 
 
 def _write_metadata(m_dir: str, m: dict, slug: str, d: date, artifacts: dict) -> None:
