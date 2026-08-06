@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
@@ -147,18 +148,47 @@ class CalendarAccessError(RuntimeError):
     pass
 
 
+# Transient gws/Google failures worth retrying rather than aborting the run.
+# The keyring one is not hypothetical: a full-corpus re-harvest (2025-01-01 →
+# 2026-08-05, ~485 days, thousands of gws invocations) died after 198 days on
+#   "keyring error[api]: Authentication backend unavailable"
+# and a plain `gws calendar events list` succeeded immediately afterwards — i.e.
+# the macOS keyring intermittently refuses under sustained access. Losing ~20
+# minutes of completed work to a blip that self-heals in seconds is the wrong
+# failure mode for a long backfill.
+_GWS_TRANSIENT_RE = re.compile(
+    r"authentication backend unavailable|keyring error|could not be opened"
+    r"|rate ?limit|quota ?exceeded|backend ?error|timed? ?out|timeout"
+    r"|connection (reset|refused|aborted)|temporarily unavailable"
+    r"|\b(429|500|502|503|504)\b",
+    re.I)
+GWS_MAX_ATTEMPTS = 5
+
+
 def gws_json(service: str, *args, **params) -> dict:
     clean = {k: v for k, v in params.items() if v is not None}
     cmd = ["gws", service, *args, "--params", json.dumps(clean)]
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=PROJECT_ROOT)
-    if result.returncode != 0:
+    delay = 2.0
+    for attempt in range(1, GWS_MAX_ATTEMPTS + 1):
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=PROJECT_ROOT)
+        if result.returncode == 0:
+            out = result.stdout
+            i = out.find("{")
+            return json.loads(out[i:] if i >= 0 else out)
         stderr = result.stderr.strip()
-        if service == "calendar" and re.search(r"\b(403|404|forbidden|notFound|not found)\b", stderr, re.I):
+        # A real permission problem must NOT be retried — it is the caller's
+        # signal to skip this calendar, and retrying just wastes five attempts.
+        if service == "calendar" and re.search(
+                r"\b(403|404|forbidden|notFound|not found)\b", stderr, re.I):
             raise CalendarAccessError(stderr)
+        if attempt < GWS_MAX_ATTEMPTS and _GWS_TRANSIENT_RE.search(stderr):
+            print(f"    gws {service} {' '.join(args)} transient failure "
+                  f"(attempt {attempt}/{GWS_MAX_ATTEMPTS}), retrying in "
+                  f"{delay:.0f}s: {stderr.splitlines()[-1][:120]}", file=sys.stderr)
+            time.sleep(delay)
+            delay *= 2
+            continue
         raise RuntimeError(f"gws {service} {' '.join(args)} failed: {stderr}")
-    out = result.stdout
-    i = out.find("{")
-    return json.loads(out[i:] if i >= 0 else out)
 
 
 def gws_export(file_id: str, output_path: str, mime_type: str) -> bool:
