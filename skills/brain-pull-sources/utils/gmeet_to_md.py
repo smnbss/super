@@ -898,7 +898,29 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
 
     # Pre-fetch Drive candidates once per day (cheaper than per-meeting).
     time_min, time_max = day_bounds_utc(d)
-    doc_window = (f"modifiedTime > '{time_min}' and modifiedTime < '{time_max}'")
+    # Match on createdTime OR modifiedTime.
+    #
+    # A modifiedTime-only window silently loses any artifact edited after its own
+    # meeting day — the doc drops out of the only window that would ever look for
+    # it. Confirmed live: three notes captured by an earlier export vanished on
+    # re-harvest while still present and untrashed in Drive:
+    #
+    #   'Team Leader Session - 2026/06/26 …'  created 06-26, modified 07-24
+    #   'AI sales deepdive - 2026/07/20 …'    created 07-20, modified 07-27
+    #   '[Brainstorming] Flight/Hotel … '     created 06-22, modified 06-26
+    #
+    # The 06-26 one is a plenaria whose content a month of L2 facts rested on, and
+    # its loss is exactly the sort a re-harvest is assumed not to cause: this made
+    # re-harvesting NON-idempotent in the destructive direction, which is far worse
+    # than merely missing a doc on first pass.
+    #
+    # A Gemini artifact is created when its meeting happens, so createdTime is the
+    # honest signal (as the DOC_CREATED_MAX_DAYS comment above already notes).
+    # modifiedTime is kept as well so a doc created slightly outside the day
+    # boundary but touched during it still qualifies; DOC_CREATED_MAX_DAYS then
+    # bounds how far off the creation date may be.
+    doc_window = (f"((createdTime > '{time_min}' and createdTime < '{time_max}')"
+                  f" or (modifiedTime > '{time_min}' and modifiedTime < '{time_max}'))")
     notes_q = (f'mimeType="{GOOGLE_DOC_MIME}" and ('
                + " or ".join(f'name contains "{n}"' for n in GEMINI_NOTES_NEEDLES)
                + f") and {doc_window}")
