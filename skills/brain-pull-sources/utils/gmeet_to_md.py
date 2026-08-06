@@ -665,7 +665,29 @@ def assign_matches(meetings: list[dict], candidates: list[dict],
         doc["_createdDaysOff"] = days_off
         assigned[mi] = doc
         used_docs.add(ci)
-    return assigned
+
+    # Every guard-passing (meeting, candidate) pair, best-first, INCLUDING the ones
+    # the one-to-one pass could not use. Callers need this to recover when the
+    # winning doc turns out to be unusable only after it is exported and read:
+    #
+    #   * a "not enough conversation in a supported language" stub, while the real
+    #     Italian/English companion doc sits right there unused (measured: both
+    #     directions occur — an empty EN stub chosen over a full IT note, and a thin
+    #     IT note chosen over a fuller EN one);
+    #   * a doc discarded by the content-date or in-body-title check, which under
+    #     strict one-to-one is simply consumed and the meeting left empty. That is
+    #     how 2026-07-09 SAIAN ended up with a stub while its real note — correctly
+    #     rejected from four other folders — was never offered to SAIAN itself.
+    #
+    # Without alternates the pipeline can only ever fail closed (lose the note); with
+    # them it can fall forward to the next acceptable candidate.
+    alternates: dict[int, list[dict]] = {}
+    for ratio, _negdelta, mi, ci, days_off in triples:
+        doc = dict(candidates[ci])
+        doc["_matchRatio"] = round(ratio, 3)
+        doc["_createdDaysOff"] = days_off
+        alternates.setdefault(mi, []).append(doc)
+    return assigned, alternates
 
 
 def _iso_to_epoch(s: str) -> float:
@@ -937,9 +959,10 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
 
     # Globally assign each note/transcript/recording doc to a single meeting so a
     # shared doc can't be duplicated across same-day meetings with similar titles.
-    note_assign = assign_matches(meetings, note_candidates, d)
-    transcript_assign = assign_matches(meetings, transcript_candidates, d)
-    recording_assign = assign_matches(meetings, recording_candidates, d)
+    note_assign, note_alternates = assign_matches(meetings, note_candidates, d)
+    transcript_assign, _ = assign_matches(meetings, transcript_candidates, d)
+    recording_assign, _ = assign_matches(meetings, recording_candidates, d)
+    used_note_ids: set[str] = {v["id"] for v in note_assign.values() if v.get("id")}
 
     rows = []
     folders_written = 0
@@ -1018,43 +1041,90 @@ def harvest_day(calendar_id: str, d: date, stats: dict) -> int:
         # discard it rather than misdate every fact downstream. (A misdated note
         # silently misdates the daily digest, the weekly/monthly rollups and the
         # L2 memory facts derived from them, with a healthy-looking source trail.)
-        note = note_assign.get(mi)
-        if note:
+        # Try the assigned doc, then FALL FORWARD through the remaining
+        # guard-passing candidates. Rejecting a doc must never mean the meeting
+        # silently ends up with nothing (or with a stub) while a usable companion
+        # doc sits unused — see the alternates note in assign_matches().
+        primary = note_assign.get(mi)
+        queue = []
+        if primary:
+            queue.append(primary)
+        for alt in note_alternates.get(mi, []):
+            if alt.get("id") != (primary or {}).get("id") \
+                    and alt.get("id") not in used_note_ids:
+                queue.append(alt)
+
+        notes_path = os.path.join(m_dir, "notes.md")
+        stub_fallback = None                  # remembered in case nothing better exists
+        for attempt, note in enumerate(queue):
             os.makedirs(m_dir, exist_ok=True)
-            notes_path = os.path.join(m_dir, "notes.md")
-            if export_google_doc_md(note["id"], m["title"], notes_path):
-                verdict = _content_title_mismatch(
-                    notes_path, m["title"], [x["title"] for x in meetings])
-                if _content_date_mismatch(notes_path, d):
-                    print(f"    Discarding notes '{note.get('name','')}' for "
-                          f"'{m['title']}' — content date != meeting date {d}",
-                          file=sys.stderr)
-                    os.remove(notes_path)
-                elif verdict and verdict[0] == "misfiled":
-                    print(f"    Discarding notes '{note.get('name','')}' for "
-                          f"'{m['title']}' — body is about '{verdict[1]}', another "
-                          f"meeting on {d} (the date matched, so only the in-body "
-                          f"title reveals it)", file=sys.stderr)
-                    os.remove(notes_path)
-                else:
-                    if verdict:
-                        print(f"    WARN: notes for '{m['title']}' have in-body "
-                              f"title '{verdict[1]}' — no other meeting on {d} "
-                              f"accounts for it, so KEEPING (likely the organiser's "
-                              f"name for this series). Recorded in metadata.",
-                              file=sys.stderr)
-                        artifacts.setdefault("_dataQuality", {})["notesTitleSuspect"] = {
-                            "calendarTitle": m["title"], "bodyTitle": verdict[1],
-                        }
-                    produced.append("notes")
-                    artifacts["notes"] = {
-                        "source": "drive-search", "docId": note["id"],
-                        "driveLink": note.get("webViewLink", ""),
-                        "docName": note.get("name", ""),
-                        "docCreatedTime": note.get("createdTime", ""),
-                        "matchRatio": note.get("_matchRatio"),
-                        "createdDaysOff": note.get("_createdDaysOff"),
-                    }
+            if not export_google_doc_md(note["id"], m["title"], notes_path):
+                continue
+            verdict = _content_title_mismatch(
+                notes_path, m["title"], [x["title"] for x in meetings])
+            why = None
+            if _content_date_mismatch(notes_path, d):
+                why = f"content date != meeting date {d}"
+            elif verdict and verdict[0] == "misfiled":
+                why = (f"body is about '{verdict[1]}', another meeting on {d} "
+                       f"(the date matched, so only the in-body title reveals it)")
+            elif _is_empty_gemini_note(notes_path):
+                # Gemini emits a placeholder when it could not summarise (usually
+                # "not enough conversation in a supported language"). Keep looking:
+                # the same meeting often has a second doc in the other language with
+                # the actual content.
+                why = "Gemini produced no summary (empty/stub note)"
+                if stub_fallback is None:
+                    stub_fallback = dict(note)
+            if why:
+                nxt = " — trying next candidate" if attempt + 1 < len(queue) else ""
+                print(f"    Rejecting notes '{note.get('name','')}' for "
+                      f"'{m['title']}' — {why}{nxt}", file=sys.stderr)
+                os.remove(notes_path)
+                continue
+
+            if verdict:
+                print(f"    WARN: notes for '{m['title']}' have in-body title "
+                      f"'{verdict[1]}' — no other meeting on {d} accounts for it, so "
+                      f"KEEPING (likely the organiser's name for this series). "
+                      f"Recorded in metadata.", file=sys.stderr)
+                artifacts.setdefault("_dataQuality", {})["notesTitleSuspect"] = {
+                    "calendarTitle": m["title"], "bodyTitle": verdict[1],
+                }
+            if attempt:
+                print(f"    Recovered notes for '{m['title']}' from alternate "
+                      f"candidate '{note.get('name','')}' (primary was unusable)",
+                      file=sys.stderr)
+            used_note_ids.add(note["id"])
+            produced.append("notes")
+            artifacts["notes"] = {
+                "source": "drive-search", "docId": note["id"],
+                "driveLink": note.get("webViewLink", ""),
+                "docName": note.get("name", ""),
+                "docCreatedTime": note.get("createdTime", ""),
+                "matchRatio": note.get("_matchRatio"),
+                "createdDaysOff": note.get("_createdDaysOff"),
+            }
+            break
+        else:
+            # Nothing usable. A stub is still better than no record at all — it at
+            # least preserves the Drive link and proves Gemini ran — so restore it,
+            # clearly marked, rather than leaving the meeting artifact-less.
+            if stub_fallback is not None and \
+                    export_google_doc_md(stub_fallback["id"], m["title"], notes_path):
+                print(f"    Keeping stub note for '{m['title']}' — no usable "
+                      f"alternative found", file=sys.stderr)
+                used_note_ids.add(stub_fallback["id"])
+                produced.append("notes")
+                artifacts["notes"] = {
+                    "source": "drive-search", "docId": stub_fallback["id"],
+                    "driveLink": stub_fallback.get("webViewLink", ""),
+                    "docName": stub_fallback.get("name", ""),
+                    "docCreatedTime": stub_fallback.get("createdTime", ""),
+                    "matchRatio": stub_fallback.get("_matchRatio"),
+                    "createdDaysOff": stub_fallback.get("_createdDaysOff"),
+                }
+                artifacts.setdefault("_dataQuality", {})["notesIsStub"] = True
 
         # 2d — transcript docs (best-effort), same content-date guard.
         #
@@ -1186,6 +1256,51 @@ def _body_meeting_title(md_path: str) -> str | None:
             return nxt
         return None
     return None
+
+
+# Match Gemini's own placeholder wording. Note the apostrophe: the real text is
+# "there wasn't enough conversation in a supported language", so a pattern anchored
+# on "not enough" silently fails — use the unambiguous tail instead.
+_EMPTY_NOTE_RE = re.compile(
+    r"enough conversation in a supported language"
+    r"|summary\s+wasn.t\s+produced|details\s+weren.t\s+produced"
+    r"|no summary (was )?(generated|produced)"
+    r"|non c.è stat[ao] abbastanza|conversazione insufficiente"
+    r"|couldn.t (generate|create) (a )?summary",
+    re.I)
+
+
+def _is_empty_gemini_note(md_path: str) -> bool:
+    """True when Gemini produced a placeholder instead of a summary.
+
+    Two shapes: an explicit apology ("not enough conversation in a supported
+    language"), or a doc with the header scaffolding and essentially no body. Both
+    mean the *other* language variant of the same meeting is worth trying — the
+    extractor has been observed choosing an empty EN stub over a full IT note and
+    a thin IT note over a fuller EN one, so this cannot assume a preferred locale.
+    """
+    try:
+        with open(md_path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return False
+    if _EMPTY_NOTE_RE.search(text[:4000]):
+        return True
+    # Strip our H1, the marker line, the date, attendee/attachment scaffolding, and
+    # see whether any prose is left.
+    body = []
+    for ln in text.splitlines():
+        s = ln.strip().lstrip("﻿")
+        if not s or s.startswith("#") or "\U0001F4DD" in s:
+            continue
+        if looks_like_date_line(s):
+            continue
+        if s.lower().startswith(("invitato", "invitati", "attendees", "allegati",
+                                 "record delle", "meeting records", "riepilogo",
+                                 "summary", "trascrizione", "registrazione")):
+            continue
+        body.append(s)
+    return len(" ".join(body)) < 200
 
 
 def _content_title_mismatch(md_path: str, meeting_title: str,
