@@ -274,6 +274,33 @@ A two-pass synthesis. The agent reads the artifacts in each day's meeting folder
 
 If a meeting has no artifacts (just metadata), include it with: "No Gemini notes or transcript available."
 
+> **VERIFY THE NOTE BELONGS TO THE MEETING before summarising it.** This is the step where a
+> misfiled artifact becomes a wrong *fact* — it flows into the daily digest, the weekly/monthly/YTD
+> rollups, and the `L2/` memory those feed, with a `verified:`/`source:` trail that looks perfectly
+> healthy. A 2026-08-06 audit found **128 of 758 `notes.md` (16.9%)** holding another meeting's
+> notes, including 3 one-to-one leaks.
+>
+> The folder name, date and `# H1` come from Calendar and are **always** right, so they prove
+> nothing. Read the line just under the `📝` marker — that is the title Gemini wrote *inside* the
+> doc. If it names a different meeting (e.g. folder `ged-deep-dive`, body `SAIAN DeepDive`),
+> **discard the artifact and treat the meeting as having no notes.** Do not try to salvage it, and
+> do not attribute its decisions to either meeting.
+>
+> Two things that are NOT misfiles: a body title that is merely a longer or reworded form of the
+> event name, and an organiser's alternate name for the same recurring series (`FE Alignment`
+> bodies titled `GED Design Sharing/Alignment`). Only a *mutual* contradiction — each side naming
+> something the other never mentions — is disqualifying.
+>
+> A folder may also carry `metadata.json` → `dataQuality.notesTitleSuspect`, written by the
+> extractor when it kept a disagreeing note deliberately. Treat that as "usable but state the
+> uncertainty", not as grounds to drop it.
+>
+> `gmeet_to_md` now discards the provable cases itself, so this should be rare — but the extractor
+> only sees one day's calendar, and this bug has been fixed three times, so check rather than
+> assume. Prefer live systems of record (Linear, Personio, Slack) over meeting notes for anything
+> load-bearing, and never repeat a note's content to the people who were in the room without this
+> check.
+
 **Pass 2 — daily rollup.** Aggregate all per-meeting summaries into the daily digest:
 
 ```markdown

@@ -74,7 +74,61 @@ Source commands (the `github_clone` command lives in `sources.github.md`; all th
 - `linear_to_md <url>` — export Linear projects
 - `linear_issues_to_md <url>` — export ALL issues for a Linear team or project (including triage). **Incremental**: keeps a per-issue `updatedAt` map in `.issues-registry.json` and re-fetches the full description + rewrites the file only for issues that changed since the last run (the index is always rebuilt from the cheap bulk query). `--force` re-fetches everything. (A no-change run of a ~120-issue project drops from ~85s to ~2s.)
 - `metabase_index <url>` — export full Metabase index
-- `gmeet_to_md <email>` — harvest meeting notes/agendas/recordings/attachments the email is invited to (Google Calendar + Drive) into `src/gmeet/`; deterministic Steps 1–5 of `brain-pull-my-meeting-notes`, no LLM digests. Incremental via `src/gmeet/.registry.json`; `--since` / `--day` / `--days` / `--force` / `--list`. Assumes `email` == the authenticated gws user.
+- `gmeet_to_md <email>` — harvest meeting notes/agendas/recordings/attachments the email is invited to (Google Calendar + Drive) into `src/gmeet/`; deterministic Steps 1–5 of `brain-pull-my-meeting-notes`, no LLM digests. Incremental via `src/gmeet/.registry.json`; `--since` / `--day` / `--days` / `--force` / `--list`. Assumes `email` == the authenticated gws user. **Its artifact-matching contract is load-bearing — see below before touching it.**
+
+#### `gmeet_to_md` artifact matching — do not loosen these guards
+
+Folder name, date and the `# H1` come from **Calendar and are always right**. The Gemini
+notes/transcript **body** comes from a Drive *name* match and is the part that goes wrong, so a
+misfiled note looks perfectly healthy. This has now been fixed **three times** (`c5442c8`,
+`56acbd3`, `3335d2d`); a 2026-08-06 audit still found **128 of 758 `notes.md` (16.9%)** holding
+another meeting's notes, including **3 one-to-one leaks** (one person's 1:1 notes inside another
+person's folder — a confidentiality problem, not just an accuracy one). Every guard below exists
+because its absence produced real, shipped damage.
+
+- **Why loose title matching fails.** `TITLE_MATCH_THRESHOLD = 0.55` over `difflib` on the doc
+  *name*: a family of meetings sharing a suffix scores high because the boilerplate dominates,
+  while the distinguishing acronym is 3–5 chars. `'GED - Deep dive'` vs `'SAIAN DeepDive'` = 0.667,
+  vs `'AI DeepDive'` = 0.750, `'Simon / Marina 1:1'` vs `'Simon / Giovanni 1:1'` = 0.706 — all
+  above 0.55, none reaching `TITLE_MATCH_STRICT` (0.90).
+- **Guard 1 — creation-date bound** (`DOC_CREATED_MAX_DAYS`): the candidate query filters on
+  `modifiedTime`, so merely *opening* an old doc makes it a candidate.
+- **Guard 2 — cross-meeting word conflict**: only fires when the stolen word belongs to another
+  meeting **the same day**. Necessary but not sufficient — it cannot catch a misfile on a day when
+  the rival meeting is not scheduled.
+- **Guard 3 — `title_contradiction()`, day-INDEPENDENT**: if each side carries a distinctive word
+  the other lacks, require `TITLE_MATCH_STRICT`. This is the guard that closes Guard 2's hole.
+  Asymmetric cases are deliberately *not* contradictions, so legitimate renames still match.
+- **`title_tokens()` keeps 2-letter UPPERCASE acronyms.** `AI` was dropped as noise by a
+  `len >= 3` rule, which is precisely why `AI DeepDive` was the most frequent impostor (20
+  folders). Lowercase 2-letter words stay dropped (`di`, `in`, `on`, `to`).
+- **`_content_title_mismatch()` — the in-body check.** Reads the title Gemini wrote *inside* the
+  doc, the only place the truth appears. Two verdicts, and the distinction is essential:
+  `misfiled` (the body names another meeting **on that day** → discard) vs `suspect` (nothing on
+  the calendar accounts for it → **keep**, record under `dataQuality`).
+  ⚠️ **Never turn `suspect` into a discard.** `FE Alignment` legitimately carries bodies titled
+  `GED Design Sharing/Alignment` on 7 different days with distinct `docId`s, and that title owns
+  **no folder anywhere in two years** — it is the organiser's name for the same series.
+  Discard-on-disagreement deletes 7 genuine files. The discriminator when auditing offline is
+  *does the body's title own a folder somewhere?* (`Simon / Cass 1:1` owns 10 → real meeting →
+  leak; `GED Design Sharing/Alignment` owns 0 → alias → keep.)
+- **`looks_like_date_line()`**: Italian day-first dates (`19 mar 2026`) are not month-first, so
+  without this they parse as a *title* and the guards reject good notes because `{mar}`
+  "contradicts" `{ged}`.
+- **`best_match()` is deprecated and must stay unused** — no one-to-one constraint, so one doc gets
+  claimed by several same-day meetings. That is the origin of most historical damage: of the 128
+  misfiles, **120 were duplicates** of a correctly-filed copy. Use `assign_matches()`.
+- **Transient-failure retry** (`gws_json`, `_GWS_TRANSIENT_RE`): keyring-unavailable, 429/5xx,
+  quota, timeout and connection resets retry with backoff (5 attempts). A ~485-day backfill died
+  after 198 completed days on a macOS keyring blip that self-healed in seconds. Permanent errors
+  are **not** retried — calendar 403/404 must keep raising `CalendarAccessError` immediately.
+- **Long backfills: drive them per-day, not as one `--since` span.** One process over ~485 days
+  loses everything on a single failure; a per-day loop with a checkpoint file loses one day.
+- **Auditing an existing corpus**: artifact-less folders are pruned, so a re-harvest of a bad day
+  *removes* folders. `index.md` still lists every meeting, so calendar history survives — only the
+  false artifact links go. A shrinking `notes.md` count is the success signal, not a regression.
+  Note also that `*-digest.md` and `transcript.md` are **preserved** across re-harvests, so
+  LLM-written digests keep whatever the old wrong notes said until regenerated separately.
 - `personio_to_md` — export the staff roster from the Personio API (v1 `/company/employees`) into `src/personio/personio-staff.tsv` (canonical columns — ID, name, email, position, department, team, office, hire date, status, supervisor, contract end, occupation type). Takes no URL; authenticates with `PERSONIO_CLIENT`/`PERSONIO_SECRET` from `.env.local`. Attributes are flattened **by label**, so company-specific dynamic attributes (Team, Office) are picked up automatically and the export survives Personio attribute-id changes. Exports **active staff only** by default (status active/leave/onboarding); pass `--include-inactive` to keep ex-employees. Flags: `--list`, `--limit N` (page size, default 200), `--include-inactive`, `--base-url`, `--verbose`. If a canonical column comes back empty it prints a NOTE — usually the credential's readable-attributes scope in Personio needs widening. The bearer token used is read-only on persons/employees. (Replaces the retired `brain-personio-staff-sync` browser-scrape skill.)
 
 GitHub repos are full clones (~48 repos from the IDP service catalog).
