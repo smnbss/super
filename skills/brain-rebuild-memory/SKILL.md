@@ -309,12 +309,37 @@ Each source MOC contains:
 | `team-members.md` | `src/personio/staff-roster.tsv` + `memory/L2/team-*.md` members sections + **`$BRAIN_CONFIG` `teams[]`** (for the Linear-team column) |
 | `product-areas.md` | Team L2 files (group features by product area) |
 | `business-domains.md` | `memory/L2/exco.md` + `memory/L2/intranet.md` + `memory/L2/one-pagers.md` |
-| `data-model.md` | `outputs/services/weroad/dbt.agent.md` + `outputs/services/weroad/dashboards.agent.md` + BigQuery metadata |
+| `data-model.md` | **`src/outline/BI Wiki/**`** (dbt's documentation home — see the docs-first note below) + `outputs/services/**/*.db.agent.md` + BigQuery metadata |
 | `entities.md` | Full scan of all L2 files — anything appearing in 2+ sources gets an entry |
 | `tone-of-voice.md` | `src/medium/smnbss/` — Simone's writing voice analysis |
 | `skills.md` | `.claude/skills/*/SKILL.md` — enumerate all skills |
 | `system-map.md` | `.claude/agents/`, `.claude/skills/`, `.claude/commands/` — full system index |
 | `hub.md` | **Last** — reads all other L1 files, builds the top-level nav with counts. Keep only the last **7** "What changed" entries live; older entries rotate to `hub-changelog-YYYY-MM` archives (see "Size Caps & Archive Rotation") |
+
+> ⚠️ **Docs-first repos have NO `.agent.md` — do not treat that as a gap.** As of
+> 2026-08-12, `brain-rebuild-services` deletes rather than generates a per-repo doc for
+> any repo whose documentation lives in Outline via `doc-sync`; 26 were removed in that
+> run (api-catalog, api-partner, api-payments, booking, buynana, community,
+> coordinators, **dbt**, kaioh, my, myweroad, partner, weroad, wemeet, …). Consequences
+> for every `inputs` glob in this table and in Phase 2:
+>
+> - `outputs/services/**/*.agent.md` now resolves to **62** files, not 88. Any target
+>   whose knowledge came from a deleted doc must add
+>   **`src/outline/<Collection> Wiki/**`** to its inputs — that tree is gbrain-indexed
+>   and is the same content the owning team maintains. The clone's `docs/domain/` is the
+>   byte-authoritative side if you need to disambiguate.
+> - **`outputs/services/**/*.db.agent.md` (34 files) survives untouched** and is still
+>   the only source for columns, enums and status lifecycles. Schema knowledge did not
+>   move.
+> - **`outputs/services/TRAPS-from-deleted-docs.md` is append-only** — 39 corrections
+>   extracted from the deleted docs. Read it wherever you previously read a service
+>   doc's `## Traps` section, and never regenerate it.
+> - Repo↔collection mapping is by **document-basename overlap**, never by collection
+>   name (two collections are both titled `Partner Portal`). `n8n-workflows` has no
+>   collection and therefore keeps its doc.
+>
+> A stale glob here **loses detail silently instead of failing**, which is why this note
+> sits next to the table rather than in a changelog.
 
 #### `memory/L1/teams.md`
 

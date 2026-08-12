@@ -105,6 +105,38 @@ Then follow `## Process` for the changed surfaces only, and write the doc with t
 new `head:`, today's `verified:` date, and the changelog discipline in
 [Changelog & size discipline](#changelog--size-discipline).
 
+### 0.4 Inert diff — HEAD moved, but nothing a doc can describe
+
+Step 0.2 skips a repo when HEAD is **unchanged**. That is not the common case.
+The common case is HEAD moved by a commit that cannot change any sentence in the
+doc, and until now those got a full incremental pass. Classify the changed set
+from 0.3 **before** reading anything:
+
+```bash
+git -C <repo-path> diff --name-only "$RECORDED..HEAD" \
+  | grep -vE '(^|/)(CHANGELOG\.md|\.release-please-manifest\.json|pnpm-lock\.yaml|package-lock\.json|composer\.lock|poetry\.lock|uv\.lock|yarn\.lock|LICENSE|\.gitignore|\.editorconfig)$' \
+  | grep -vE '^\.github/(gemini|copilot|dependabot)' \
+  | grep -vE '^(docs|\.claude)/.*\.md$'
+```
+
+**Empty output → INERT.** Stamp the new `head:` and today's `verified:` date on the
+existing doc and change **nothing else**. Report `<repo>: inert diff (<n> commits,
+release/lockfile/CI only) — stamped, not regenerated`.
+
+Two extra checks before declaring inert, because a version bump *is* a fact the doc
+carries: if `package.json`/`composer.json`/`VERSION` changed, diff them and confirm
+only the `version` field moved — then update the doc's version number and the
+release-narrative bullet, still without re-reading source. If a `deploy/*.env`
+changed, confirm the diff is only `${HELMSECRET}:` ciphertext (a secret rotation) —
+that is inert for architecture, and worth one changelog line.
+
+This rung is the single largest saving available to this skill, and the evidence is
+in the docs it already wrote: `doc-sync.agent.md` records that **1.7.1 was "no code
+whatsoever"** — one `chore: add github-token` plus the release-please bump. A human
+established that by re-reading the repo. `git diff --name-only` establishes it for
+free. Repo HEADs move on `chore: add Gemini config`, `chore(main): release X.Y.Z`
+and Dependabot bumps far more often than on architecture.
+
 ## Step 0.5 — Is this a docs-first repo?
 
 Teams now maintain first-party documentation **inside their repos** under
@@ -124,29 +156,121 @@ api-catalog 63, coordinators 53, kaioh 48, api-partner 48, booking 41, buynana 3
 …. The in-repo tree is byte-authoritative; the Outline copy only reformats
 markdown, so read the clone, never the export.)
 
-For a docs-first repo, **do not generate the narrative sections.** Drop
-`## Architecture`, `## Domain Model` and `## Request Flows` from the output and
-replace them with a pointer:
+### A docs-first repo gets NO `.agent.md` at all
 
-```markdown
-## Documentation
+**Decided 2026-08-12: do not generate, and do not keep, an `.agent.md` for a repo
+whose documentation lives in Outline.** Not a slimmer doc, not a stub — no file. The
+26 that existed were deleted in that run (8,732 lines). If you find yourself about to
+create one for a docs-first repo, stop: the deletion was the point.
 
-Domain, feature and glossary documentation is maintained by the owning team in
-`<repo-path>/docs/domain/` (<N> pages) and mirrored to Outline as
-*<Collection Name> Wiki* → `src/outline/<Collection Name> Wiki/`. Read that for
-what the service *does* and why; this doc covers only what is derived from code.
+The replacement is strictly richer. Measured on the deleted set: dbt **1,597** Outline
+pages replaced a 266-line doc, buynana **251** replaced 251 lines, coordinators **146**
+replaced 354, booking **146** replaced 218, kaioh **81** replaced 238. The wiki is
+written by the owning team, reviewed, and gbrain-indexed at `src/outline/<Collection>
+Wiki/`; the clone's `docs/domain/` is the byte-authoritative side of the same content.
 
-- Feature map: `<repo-path>/docs/domain/tech/features/_features.md`
-- Glossary: `<repo-path>/docs/domain/tech/glossary.md`
+**Mapping a repo to its collection is done by document overlap, never by name.**
+Collection titles do not reliably carry the repo name — verified 2026-08-12: two
+collections are both titled `Partner Portal.md`, several name the repo only in
+backticks, most not at all. Match `basename` sets between `<repo>/docs/domain/**` and
+`src/outline/*/**` and take the best overlap; 26 of 27 docs-first repos mapped
+unambiguously that way (`n8n-workflows`, 331 pages, matched **nothing** — it has no
+collection, so it keeps its doc).
+
+Two things still have to exist, and neither is the per-repo narrative:
+
+- **`.db.agent.md` stays, in full.** The wikis do not document columns. 34 survive.
+- **The `cross/` RabbitMQ topology files stay**, and Step 4 still runs for docs-first
+  repos — read exchange/queue/routing-key **names** from source for that purpose only.
+  Do not let it become a pretext for re-reading controllers.
+
+The facts a deleted doc used to carry now resolve as follows — check here before
+concluding something was lost:
+
+| Fact the old doc carried | Where it lives now |
+|---|---|
+| Architecture, Domain Model, Request Flows, Features | `docs/domain/` + `src/outline/<Collection> Wiki/` — written and reviewed by the owning team |
+| API Surface | the wiki's own generated spec, e.g. `Payments Backend Wiki/Tech/Api/api-payments — OpenAPI.md` |
+| Glossary / domain vocabulary | `docs/domain/tech/glossary.md` + the wiki's Glossary page |
+| Source Structure, Key Files, Testing, Configuration | the repo — cheap to `ls`/read on demand, worthless to snapshot daily |
+| Database columns, enums, status lifecycles | **`{repo}.db.agent.md`** — kept, no substitute |
+| Exchange / queue / routing keys | the **`cross/`** topology files, maintained by Step 4 |
+| Stack per repo | `memory/L2/technologies.md`, which aggregates from manifests directly |
+| Team ownership | `CODEOWNERS` + `memory/L1/teams.md` |
+| **Traps / corrections** | **`outputs/services/TRAPS-from-deleted-docs.md`** — see below |
+
+Do not grep `@Controller`/`@Resolver`/`@Cron`/`@RabbitSubscribe` and do not walk `src/`
+for a docs-first repo. That enumeration was the single most expensive thing this skill
+did, and it produced the worse copy of something the team already maintains.
+
+⚠️ **Traps are the one thing a wiki structurally cannot hold**, because they are
+statements that *a source is wrong* — doc-sync's live PostgreSQL column COMMENTs naming
+enum values that no longer exist; `?demo=1` in wemeet-hosted-ops rendering synthetic
+data; a metric that must not be quoted. A wiki documents what a service does, not the
+ways its own artefacts mislead. 39 such markers across 9 of the 26 deleted docs were
+extracted verbatim into **`outputs/services/TRAPS-from-deleted-docs.md`** before
+deletion. Rules:
+
+- That file is **append-only and never regenerated**. Nothing derives it; losing it
+  loses knowledge that cost real debugging to find.
+- A new trap discovered about a **docs-first** repo goes there, not into a resurrected
+  `.agent.md`.
+- On a **surviving** doc, carry its `## Traps` section forward verbatim on every pass.
+  If the diff did not touch what a trap describes, the trap is still true.
+
+**Consequence that is now live, not hypothetical:** `brain-rebuild-memory` lists
+`outputs/services/**/*.agent.md` among its inputs, and `memory/L1/data-model.md` derived
+specifically from `outputs/services/weroad/jungle/dbt.agent.md` — **which no longer
+exists.** Its input globs must resolve to the Outline mirror instead
+(`src/outline/BI Wiki/**` for data-model; `src/outline/<Collection> Wiki/**` generally),
+and the surviving `.db.agent.md` set still covers schema. A memory rebuild run against
+the old globs will quietly lose detail rather than fail, so treat the glob update as
+part of this change, not a follow-up.
+
+If the repo has **no** `docs/domain/` tree (or fewer than 10 pages), generate every
+section as before — that knowledge exists nowhere else. Measured 2026-08-12 across
+the day's 16 changed repos, the split was **6 docs-first** (api-myweroad 38,
+buynana 64, coordinators 55, dbt 1196, kaioh 68, wemeet 21) and **10 not**
+(actions, airflow, coordi-app, doc-sync, helm-charts, idp, infrastructure,
+mailcarrier, terraform, wemeet-hosted-ops — each 0 pages under `docs/domain/`), so
+expect the stub path to cover roughly a third of a typical morning and the full
+path to remain the default.
+
+## Step 0.6 — On an incremental pass, PATCH the doc; never re-emit it
+
+Steps 0.2–0.5 cut what you **read**. This step cuts what you **write**, which on a
+gated run is the larger half of the bill: these docs are 200–400 lines, and a
+regeneration that changes two facts still costs 350 lines of output. Sixteen docs at
+~350 lines is ~5,600 lines of generated markdown per morning, the overwhelming
+majority of it retyped verbatim from the version already on disk.
+
+**Rule: a repo that existed in the last run is edited, not rewritten.** Use targeted
+`Edit` calls against the sections the diff actually touched. Reserve a whole-file
+`Write` for first generation, for a repo whose `head:` was never stamped, and for an
+archive rotation.
+
+This also removes a whole class of silent regression. Retyping a 350-line doc from
+context is a lossy copy: it is exactly how a `## Traps` block, a `superseded:`
+marker, or a hard-won correction disappears without anyone editing it away. An
+`Edit` that does not mention a section cannot damage it.
+
+Order of work per repo, cheapest exit first:
+
+| Gate | Outcome |
+|---|---|
+| 0.2 HEAD unchanged | write nothing, touch no date |
+| 0.4 inert diff | stamp `head:` + `verified:` only |
+| 0.5 docs-first | **write nothing at all**; never grep the source tree. `.db.agent.md` + `cross/` only |
+| 0.6 incremental | `Edit` the affected sections |
+| else | full read + `Write` |
+
+**Report the gate you took, per repo, in one machine-checkable line** so the phase can
+be audited rather than trusted — the orchestrator gates on this, and an unexplained
+`full` on a repo whose diff was two lockfiles is the signal that this step was skipped:
+
 ```
-
-Keep every remaining section — they are the machine-derived facts the wiki does
-*not* carry: Stack, Source Structure, API Surface, Messaging, Inter-Service
-Dependencies, Auth Patterns, Background Jobs, Configuration, Testing, Key Files,
-Commands, Owner. Keep `.db.agent.md` in full: the wikis do not document columns.
-
-If the repo has **no** `docs/domain/` tree (or fewer than 10 pages), generate the
-narrative sections as before — that knowledge exists nowhere else.
+<repo>	<gate: unchanged|inert|docs-first|incremental|full>	<commits>	<files changed>	<sections written>
+```
 
 ## Process
 
