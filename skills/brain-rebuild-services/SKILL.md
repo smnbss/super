@@ -643,22 +643,37 @@ These docs accrete. Each incremental pass wants to add a dated `<!-- YYYY-MM-DD:
 HEAD … -->` note and a fresh "Recent / Earlier — shipped in vX" block, and nothing
 ever removed one: by 2026-08-05 the 111 docs carried **172 dated comments totalling
 140 KB** (`erp-buddy.agent.md` alone had 11), all of it re-read and re-emitted on
-every regeneration of that file. `memory/` hit the same wall on 2026-07-14 and
-solved it with a size cap plus verbatim archive rotation. Same rule here.
+every regeneration of that file.
+
+**`outputs/services/archive/` no longer exists — do not create it.** From
+2026-08-05 to 08-12 over-cap history was rotated into `<repo>-<YYYY-MM>.md` pages
+there, and the directory was removed on 2026-08-12 (35 files, 932 KB). The reason is
+the one this section already stated for release blocks: **that narrative is already in
+the repo's own `git log` and `CHANGELOG`, and in `src/linear/`'s release-note
+exports.** An archive page was a third copy — indexed, retrieved, and competing with
+the live doc in search, while adding nothing a `git log` does not answer. It also cost
+what it was meant to save: 28 live docs had been compressed against it and carried 86
+pointers into it, so the rotation target became load-bearing for content the live doc
+had deliberately dropped.
 
 - **Keep at most 2 dated `<!-- YYYY-MM-DD: HEAD … -->` comments**: the current pass
-  and the one before it. Rotate the rest **verbatim** (never summarized, never
-  deleted) into `outputs/services/archive/<repo>-<YYYY-MM>.md`, appending in date
-  order, and link it once from the doc: `<!-- earlier passes: [[<repo>-<YYYY-MM>]] -->`.
+  and the one before it. **Drop the rest.** Do not rotate them anywhere, do not
+  summarize them into the body, and do not leave a pointer comment behind. `git log
+  -p -- <doc>` recovers any dropped block verbatim, which is strictly better than a
+  hand-maintained copy: it cannot drift and it costs no retrieval budget.
 - **Keep at most 2 release blocks** in the body: the current unreleased set and the
   most recent released version. Older per-release narrative is already in
-  `src/linear/` (441 release-note exports) and in the repo's own CHANGELOG —
-  rotate it to the same archive page rather than carrying it forward.
+  `src/linear/` (441 release-note exports) and in the repo's own CHANGELOG — drop it
+  rather than carrying it forward.
 - **40 KB hard cap** per doc, matching the `memory/` cap and for the same reason:
-  oversized pages chunk badly in gbrain and dilute retrieval. If a doc is over
-  after rotation, compress tables before dropping facts.
-- The archive pages are ordinary curated pages — give each a `Topics:` footer
-  (`[[<repo>.agent.md]] · [[services]]`) so the graph still reaches them.
+  oversized pages chunk badly in gbrain and dilute retrieval. If a doc is over cap
+  after dropping history, compress tables before dropping facts — and if the excess
+  is steady-state architecture rather than changelog, **say so in the run report
+  instead of cutting current facts to hit the number.**
+- **Never write a forward reference to content you are deleting.** A line like "full
+  listing verbatim in [[<repo>-2026-08]]" is only true while the target exists; once
+  it does not, the doc is promising detail that is nowhere in the working tree. If a
+  fact matters enough to point at, keep it inline; if it does not, drop it silently.
 
 ## Rules
 
