@@ -163,19 +163,49 @@ whose documentation lives in Outline.** Not a slimmer doc, not a stub — no fil
 26 that existed were deleted in that run (8,732 lines). If you find yourself about to
 create one for a docs-first repo, stop: the deletion was the point.
 
-The replacement is strictly richer. Measured on the deleted set: dbt **1,597** Outline
-pages replaced a 266-line doc, buynana **251** replaced 251 lines, coordinators **146**
-replaced 354, booking **146** replaced 218, kaioh **81** replaced 238. The wiki is
-written by the owning team, reviewed, and gbrain-indexed at `src/outline/<Collection>
-Wiki/`; the clone's `docs/domain/` is the byte-authoritative side of the same content.
+The replacement is richer. Re-measured against the export on 2026-08-12: dbt **1,597**
+Outline pages (BI Wiki 205 + Bi Wiki Internal 1,392) replaced a 266-line doc, buynana
+**51** replaced 251 lines, coordinators **73** replaced 354, booking **54** replaced
+218, kaioh **73** replaced 238. The wiki is written by the owning team, reviewed, and
+gbrain-indexed at `src/outline/<Collection> Wiki/`.
 
-**Mapping a repo to its collection is done by document overlap, never by name.**
-Collection titles do not reliably carry the repo name — verified 2026-08-12: two
-collections are both titled `Partner Portal.md`, several name the repo only in
-backticks, most not at all. Match `basename` sets between `<repo>/docs/domain/**` and
-`src/outline/*/**` and take the best overlap; 26 of 27 docs-first repos mapped
-unambiguously that way (`n8n-workflows`, 331 pages, matched **nothing** — it has no
-collection, so it keeps its doc).
+> ⚠️ **CORRECTED 2026-08-12 — the earlier version of this paragraph inflated four of
+> those five figures** (buynana 251, coordinators 146, booking 146, kaioh 81). Only the
+> dbt number was right. `buynana **251** replaced 251 lines` shows the mechanism: the
+> Outline count was copied from the line count. The **decision still holds** — 51
+> structured, team-maintained pages beat a 251-line generated doc for domain narrative,
+> and the same is true of the others — but verify counts against
+> `find "src/outline/<Collection>" -name '*.md' | wc -l`, never from memory of a prior run.
+
+**Map a repo to its collection by NAME, then confirm by reading one page.**
+
+> ⚠️ **This rule was the exact inverse until 2026-08-12, and the old rule does not
+> work.** It said "by document overlap, never by name", on the premise that two
+> collections were both titled `Partner Portal.md`. That was a document/collection
+> confusion: the collections are **`Partner Portal Backend Wiki`** and **`Partner Portal
+> Frontend Wiki`** (→ `api-partner` and `partner`), which are unambiguous. Worse, the
+> prescribed method cannot work at all, because `doc-sync` **retitles** as it mirrors:
+> the repo writes slugs (`zendesk-users-duplicate-merge.md`) and Outline holds prose
+> titles (`Zendesk Duplicate Ticket Cleanup.md`). Measured basename overlap is
+> **3 of 308** for n8n-workflows and **2 of 62** for buynana — even after case-folding
+> and stripping all punctuation. It returns noise for every repo, so "26 of 27 mapped
+> unambiguously that way" cannot have been true of the method described.
+
+Collection titles do carry the service name, and the mapping is near-mechanical:
+`Buynana Wiki`→`buynana`, `Bookings Wiki`→`booking`, `Coordinators Wiki`→
+`coordinators`, `Kaioh Wiki`→`kaioh`, `Catalog Wiki`→`api-catalog`, `N8N Flows Wiki`→
+`n8n-workflows`, `Geodata wiki`→`api-geodata`, `Imaginary Wiki`→`strapi-imaginary`,
+`WeFlights Wiki`→`weflight-radar`, `{BI Wiki, Bi Wiki Internal}`→`dbt`. Backend/frontend
+pairs split on the suffix (`Payments Backend Wiki`→`api-payments`, `Payments Frontend
+Wiki`→`payments`). **Then open one page and check it describes that service** — the
+spot-check is what the overlap test was reaching for, and it costs one file read.
+
+**Never conclude "no collection" from a failed match.** `n8n-workflows` was recorded as
+having none; `N8N Flows Wiki` had existed since 2026-07-30 and was simply missing from
+`sources.md`, so it was absent from `src/outline/` rather than from the wiki. Before
+writing that a repo has no collection, list the live collections
+(`mcp__outline__list_collections`) and diff against `sources.md` — the export is a
+mirror of a manifest, not of the wiki.
 
 Two things still have to exist, and neither is the per-repo narrative:
 
