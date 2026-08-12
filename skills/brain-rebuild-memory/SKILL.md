@@ -119,10 +119,19 @@ Record all counts — they go in the Phase 5 digest.
          "inputs": ["src/personio/staff-roster.tsv", "src/clickup/Docs BUKTU/**", "outputs/services/**/*.agent.md"],
          "max_mtime": 1713398400,
          "content_hash": "sha256:..."
+       },
+       "memory/L1/teams.md": {
+         "inputs": [".super/brain.config.yml", "memory/L2/team-*.md", "src/personio/staff-roster.tsv"],
+         "max_mtime": 1713398400,
+         "content_hash": "sha256:..."
        }
      }
    }
    ```
+   Note `memory/L1/teams.md` (and `team-members.md`) list **`.super/brain.config.yml`** — the
+   `$BRAIN_CONFIG` file — as a first-class input. Config is an input like any other source: a
+   `teams[]` edit must make these targets dirty, and mtime alone carries that signal only if the
+   path is in the globs. See Phase 3's `teams.md` section.
    Missing / unparseable → treat every target as dirty (equivalent to full rebuild) and keep going.
 
 2. For every L2 and L1 target listed in Phases 2–3 below, compute `current_max_mtime` = max `mtime` of all files matched by that target's `inputs` globs. Primary check is mtime (fast, good enough on 446K-file `github/`).
@@ -296,8 +305,8 @@ Each source MOC contains:
 
 | L1 File | Derives from |
 |---------|-------------|
-| `teams.md` | All `memory/L2/team-*.md` files + `src/personio/staff-roster.tsv` |
-| `team-members.md` | `src/personio/staff-roster.tsv` + `memory/L2/team-*.md` members sections |
+| `teams.md` | All `memory/L2/team-*.md` files + `src/personio/staff-roster.tsv` + **`$BRAIN_CONFIG` `teams[]`** |
+| `team-members.md` | `src/personio/staff-roster.tsv` + `memory/L2/team-*.md` members sections + **`$BRAIN_CONFIG` `teams[]`** (for the Linear-team column) |
 | `product-areas.md` | Team L2 files (group features by product area) |
 | `business-domains.md` | `memory/L2/exco.md` + `memory/L2/intranet.md` + `memory/L2/one-pagers.md` |
 | `data-model.md` | `outputs/services/weroad/dbt.agent.md` + `outputs/services/weroad/dashboards.agent.md` + BigQuery metadata |
@@ -309,7 +318,11 @@ Each source MOC contains:
 
 #### `memory/L1/teams.md`
 
-Generate this file from `memory/L2/team-*.md` + `src/personio/staff-roster.tsv` + any team data in `src/linear/` or `src/clickup/`.
+Generate this file from `$BRAIN_CONFIG` `teams[]` + `memory/L2/team-*.md` + `src/personio/staff-roster.tsv` + any team data in `src/linear/` or `src/clickup/`.
+
+**`$BRAIN_CONFIG` is a declared input of this target** — it MUST appear in the target's `inputs` list in `memory/.rebuild-state.json` (as `.super/brain.config.yml`), so that editing `teams[]` marks `teams.md` dirty on the next incremental run. Without it a new team row sits in config and never reaches the table, and the prep skills go on re-deriving that calendar event by hand every run (observed 2026-08-06: the `GED - Deep dive` recurring event had no row).
+
+**Every `teams[]` row must produce a table row**, including non-squad functional teams with no IDP services (e.g. `GED`, `Content/SEO`). Conversely, do not invent rows with no config entry and no Personio/Linear backing. Verify each row's `Linear teams` cell against `mcp__linear__list_teams` (a team's Personio name is frequently NOT its Linear name — `GED` → `Design`, `Content` → `CONTENT&SEO`) and each `Members` count against Active rows in the roster.
 
 The file must contain a **machine-readable mapping table** at the top (after frontmatter) with these exact columns:
 
