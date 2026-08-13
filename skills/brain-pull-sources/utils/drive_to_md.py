@@ -1020,7 +1020,17 @@ def sync_content_for_folders(cache: dict, out_dir: str, folder_ids: set[str],
                     "local_path": rel,
                     "folder_id": fid,
                 }
-            mark = "✓" if status == "converted" else ("·" if status == "kept_binary" else "✗")
+            # "~" = content recovered but degraded. It must NOT share the "✗" of a
+            # real failure: a log that marks 65 successful recoveries as failures is
+            # the same misreporting this whole path was fixed to remove.
+            if status == "converted":
+                mark = "✓"
+            elif status == "converted_text_fallback":
+                mark = "~"
+            elif status == "kept_binary":
+                mark = "·"
+            else:
+                mark = "✗"
             print(f"  [{idx}/{total}] {mark} {name[:45]:<45} ({status_short}) [{status}]", flush=True)
 
     # For folders we didn't touch this run, rehydrate local_map from file_state
