@@ -10,22 +10,42 @@ document tree, mirror it as a folder hierarchy under src/outline/, and write the
 exported Markdown verbatim (keeping the leading H1 and absolute /doc/ links).
 
 Usage:
-    python outline_to_md.py <collection_url> [--token TOKEN] [--force] [--list]
+    python outline_to_md.py [<collection_url>] [--token TOKEN] [--force] [--list]
+                            [--exclude SUBSTR ...] [--include-test]
 
 Examples:
-    # Export a collection by URL
+    # Export EVERY collection the token can see (no argument, or just the base URL).
+    # This is the form sources.md uses — one manifest line instead of one per
+    # collection, so a collection created upstream is picked up automatically
+    # rather than silently missing until someone notices.
+    python outline_to_md.py
+    python outline_to_md.py https://docs.weroad.com/
+
+    # Export a single collection by URL
     python outline_to_md.py https://docs.weroad.com/collection/weroad-6YhKbLKB40/overview
 
-    # Accept a bare urlId or UUID
+    # Accept a bare urlId or UUID (NOT treated as all-collections — see _BASE_ONLY)
     python outline_to_md.py 6YhKbLKB40
 
     # Force re-export every document (ignore the incremental registry)
-    python outline_to_md.py https://docs.weroad.com/collection/weroad-6YhKbLKB40/overview --force
+    python outline_to_md.py --force
+
+    # All collections except some, by name substring
+    python outline_to_md.py --exclude 'Internal' --exclude 'Sandbox'
 
     # List previously exported collections and exit
     python outline_to_md.py --list
 
 Output is saved to:  src/outline/<collection name>/
+
+All-collections mode:
+    Enumerates `collections.list` (paginated) and exports each in name order.
+    Collections named `[TEST] …` are SKIPPED by default — sources.md used to carry
+    the `[TEST] Monkeys Services (simon test)` scratch collection commented out on
+    purpose, and collapsing the manifest to one line must not silently start
+    exporting it. `--include-test` opts back in.
+    Each collection is isolated: one failure is reported and the run continues,
+    with a non-zero exit at the end so pull_sources still marks the source failed.
 
 Environment:
     OUTLINE_API_TOKEN  -- Outline personal API token (if --token not provided)
@@ -224,6 +244,26 @@ def get_collection_info(token: str, ref: str) -> dict:
     return resp.get("data", {})
 
 
+def list_all_collections(token: str) -> list[dict]:
+    """Every collection the token can see, newest-API-order, fully paginated.
+
+    `collections.list` caps `limit` at 100 and WeRoad is at 34, but paginate
+    anyway: a silent truncation here would look exactly like "that collection
+    does not exist", which is the failure that hid `N8N Flows Wiki` for two
+    weeks while it sat un-exported (see the manifest note in sources.md).
+    """
+    out: list[dict] = []
+    offset, limit = 0, 100
+    while True:
+        resp = api_post(token, "collections.list", {"offset": offset, "limit": limit})
+        batch = resp.get("data", [])
+        out.extend(batch)
+        if len(batch) < limit:
+            break
+        offset += limit
+    return out
+
+
 def get_document_tree(token: str, collection_id: str) -> list[dict]:
     """Fetch the nested document nav tree for a collection."""
     resp = api_post(token, "collections.documents", {"id": collection_id})
@@ -321,12 +361,43 @@ def assign_paths(docs: list[dict], out_dir: str):
 
 # -- Main ---------------------------------------------------------------------
 
+# -- all-collections mode -----------------------------------------------------
+
+# A reference that names no specific collection: bare base URL, the host with or
+# without a trailing slash, or nothing at all. Anything containing /collection/
+# is a single-collection reference and is parsed by parse_collection_ref().
+#
+# The `\.` is load-bearing: a bare urlId ("6YhKbLKB40") also has no slash, so a
+# host pattern without the dot requirement classifies it as all-collections and
+# silently exports all 34 when the caller asked for one. A hostname has a dot;
+# an Outline urlId never does.
+_BASE_ONLY = re.compile(r"^(?:https?://)?[^/\s]+\.[^/\s]+/?$", re.I)
+
+
+def is_all_collections_ref(url: str | None) -> bool:
+    """True when the caller asked for every collection rather than one."""
+    if not url or not url.strip():
+        return True
+    u = url.strip()
+    if "/collection/" in u or "/doc/" in u:
+        return False
+    return bool(_BASE_ONLY.match(u))
+
+
+def collection_url(info: dict) -> str:
+    """Canonical overview URL for a collection, for the registry key."""
+    url_id = info.get("urlId") or info.get("id") or ""
+    slug = sanitize_filename(info.get("name") or "").lower().replace(" ", "-")
+    return f"{DEFAULT_BASE_URL}/collection/{slug}-{url_id}/overview"
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Export an Outline collection to src/outline/<collection name>/ as Markdown."
+        description="Export Outline collections to src/outline/<collection name>/ as Markdown."
     )
     parser.add_argument("url", nargs="?",
-                        help="Collection URL or urlId (e.g. https://docs.weroad.com/collection/weroad-6YhKbLKB40/overview)")
+                        help="Collection URL or urlId. Omit it, or pass just the base URL "
+                             "(https://docs.weroad.com/), to export EVERY collection the token can see.")
     parser.add_argument("--token", default=os.environ.get("OUTLINE_API_TOKEN", ""),
                         help="Outline API token (or set OUTLINE_API_TOKEN env var)")
     parser.add_argument("--list", action="store_true",
@@ -335,14 +406,17 @@ def main():
                         help="With --list, show every document per collection")
     parser.add_argument("--force", action="store_true",
                         help="Force re-export of every document even if unchanged")
+    parser.add_argument("--exclude", action="append", default=[], metavar="SUBSTR",
+                        help="In all-collections mode, skip collections whose name contains SUBSTR "
+                             "(case-insensitive, repeatable)")
+    parser.add_argument("--include-test", action="store_true",
+                        help="In all-collections mode, also export collections whose name starts "
+                             "with '[TEST]' (skipped by default)")
     args = parser.parse_args()
 
     if args.list:
         print_registry(verbose=args.verbose)
         return
-
-    if not args.url:
-        parser.error("url is required (unless using --list)")
 
     token = args.token
     if not token:
@@ -350,21 +424,96 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    ref = parse_collection_ref(args.url)
+    if is_all_collections_ref(args.url):
+        run_all_collections(token, args)
+        return
 
+    ref = parse_collection_ref(args.url)
+    try:
+        export_one(token, ref, args.url, force=args.force)
+    except CollectionError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+class CollectionError(RuntimeError):
+    """A single collection could not be exported."""
+
+
+def run_all_collections(token: str, args) -> None:
+    """Export every visible collection, one at a time.
+
+    One collection's failure must not discard the other 33 — each is isolated,
+    failures are collected, and the exit code reflects them so pull_sources
+    still records the source as failed.
+    """
+    print(f"No collection specified — exporting ALL collections from {DEFAULT_BASE_URL}")
+    try:
+        collections = list_all_collections(token)
+    except urllib.error.HTTPError as e:
+        print(f"ERROR: Could not list collections: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    skipped: list[str] = []
+    todo: list[dict] = []
+    for c in collections:
+        name = c.get("name") or ""
+        if not args.include_test and name.strip().startswith("[TEST]"):
+            skipped.append(f"{name} (test collection; --include-test to export)")
+            continue
+        hit = next((s for s in args.exclude if s.lower() in name.lower()), None)
+        if hit:
+            skipped.append(f"{name} (--exclude {hit!r})")
+            continue
+        todo.append(c)
+
+    # Stable, human-readable order so the log diffs cleanly run to run.
+    todo.sort(key=lambda c: (c.get("name") or "").lower())
+
+    print(f"  {len(collections)} visible, {len(todo)} to export, {len(skipped)} skipped")
+    for s in skipped:
+        print(f"    skip: {s}")
+
+    totals = {"new": 0, "updated": 0, "unchanged": 0}
+    failures: list[tuple[str, str]] = []
+    for i, c in enumerate(todo, 1):
+        name = c.get("name") or c.get("id")
+        print(f"\n=== [{i}/{len(todo)}] {name} ===")
+        try:
+            stats = export_one(token, c.get("urlId") or c.get("id"),
+                               collection_url(c), force=args.force)
+        except Exception as e:                      # noqa: BLE001 - isolate per collection
+            print(f"  ERROR: {e}", file=sys.stderr)
+            failures.append((str(name), str(e)))
+            continue
+        for k in totals:
+            totals[k] += stats.get(k, 0)
+
+    print(f"\n{'='*60}")
+    print(f"All collections: {totals['new']} new, {totals['updated']} updated, "
+          f"{totals['unchanged']} unchanged across {len(todo) - len(failures)} collections")
+    if skipped:
+        print(f"Skipped {len(skipped)}: " + "; ".join(skipped))
+    if failures:
+        print(f"FAILED {len(failures)}:", file=sys.stderr)
+        for name, err in failures:
+            print(f"  - {name}: {err}", file=sys.stderr)
+        sys.exit(1)
+
+
+def export_one(token: str, ref: str, url: str, force: bool = False) -> dict:
+    """Export a single collection. Raises CollectionError on failure."""
     # Resolve collection metadata
     print(f"Fetching collection info for {ref}...")
     try:
         info = get_collection_info(token, ref)
     except urllib.error.HTTPError as e:
-        print(f"ERROR: Could not fetch collection: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise CollectionError(f"Could not fetch collection {ref}: {e}") from e
     collection_id = info.get("id")
     collection_url_id = info.get("urlId", ref)
     collection_name = info.get("name") or ref
     if not collection_id:
-        print(f"ERROR: No collection found for {ref}", file=sys.stderr)
-        sys.exit(1)
+        raise CollectionError(f"No collection found for {ref}")
 
     safe_name = sanitize_filename(collection_name)
     out_dir = os.path.join(OUTPUT_BASE, safe_name)
@@ -372,9 +521,9 @@ def main():
     print(f"Collection: \"{collection_name}\"  ->  {os.path.relpath(out_dir, PROJECT_ROOT)}")
 
     existing = get_existing_doc_map(collection_id)
-    if existing and not args.force:
+    if existing and not force:
         print(f"  Found {len(existing)} documents in registry (comparing for changes)...")
-    elif args.force:
+    elif force:
         print("  Force mode: re-exporting all documents")
 
     # Fetch tree + updatedAt map
@@ -383,21 +532,20 @@ def main():
         tree = get_document_tree(token, collection_id)
         updated_map = list_documents(token, collection_id)
     except urllib.error.HTTPError as e:
-        print(f"ERROR: Could not list documents: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise CollectionError(f"Could not list documents for {collection_name}: {e}") from e
 
     docs: list[dict] = []
     flatten_tree(tree, None, updated_map, docs)
     print(f"  Found {len(docs)} documents.")
     if not docs:
-        print("No documents found. Exiting.")
-        return
+        print("No documents found — nothing to export.")
+        return {"total": 0, "new": 0, "updated": 0, "unchanged": 0}
 
     # Decide what needs updating
     for d in docs:
         prev = existing.get(d["id"])
         d["_needs_update"] = (
-            args.force
+            force
             or prev is None
             or prev.get("updated_at") != d.get("updated_at")
             or d.get("updated_at") is None  # can't prove unchanged -> refetch
@@ -409,7 +557,7 @@ def main():
     new_count = sum(1 for d in docs if d["_needs_update"] and d["id"] not in existing)
     upd_count = sum(1 for d in docs if d["_needs_update"] and d["id"] in existing)
     unchanged = len(docs) - new_count - upd_count
-    if not args.force:
+    if not force:
         print(f"  New: {new_count}, Updated: {upd_count}, Unchanged: {unchanged}")
 
     # Assign file paths for the whole tree (so unchanged docs keep stable paths too)
@@ -441,7 +589,7 @@ def main():
         print("  Nothing to export — all documents up to date.")
 
     upsert_registry(
-        url=args.url,
+        url=url,
         collection_id=collection_id,
         collection_url_id=collection_url_id,
         collection_name=collection_name,
@@ -453,6 +601,7 @@ def main():
 
     print(f"\nDone! {stats['new']} new, {stats['updated']} updated, {stats['unchanged']} unchanged "
           f"in {os.path.relpath(out_dir, PROJECT_ROOT)}")
+    return stats
 
 
 if __name__ == "__main__":

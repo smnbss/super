@@ -1,6 +1,8 @@
 #!/bin/bash
 # Outline collection to Markdown exporter wrapper
-# Usage: outline_to_md <outline_collection_url>
+# Usage: outline_to_md [<outline_collection_url>] [--force] [--list] [--exclude SUBSTR] [--include-test]
+#   With no URL (or just the base URL, https://docs.weroad.com/), exports EVERY
+#   collection the token can see. '[TEST] …' collections are skipped by default.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
