@@ -121,14 +121,38 @@ def gws_json(*args, **params) -> dict:
     return json.loads(out[i:] if i >= 0 else out)
 
 
-def gws_file(*args, output_path: str, **params) -> bool:
+def gws_file(*args, output_path: str, **params) -> tuple[bool, str]:
     """Run a gws drive command that writes output to a file.
-    output_path must be absolute; gws receives it as relative to PROJECT_ROOT."""
+    output_path must be absolute; gws receives it as relative to PROJECT_ROOT.
+
+    Returns (ok, reason). `reason` is the Drive API `reason` field when the call
+    failed (e.g. "exportSizeLimitExceeded"), else a trimmed error line, else "".
+    Never discard it: a bare boolean here is what made 234 conversion failures
+    undiagnosable on 2026-08-13 — the cause was a 403 nobody could see."""
     clean = {k: v for k, v in params.items() if v is not None}
     cmd = ["gws", "drive", *args,
            "--params", json.dumps(clean), "-o", _rel(output_path)]
     result = subprocess.run(cmd, capture_output=True, cwd=PROJECT_ROOT)
-    return result.returncode == 0
+    if result.returncode == 0 and os.path.exists(output_path):
+        return True, ""
+    # gws prints the API error as JSON on stdout AND a summary line on stderr,
+    # and it can exit 0 while writing nothing — so check both streams.
+    blob = (result.stdout or b"").decode("utf-8", "replace") + \
+           (result.stderr or b"").decode("utf-8", "replace")
+    reason = ""
+    m = re.search(r'"reason"\s*:\s*"([^"]+)"', blob)
+    if m:
+        reason = m.group(1)
+    else:
+        m = re.search(r'"message"\s*:\s*"([^"]+)"', blob)
+        if m:
+            reason = m.group(1)[:160]
+        else:
+            for line in blob.splitlines():
+                if line.strip().startswith("error"):
+                    reason = line.strip()[:160]
+                    break
+    return False, reason or "unknown"
 
 
 def list_children(parent_id: str) -> list[dict]:
@@ -363,6 +387,26 @@ EXPORT_MIME_TYPES: dict[str, tuple[str, str]] = {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"),
 }
 
+# Drive's export endpoint refuses Workspace->Office conversion above ~10 MB with
+# HTTP 403 `exportSizeLimitExceeded`. That is a Google limit, not something we can
+# raise. But a plain-text export of the SAME file has no such ceiling, because it
+# carries none of the embedded images that blow the budget. Text is what the brain
+# actually indexes, so falling back loses layout and keeps the content.
+#
+# Measured 2026-08-13 on "2026 H1 WeRoad Report for Investors_Final": pptx 403,
+# pdf 403, text/plain 14,583 B of real content (604 lines, the whole H1 narrative).
+EXPORT_FALLBACK_MIME_TYPES: dict[str, tuple[str, str]] = {
+    "application/vnd.google-apps.document": ("text/plain", ".txt"),
+    "application/vnd.google-apps.presentation": ("text/plain", ".txt"),
+    # Sheets have no text/plain export; CSV yields the FIRST SHEET ONLY. Taking it
+    # anyway beats nothing, but the stub notes the truncation so no one reads a
+    # one-tab CSV as the whole workbook.
+    "application/vnd.google-apps.spreadsheet": ("text/csv", ".csv"),
+}
+
+# Export failures we can explain. Anything else keeps its raw reason string.
+EXPORT_SIZE_LIMIT_REASON = "exportSizeLimitExceeded"
+
 SKIP_MIME_TYPES = {
     "application/vnd.google-apps.drawing",
     "application/vnd.google-apps.form",
@@ -471,9 +515,49 @@ def download_and_convert(file_info: dict, target_dir: str,
         export_mime, ext = EXPORT_MIME_TYPES[mime_type]
         office_path = os.path.join(target_dir, f"{safe_name}{ext}")
         md_path = os.path.join(target_dir, f"{safe_name}.md")
-        if not gws_file("files", "export", output_path=office_path,
-                       fileId=file_id, mimeType=export_mime):
-            return None, "failed"
+        ok, reason = gws_file("files", "export", output_path=office_path,
+                              fileId=file_id, mimeType=export_mime)
+        if not ok:
+            # Drive refuses Workspace->Office above ~10 MB. Retry as plain text:
+            # same file, no embedded images, no size ceiling — and text is what
+            # gets indexed anyway. Only the rich export is size-capped.
+            fb = EXPORT_FALLBACK_MIME_TYPES.get(mime_type)
+            if fb and reason == EXPORT_SIZE_LIMIT_REASON:
+                fb_mime, fb_ext = fb
+                fb_path = os.path.join(target_dir, f"{safe_name}{fb_ext}")
+                fb_ok, fb_reason = gws_file("files", "export", output_path=fb_path,
+                                            fileId=file_id, mimeType=fb_mime)
+                if fb_ok:
+                    meta = _build_meta(file_info, drive_rel_path)
+                    with open(fb_path, encoding="utf-8", errors="replace") as fh:
+                        body = fh.read()
+                    note = (f"> Exported as **plain text**: the rich "
+                            f"({export_mime.rsplit('.', 1)[-1]}) export exceeds Drive's "
+                            f"~10 MB `exportSizeLimitExceeded` cap. Text is complete; "
+                            f"layout, images and speaker notes are not. "
+                            f"See [Open in Drive]({meta['gdrive_url']}).\n")
+                    if fb_mime == "text/csv":
+                        note += (">\n> ⚠️ CSV export carries the **first sheet only** — "
+                                 "do not read this as the whole workbook.\n")
+                    with open(md_path, "w", encoding="utf-8") as fh:
+                        fh.write(stamp_frontmatter(f"{note}\n{body}", meta))
+                    os.remove(fb_path)
+                    print(f"  INFO: {name}: rich export too large, recovered "
+                          f"{len(body)} B as plain text", file=sys.stderr)
+                    return md_path, "converted_text_fallback"
+                reason = f"{reason}+fallback:{fb_reason}"
+            # Hard failure. Still write a stub so the file is VISIBLE in the brain
+            # with its Drive link and the reason — silence is what let a whole
+            # investor deck read as "not there" instead of "could not export".
+            print(f"  WARN: export failed for {name}: {reason}", file=sys.stderr)
+            meta = _build_meta(file_info, drive_rel_path)
+            with open(md_path, "w", encoding="utf-8") as fh:
+                fh.write(stamp_frontmatter(
+                    f"> **Content unavailable — Drive export failed** "
+                    f"(`{reason}`). This file exists but its content is NOT in the "
+                    f"brain; do not treat its absence as evidence about the content. "
+                    f"See [Open in Drive]({meta['gdrive_url']}).\n", meta))
+            return md_path, f"failed_{reason.split('+')[0]}"
         try:
             text = _convert_with_timeout(office_path)
             meta = _build_meta(file_info, drive_rel_path)
@@ -505,9 +589,11 @@ def download_and_convert(file_info: dict, target_dir: str,
     # Binary / plain files — download via alt=media
     ext = raw_ext or EXT_MAP.get(mime_type, "")
     output_path = os.path.join(target_dir, f"{safe_name}{ext}")
-    if not gws_file("files", "get", output_path=output_path,
-                   fileId=file_id, alt="media", supportsAllDrives=True):
-        return None, "failed"
+    ok, reason = gws_file("files", "get", output_path=output_path,
+                          fileId=file_id, alt="media", supportsAllDrives=True)
+    if not ok:
+        print(f"  WARN: download failed for {name}: {reason}", file=sys.stderr)
+        return None, f"failed_{reason}"
 
     # Try conversion for formats markitdown handles
     if ext.lower() in {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".html"}:
@@ -845,7 +931,11 @@ def sync_content_for_folders(cache: dict, out_dir: str, folder_ids: set[str],
     cache.setdefault("files", {})
     file_state: dict = cache["files"]
 
-    stats = {"converted": 0, "kept_binary": 0, "skipped": 0, "failed": 0, "unchanged": 0}
+    stats = {"converted": 0, "kept_binary": 0, "skipped": 0, "failed": 0,
+             "unchanged": 0, "text_fallback": 0}
+    # status -> count, so the summary can say WHY things failed instead of just
+    # how many. A bare count is what let 234 failures sit under "0 failed".
+    failure_reasons: dict[str, int] = {}
     # file_id -> relative md filename (used by INDEX rendering)
     local_map: dict[str, str] = {}
 
@@ -897,12 +987,18 @@ def sync_content_for_folders(cache: dict, out_dir: str, folder_ids: set[str],
             )
             if status == "converted":
                 stats["converted"] += 1
+            elif status == "converted_text_fallback":
+                # Counted apart from "converted" on purpose: the content is there
+                # but degraded (no layout/images), and a run that needs this a lot
+                # is a run worth looking at.
+                stats["text_fallback"] += 1
             elif status == "kept_binary":
                 stats["kept_binary"] += 1
             elif status.startswith("skipped"):
                 stats["skipped"] += 1
             else:
                 stats["failed"] += 1
+                failure_reasons[status] = failure_reasons.get(status, 0) + 1
 
             if local_path and local_path.endswith(".md"):
                 rel = os.path.relpath(local_path, PROJECT_ROOT)
@@ -937,6 +1033,7 @@ def sync_content_for_folders(cache: dict, out_dir: str, folder_ids: set[str],
         if os.path.dirname(abs_path) == expected_dir and os.path.exists(abs_path):
             local_map[file_id] = os.path.basename(abs_path)
 
+    stats["_failure_reasons"] = failure_reasons
     return local_map, stats
 
 
@@ -1187,8 +1284,18 @@ def main() -> None:
             f"{content_stats.get('unchanged', 0)} unchanged, "
             f"{content_stats.get('kept_binary', 0)} kept binary, "
             f"{content_stats.get('skipped', 0)} skipped, "
+            f"{content_stats.get('text_fallback', 0)} text-fallback, "
             f"{content_stats.get('failed', 0)} failed."
         )
+        # Name the reasons. An unexplained count is a count nobody acts on.
+        reasons = content_stats.get("_failure_reasons") or {}
+        if reasons:
+            top = sorted(reasons.items(), key=lambda kv: -kv[1])
+            summary += "\n  FAILURE REASONS: " + ", ".join(
+                f"{k.removeprefix('failed_')}={v}" for k, v in top[:6])
+            summary += ("\n  ⚠️  Those files have a stub .md recording the failure — "
+                        "their CONTENT is not in the brain. Absence of content is not "
+                        "evidence about the content.")
     summary += f" Removed {removed} stale."
     print(summary)
     print(f"Root index: {_rel(os.path.join(out_dir, INDEX_NAME))}")
