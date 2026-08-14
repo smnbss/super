@@ -46,12 +46,24 @@ to rediscover what the existing doc already says.
 > until that repo happens to move again, which may be never.
 >
 > Measured on the live brain, 2026-08-14: **14 of 100 docs were behind their clone's
-> HEAD, and all 14 were absent from that day's 22-line ledger.** Nine were clones
-> `github_clone` had skipped for uncommitted changes — and a skipped clone's HEAD
-> *cannot* move during the run, so those docs were unreachable **by construction**,
-> not by accident. Examples: `cashew.agent.md` doc=`f0bd3496` clone=`b22a1277`;
-> `cli.agent.md` doc=`45551bf2` clone=`5046f3bc`; `api-catalog.db.agent.md`
-> doc=`815da212` clone=`f07784ee`.
+> HEAD, and all 14 were absent from that day's 22-line ledger.** Two independent
+> causes, neither visible to a movement ledger:
+>
+> | Cause | Docs | Clones | Which |
+> |---|---|---|---|
+> | Clone **dirty** → `github_clone` skipped it, so its HEAD *cannot* move during the run. Unreachable **by construction**, not by accident. | **9** | **8** | `api-catalog.db`, `api-payments.db`, `api-spendsync.db`, `booking.db`, `cashew` **+** `cashew.db`, `community.db`, `message-board.db`, `my.db` |
+> | Clone **clean**, HEAD simply moved on a day the doc was not regenerated. | 5 | 5 | `super`, `api-draghi`, `api-partner.db`, `api-travel-catalog.db`, `cli` |
+>
+> **9 docs but 8 clones** — `cashew` carries both `cashew.agent.md` and
+> `cashew.db.agent.md`, so a per-clone count and a per-doc count differ. State which
+> one you mean; the work-list is counted in **docs**.
+>
+> ⚠️ **Two of the five clean ones are on non-default branches** — `api-partner` on
+> `ai-creation`, `cli` on `fix/wr-personio-stale-cdp-port` (4 ahead of `origin/main`).
+> `git rev-parse HEAD` there is a *branch tip*, so a doc regenerated from it
+> **documents a feature branch, not `main`**. Report the branch in the sweep output
+> whenever it is not the default, and never let a doc silently describe unshipped
+> work as production architecture.
 
 **Compute the work-list by comparing every doc's recorded `head:` against its
 clone's actual HEAD.** This is a deterministic shell sweep over ~100 docs — about a
@@ -80,7 +92,13 @@ find outputs/services -name '*.agent.md' | while read -r DOC; do
   if [ -z "$RECORDED" ]; then echo "NO-STAMP	$REL	$REPO"; continue; fi
   R=$(git -C "$REPO" rev-parse -q --verify "$RECORDED^{commit}" 2>/dev/null || echo unknown)
   A=$(git -C "$REPO" rev-parse HEAD)
-  [ "$R" = "$A" ] || echo "DIVERGED	$REL	$REPO	${RECORDED:0:8}..${A:0:8}"
+  # Flag a non-default branch and a dirty tree: HEAD on a feature branch means a
+  # regenerated doc would describe unshipped work, and a dirty clone is one
+  # github_clone skipped — the reason it is missing from the ledger at all.
+  BR=$(git -C "$REPO" rev-parse --abbrev-ref HEAD)
+  case "$BR" in main|master) BRN="";; *) BRN=" branch=$BR";; esac
+  [ -n "$(git -C "$REPO" status --porcelain)" ] && BRN="$BRN dirty";
+  [ "$R" = "$A" ] || echo "DIVERGED	$REL	$REPO	${RECORDED:0:8}..${A:0:8}$BRN"
 done
 ```
 
