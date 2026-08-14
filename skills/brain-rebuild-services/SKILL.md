@@ -288,14 +288,40 @@ better than anything this skill can generate — it is written by the people who
 own the code, it carries a Feature map, a Glossary and per-feature pages, and it
 is reviewed. Duplicating it here is both waste and a second version to go stale.
 
+**THE TEST IS "DOES AN OUTLINE COLLECTION EXIST FOR THIS REPO", NOT A PAGE COUNT.**
+
 ```bash
+# 1. is there a collection for this repo?  (map by NAME, per the rule below)
+ls -d "src/outline/<Collection> Wiki" 2>/dev/null && \
+  find "src/outline/<Collection> Wiki" -name '*.md' | wc -l
+# 2. confirm it describes THIS SERVICE — one file read, non-negotiable
+ls "src/outline/<Collection> Wiki"          # expect <service>.md + Tech/
+# 3. hint only, never the gate:
 find <repo-path>/docs/domain -name '*.md' 2>/dev/null | wc -l
 ```
 
-**≥ 10 pages → docs-first repo.** (Verified 2026-08-05: 36 jungle repos qualify —
-api-catalog 63, coordinators 53, kaioh 48, api-partner 48, booking 41, buynana 37,
-…. The in-repo tree is byte-authoritative; the Outline copy only reformats
-markdown, so read the clone, never the export.)
+> ⚠️ **This gate was `docs/domain >= 10` until 2026-08-14 and that threshold LEAKS.**
+> `api-draghi` has **9** pages under `docs/domain`, one short of the line — while
+> `Draghi Wiki` carries **15** published pages that fully supersede its doc. So the
+> doc survived the 2026-08-12 sweep, was regenerated on 08-14, and would have been
+> regenerated again every day, because the count being tested was the wrong side of
+> the mirror. **A repo can publish more to Outline than it keeps under `docs/domain`**
+> (hand-authored wiki pages, or `doc-sync` procedures pointing at another path), so the
+> published collection is the authority and the in-repo count is only a hint.
+>
+> Conversely a large `docs/domain` with **no** collection is NOT docs-first for this
+> purpose — `mailcarrier` has 14 pages and no wiki, so its `.agent.md` stays. The rule
+> is about what exists **in `src/outline/`**, which is what readers and gbrain actually
+> reach.
+
+⚠️ **AND A NAME MATCH IS NOT ENOUGH — READ ONE PAGE.** `CRM Wiki` is **190 pages** and
+matches `weroad/crm` by name perfectly, yet it documents the **CRM business domain**
+(ActiveCampaign/Braze, MKTG Ops, onboarding — 97 pages mention campaign tooling, **0**
+mention NestJS/GraphQL/Prisma/`api/src`) and `crm`'s own `docs/domain` is **empty**. It
+supersedes nothing. Deleting `crm.agent.md` on the name match alone would have destroyed
+the only documentation of that service and reversed a decision Simone took on 2026-08-13.
+The one-page read is what separates `Draghi Wiki` (`Draghi — currency & exchange-rate
+service.md` + `Tech/`) from `CRM Wiki` (`CRM`, `Knowledge Sharing`, `MKTG Ops`).
 
 ### A docs-first repo gets NO `.agent.md` at all
 
@@ -350,7 +376,15 @@ mirror of a manifest, not of the wiki.
 
 Two things still have to exist, and neither is the per-repo narrative:
 
-- **`.db.agent.md` stays, in full.** The wikis do not document columns. 34 survive.
+- **`.db.agent.md` stays, in full.** The wikis do not document columns — **re-measured
+  2026-08-14 and still true**: `Catalog Wiki` gives a column table for **0** of the 98
+  tables in `api-catalog.db.agent.md`; `Draghi Wiki` **0 of 15 pages** carry any schema;
+  `Beye Wiki` reaches **1 of 14** tables. **31 jungle repos have now created an empty
+  `docs/domain/tech/db/` directory** — the slot exists, the content does not. When those
+  fill in, re-run the measurement and delete the `.db` docs the wikis actually replace;
+  until then a deleted `.db.agent.md` loses the only column-level reference there is.
+  **34 survive** — unchanged by the 2026-08-12 and 08-14 sweeps, which deleted only
+  `.agent.md` files (28 of the 34 sit under `weroad/jungle/`).
 - **The `cross/` RabbitMQ topology files stay**, and Step 4 still runs for docs-first
   repos — read exchange/queue/routing-key **names** from source for that purpose only.
   Do not let it become a pretext for re-reading controllers.
