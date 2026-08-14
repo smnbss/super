@@ -100,14 +100,50 @@ if [[ -d "$TARGET/.git" ]]; then
   # branch pointer, so committed work on a feature branch disappears too. So:
   # look before overwriting, and prefer merging to resetting whenever there is
   # anything local to lose.
-  DIRTY=""
-  [[ -n "$(git status --porcelain 2>/dev/null)" ]] && DIRTY="yes"
+  # ...but not everything dirty is "work". A TRACKED local-config file that the
+  # dev stack rewrites — `deploy/*.env` — is edited on every developer machine and
+  # committed on none, so treating it as local work freezes the clone PERMANENTLY:
+  # dirty -> skipped -> never updated -> dirty again tomorrow. Measured 2026-08-14:
+  # eight jungle clones stuck at 2026-08-07, api-catalog 57 commits behind main,
+  # my 24, booking 17, community 11 — every one of them dirty on nothing but a
+  # deploy/*.env file. Their service docs were therefore being written from
+  # week-old code.
+  #
+  # So classify the dirt. Noise-only -> stash, update, restore. Anything else ->
+  # skip, exactly as before. Only " M " (tracked, modified, unstaged) can be
+  # noise; staged, deleted, renamed and untracked entries all stay "real work",
+  # because those are shapes a human made deliberately.
+  NOISE_RE='(^|/)deploy/[^/]*\.env$'
+  DIRTY_RAW="$(git status --porcelain 2>/dev/null)"
+  DIRTY=""; NOISE=""
+  if [[ -n "$DIRTY_RAW" ]]; then
+    NON_MODIFIED="$(printf '%s\n' "$DIRTY_RAW" | grep -v '^ M ' || true)"
+    NON_NOISE="$(printf '%s\n' "$DIRTY_RAW" | grep '^ M ' | sed 's/^ M //' \
+                  | grep -vE "$NOISE_RE" || true)"
+    if [[ -n "$NON_MODIFIED" || -n "$NON_NOISE" ]]; then DIRTY="yes"; else NOISE="yes"; fi
+  fi
   CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
 
   if git fetch origin 2>/dev/null; then
     # Commits reachable from HEAD but not from the remote default branch. Counted
     # after the fetch so the comparison is against the freshly-updated remote.
     AHEAD="$(git rev-list --count "origin/$DEFAULT_BRANCH..HEAD" 2>/dev/null || echo 0)"
+
+    # Park noise-only dirt so the ladder below sees a clean tree, then put it back.
+    # Stashed AFTER the fetch succeeded on purpose: the fetch-failure path can
+    # `rm -rf` the clone, and a stash lives inside .git, so stashing earlier would
+    # put the developer's local config somewhere that path deletes.
+    STASHED=""
+    if [[ -n "$NOISE" ]]; then
+      if git stash push --quiet -m "github_clone: local dev config, restored automatically" 2>/dev/null; then
+        STASHED="yes"
+      else
+        # Could not park it — fall back to the old behaviour rather than risk it.
+        echo "⚠ $OWNER/$REPO (could not stash local dev config — left untouched)"
+        report_line "$OWNER/$REPO" "skipped — local dev config present and could not be stashed"
+        exit 0
+      fi
+    fi
 
     if [[ -n "$DIRTY" ]]; then
       # Uncommitted changes: touch nothing at all. Merging would refuse or
@@ -147,13 +183,28 @@ if [[ -d "$TARGET/.git" ]]; then
         exit 1
       fi
     fi
+    # Restore the parked dev config. A conflict here means upstream changed the
+    # same env file: keep the stash rather than dropping it, and say so loudly —
+    # the local values are recoverable with `git stash pop` but the clone is now
+    # carrying upstream's version.
+    if [[ -n "$STASHED" ]]; then
+      if git stash pop --quiet 2>/dev/null; then
+        :
+      else
+        git checkout --theirs . >/dev/null 2>&1 || true
+        echo "⚠ $OWNER/$REPO (updated, but local dev config conflicts with upstream — kept in \`git stash\`)"
+        report_line "$OWNER/$REPO" "updated, but local \`deploy/*.env\` could NOT be restored (upstream changed the same file) — your values are preserved: run \`git stash pop\` in \`$TARGET\`"
+      fi
+    fi
+
   else
     # Fetch failed. Re-cloning means `rm -rf`, so it is only ever safe on a clone
     # with nothing local in it — otherwise the recovery is more destructive than
-    # the problem it fixes.
-    if [[ -n "$DIRTY" || "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+    # the problem it fixes. NOISE counts as local: a deploy/*.env holds the
+    # developer's local ports and credentials, and rm -rf takes it with no copy.
+    if [[ -n "$DIRTY" || -n "$NOISE" || "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
       echo "⚠ $OWNER/$REPO (fetch failed — has local work, NOT re-cloned)"
-      report_line "$OWNER/$REPO" "fetch failed and local work present (\`$CURRENT_BRANCH\`${DIRTY:+, uncommitted changes}) — left as-is instead of re-cloning"
+      report_line "$OWNER/$REPO" "fetch failed and local work present (\`$CURRENT_BRANCH\`${DIRTY:+, uncommitted changes}${NOISE:+, local \`deploy/*.env\`}) — left as-is instead of re-cloning"
     else
       echo "⚠ $OWNER/$REPO (fetch failed, re-cloning)"
       cd "$PROJECT_ROOT"
