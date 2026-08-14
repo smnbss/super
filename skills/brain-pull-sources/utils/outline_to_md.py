@@ -62,6 +62,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import urllib.request
 import urllib.error
@@ -122,6 +123,37 @@ def get_existing_doc_map(collection_id: str) -> dict[str, dict]:
         if entry.get("collection_id") == collection_id:
             return {d["doc_id"]: d for d in entry.get("documents", [])}
     return {}
+
+
+def get_recorded_output_path(collection_id: str) -> str | None:
+    """The output_path this collection was last exported to, or None."""
+    for entry in load_registry():
+        if entry.get("collection_id") == collection_id:
+            return entry.get("output_path")
+    return None
+
+
+def prune_renamed_output_dir(old_rel: str, new_rel: str) -> None:
+    """Remove the directory a renamed collection used to export to.
+
+    Called ONLY after the new path has been written successfully — see the
+    ordering note in export_one(). Deleting first would be data loss, because
+    the incremental pass would then skip every doc whose `updatedAt` had not
+    changed and leave the new directory nearly empty.
+    """
+    if not old_rel or old_rel == new_rel:
+        return
+    old_abs = os.path.realpath(os.path.join(PROJECT_ROOT, old_rel))
+    base_abs = os.path.realpath(os.path.join(PROJECT_ROOT, OUTPUT_BASE))
+    # Never delete outside src/outline/, and never the base itself.
+    if not old_abs.startswith(base_abs + os.sep) or old_abs == base_abs:
+        print(f"  Refusing to prune {old_rel!r}: outside {OUTPUT_BASE}", file=sys.stderr)
+        return
+    if not os.path.isdir(old_abs):
+        return
+    n = sum(len(f) for _, _, f in os.walk(old_abs))
+    shutil.rmtree(old_abs)
+    print(f"  Pruned old export dir {old_rel!r} ({n} files) — collection was renamed")
 
 
 def upsert_registry(url: str, collection_id: str, collection_url_id: str,
@@ -489,6 +521,34 @@ def run_all_collections(token: str, args) -> None:
         for k in totals:
             totals[k] += stats.get(k, 0)
 
+    # --- Orphan sweep --------------------------------------------------------
+    # Per-collection rename detection only remembers ONE previous path, so a
+    # collection renamed twice between exports leaves the older directory behind
+    # forever (observed: `Beye Wiki` survived `Beye Wiki` -> `src/weroad/beye` ->
+    # `Beye Code Wiki`). In all-collections mode we know the complete set of live
+    # output paths, so anything else under src/outline/ is provably an orphan.
+    #
+    # Only runs when the whole enumeration succeeded: with a failed collection the
+    # live set is incomplete, and a directory would be deleted for having failed
+    # to export rather than for being stale.
+    if not failures:
+        claimed = {e.get("output_path") for e in load_registry() if e.get("output_path")}
+        skipped_names = {sanitize_filename(c.get("name") or "") for c in collections} - \
+                        {sanitize_filename(c.get("name") or "") for c in todo}
+        for name in sorted(os.listdir(OUTPUT_BASE)):
+            d = os.path.join(OUTPUT_BASE, name)
+            if not os.path.isdir(d) or name.startswith("."):
+                continue
+            rel = os.path.relpath(d, PROJECT_ROOT)
+            if rel in claimed or name in skipped_names:
+                continue
+            n = sum(len(f) for _, _, f in os.walk(d))
+            shutil.rmtree(d)
+            print(f"  Orphan swept: {rel!r} ({n} files) — no collection exports here")
+    else:
+        print("  Orphan sweep SKIPPED — a collection failed, so the live set is incomplete",
+              file=sys.stderr)
+
     print(f"\n{'='*60}")
     print(f"All collections: {totals['new']} new, {totals['updated']} updated, "
           f"{totals['unchanged']} unchanged across {len(todo) - len(failures)} collections")
@@ -518,7 +578,29 @@ def export_one(token: str, ref: str, url: str, force: bool = False) -> dict:
     safe_name = sanitize_filename(collection_name)
     out_dir = os.path.join(OUTPUT_BASE, safe_name)
     os.makedirs(out_dir, exist_ok=True)
-    print(f"Collection: \"{collection_name}\"  ->  {os.path.relpath(out_dir, PROJECT_ROOT)}")
+    new_rel = os.path.relpath(out_dir, PROJECT_ROOT)
+    print(f"Collection: \"{collection_name}\"  ->  {new_rel}")
+
+    # --- Rename detection ----------------------------------------------------
+    # The output directory is derived from the collection NAME, but identity is
+    # the collection ID. Rename a collection upstream and the next export writes
+    # to a new directory, orphaning the old one — src/outline/ accumulates a
+    # folder per historical name. Observed live 2026-08-14 on one collection
+    # renamed twice in a day: `Beye Wiki` -> `src/weroad/beye` -> `Beye Code Wiki`.
+    #
+    # ORDER MATTERS, and getting it wrong destroys content: the incremental pass
+    # skips any doc whose `updatedAt` is unchanged, so on a rename it writes only
+    # the docs that genuinely changed and leaves the rest at the OLD path. That is
+    # exactly what happened — the new dir held 1 page while the old held 34. So a
+    # rename must FORCE a full re-export, and the old dir may only be pruned
+    # AFTER that write succeeds.
+    old_rel = get_recorded_output_path(collection_id)
+    renamed_from = None
+    if old_rel and old_rel != new_rel:
+        renamed_from = old_rel
+        force = True
+        print(f"  RENAMED: was {old_rel!r} — forcing a full re-export, "
+              f"old directory pruned once this one is written")
 
     existing = get_existing_doc_map(collection_id)
     if existing and not force:
@@ -587,6 +669,17 @@ def export_one(token: str, ref: str, url: str, force: bool = False) -> dict:
         print(f"  [{len(to_write)}/{len(to_write)}] Done!          ")
     else:
         print("  Nothing to export — all documents up to date.")
+
+    # Prune the pre-rename directory only now: every doc has been written to the
+    # new path above, so the old copy is genuinely redundant rather than the only copy.
+    if renamed_from:
+        written = sum(1 for d in docs if d.get("_exported"))
+        if written >= len(docs) and len(docs) > 0:
+            prune_renamed_output_dir(renamed_from, os.path.relpath(out_dir, PROJECT_ROOT))
+        else:
+            print(f"  KEEPING {renamed_from!r}: only {written}/{len(docs)} docs written to the "
+                  f"new path, so the old directory is still the more complete copy",
+                  file=sys.stderr)
 
     upsert_registry(
         url=url,

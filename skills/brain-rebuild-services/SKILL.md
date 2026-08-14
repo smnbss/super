@@ -303,14 +303,44 @@ else echo "generate the doc"; fi
 ls "$COLL"     # then CONFIRM by eye: expect <service>.md + Tech/ , not business folders
 ```
 
-**Neither side alone is sufficient, and each has a live counter-example:**
+**Use `Tech/`, NOT a page count.** A `doc-sync` mirror always lands a `<service>.md`
+plus a `Tech/` subtree; a hand-written business wiki never does. Measured 2026-08-14 —
+this separates cleanly **at every size**, which a threshold does not:
 
-| repo | collection | wiki pages | `docs/domain` | verdict |
-|---|---|---|---|---|
-| `api-draghi` | Draghi Wiki | 15 | 9 | **docs-first** — deleted 2026-08-14 |
-| `beye` | Beye Wiki | 34 | 24 | **docs-first** — deleted 2026-08-14 |
-| `crm` | CRM Wiki | **190** | **0** | **KEEP** — big collection, but the repo feeds nothing |
-| `mailcarrier` | — | 0 | 14 | **KEEP** — in-repo docs, nothing published |
+| collection | `Tech/` | pages | what it is |
+|---|---|---|---|
+| Draghi Wiki | yes | 15 | service mirror |
+| Beye Code Wiki | yes | 34 | service mirror |
+| Mailcarrier Wiki | yes | 20 | service mirror |
+| Pdf Factory Wiki | yes | **8** | service mirror — a page count of ≥10 would have missed it |
+| PgSync Code Wiki | yes | **8** | service mirror — same |
+| CRM Wiki | **no** | **190** | business wiki (MKTG Ops, onboarding) |
+| WeRoad | **no** | **512** | knowledge base |
+| 🐵 Monkeys Wiki | **no** | **927** | knowledge base |
+| BI Wiki | **no** | **205** | warehouse dictionary |
+
+⚠️⚠️ **THIRD CONDITION, and it is the one that stops this rule destroying knowledge: a
+`Tech/` mirror is often COMPLEMENTARY, not superseding.** `doc-sync` mirrors
+`docs/domain/` — behaviour and business-rule narrative. It does **not** carry env tables,
+middleware ordering, Zod schemas, CI, Helm/K8s values, Dockerfile/`TARGETARCH`, migration
+counts, or cross-repo caller facts. Three docs say so in their own words, independently:
+
+> *"Division of labour: the tree/wiki is behaviour and business-rule narrative, with **no**
+> file paths, class names, env vars, middleware ordering, Zod schemas, CI, Helm or
+> migration counts — those live only here. Complementary, not redundant."* — `mailcarrier`
+
+Verified on `pdfactory`: `TARGETARCH` appears on **0 of its 8 wiki pages**, and the doc
+records a release-please version-of-record trap, that `POST /merge` has **no caller
+anywhere in the jungle checkout**, and that `booking/api` still sends a bearer token
+**nothing validates** (auth was deleted deliberately in `0ad5a38`, 2022-11-04) — all
+cross-repo or infra facts a per-repo wiki structurally cannot hold.
+
+**So before deleting, grep the doc for `Division of labour` / `live only here` and, if
+present, verify one named omission against the collection.** `api-draghi` and `beye`
+carried no such claim and were deleted 2026-08-14. `mailcarrier`, `pdfactory` and `pgsync`
+all do, and are **KEPT** — their wikis are 8–20 page behaviour mirrors, not supersets.
+A wiki existing is necessary but not sufficient; it must actually contain what you are
+about to delete.
 
 > ⚠️ **This gate was `docs/domain >= 10` until 2026-08-14 and that threshold LEAKS.**
 > `api-draghi` has **9** pages under `docs/domain`, one short of the line — while
