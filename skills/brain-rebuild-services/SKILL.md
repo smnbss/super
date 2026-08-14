@@ -288,17 +288,29 @@ better than anything this skill can generate — it is written by the people who
 own the code, it carries a Feature map, a Glossary and per-feature pages, and it
 is reviewed. Duplicating it here is both waste and a second version to go stale.
 
-**THE TEST IS "DOES AN OUTLINE COLLECTION EXIST FOR THIS REPO", NOT A PAGE COUNT.**
+**THE TEST HAS TWO SIDES AND BOTH MUST HOLD.** A collection is only a *mirror of this
+repo* if the repo actually feeds one. Check published-collection **AND** in-repo tree:
 
 ```bash
-# 1. is there a collection for this repo?  (map by NAME, per the rule below)
-ls -d "src/outline/<Collection> Wiki" 2>/dev/null && \
-  find "src/outline/<Collection> Wiki" -name '*.md' | wc -l
-# 2. confirm it describes THIS SERVICE — one file read, non-negotiable
-ls "src/outline/<Collection> Wiki"          # expect <service>.md + Tech/
-# 3. hint only, never the gate:
-find <repo-path>/docs/domain -name '*.md' 2>/dev/null | wc -l
+COLL="src/outline/<Collection> Wiki"                       # map by NAME, per the rule below
+WIKI=$( [ -d "$COLL" ] && find "$COLL" -name '*.md' | wc -l || echo 0 )
+DOMAIN=$(find <repo-path>/docs/domain -name '*.md' 2>/dev/null | wc -l)
+
+# docs-first  <=>  a published collection EXISTS *and* this repo feeds a docs/domain tree
+if [ "$WIKI" -ge 10 ] && [ "$DOMAIN" -gt 0 ]; then echo "docs-first -> NO .agent.md"
+else echo "generate the doc"; fi
+
+ls "$COLL"     # then CONFIRM by eye: expect <service>.md + Tech/ , not business folders
 ```
+
+**Neither side alone is sufficient, and each has a live counter-example:**
+
+| repo | collection | wiki pages | `docs/domain` | verdict |
+|---|---|---|---|---|
+| `api-draghi` | Draghi Wiki | 15 | 9 | **docs-first** — deleted 2026-08-14 |
+| `beye` | Beye Wiki | 34 | 24 | **docs-first** — deleted 2026-08-14 |
+| `crm` | CRM Wiki | **190** | **0** | **KEEP** — big collection, but the repo feeds nothing |
+| `mailcarrier` | — | 0 | 14 | **KEEP** — in-repo docs, nothing published |
 
 > ⚠️ **This gate was `docs/domain >= 10` until 2026-08-14 and that threshold LEAKS.**
 > `api-draghi` has **9** pages under `docs/domain`, one short of the line — while
