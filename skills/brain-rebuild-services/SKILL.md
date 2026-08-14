@@ -124,14 +124,20 @@ Three rules this encodes, each of which cost something to learn:
   | **Service of a monorepo** — the doc is named after a service, its repo is the monorepo | `api-rooming` and `tour-planner-buynana` → `weroad/buynana`; `admin-coordinators` and `api-coordinators{,.db}` → `weroad/coordinators` | Gate against the **monorepo** clone (`github/weroad/jungle/{buynana,coordinators}`). Both are cloned, so all four are gateable — they were never truly unresolvable. |
   | **Frozen `SUPERSEDED` doc** | `admin-coordinators`, `api-coordinators{,.db}` | Gateable, but **frozen by policy: never regenerate.** They describe the pre-consolidation repos. Note the IDP still lists both services against `weroad/coordinators` — the *repository* was consolidated, the *deployed applications* were not. |
 
-  ⚠️ **A stale clone is worse than a missing one.** `github/weroad/api-rooming` still
-  exists as a live clone at `7ce5e41`, but the IDP knows no such repository — the code
-  was merged into `weroad/buynana`. Gating `api-rooming.agent.md` against that clone
-  would report "unchanged" forever against a dead repo, i.e. a confident false
-  negative, where `UNRESOLVED` at least surfaces the problem. **Resolve through the
-  IDP before trusting a clone that matches a doc's name**, and treat a clone with no
-  IDP repository as a deletion candidate (this is how `admin-coordinators` and
-  `api-coordinators` were cleaned up on 2026-08-04).
+  ⚠️ **A stale clone is worse than a missing one — and "the IDP knows it" is three
+  different states, not one.** `list_repositories` and `list_services` answer
+  different questions and must both be consulted:
+
+  | IDP state | Meaning | Examples (2026-08-14) | Doc handling |
+  |---|---|---|---|
+  | registered **and** hosts ≥1 service | live | `my`, `api-myweroad`, `buynana`, `booking` | gate normally |
+  | **registered but hosts NO deployed service** | repo still exists; its service moved into a monorepo | **`api-rooming`** — the service is `api-rooming-buynana`, shipping from `weroad/buynana` | the clone is a **decoy**: gating against it reports "unchanged" forever against a repo that ships nothing. Gate the doc against the **host monorepo**, or retire the doc. |
+  | **not registered at all** | fully consolidated away | `admin-myweroad`, `myweroad` → `weroad/my`; `admin-coordinators`, `api-coordinators` → `weroad/coordinators` | clone is a deletion candidate (this is how the coordinators clones were cleaned up 2026-08-04) |
+
+  `github/weroad/api-rooming` is a live clone at `7ce5e41` **and a registered IDP
+  repository** — so a "is it in the IDP?" check passes and tells you nothing. The
+  test that matters is **does any deployed service map to it**. Checking only
+  `list_repositories` is how a doc ends up gated against a decoy.
 
 - **The container fallback must be narrow, and there must be no walk-up.**
   `weroad/jungle/jungle.agent.md` documents the jungle monorepo *container* at
