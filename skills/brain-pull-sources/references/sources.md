@@ -29,6 +29,11 @@ workflowly_to_md                                                                
 medium_to_md https://medium.com/feed/@<your-handle>                                                          # Medium posts (RSS)
 personio_to_md                                                                                               # Staff roster (Personio API) — needs PERSONIO_CLIENT/PERSONIO_SECRET in .env.local
 
+# Internal Developer Platform — service catalog + the full OpenAPI/AsyncAPI/GraphQL docs it serves,
+# one folder per service. database.md reads tables/columns/COMMENT ON descriptions from PostgreSQL,
+# because the IDP itself returns database NAMES ONLY. See utils/idp_to_md.py for the auth chain.
+idp_to_md https://idp.<your-domain>.com/                                                                     # IDP service catalog + API documentation
+
 # ClickUp — only if you still have content there; Outline/Confluence supersede it.
 # clickup_doc_to_md https://app.clickup.com/<team-id>/v/dc/<doc-id>                                          # ClickUp doc
 # clickup_prj_to_md https://app.clickup.com/<team-id>/v/li/<list-id>                                         # ClickUp list/project

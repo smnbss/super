@@ -1,0 +1,8 @@
+#!/bin/bash
+# WeRoad IDP service-catalog exporter wrapper
+# Usage: idp_to_md [idp_url] [--limit N] [--service NAME] [--force] [--list]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+python3 "$PROJECT_ROOT/utils/idp_to_md.py" "$@"
