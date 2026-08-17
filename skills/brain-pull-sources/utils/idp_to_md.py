@@ -1159,7 +1159,21 @@ def render_graphql(service: str, raw: bytes, source_url: str) -> str:
 # production) and every attempt is read-only catalog introspection -- no row
 # data is ever selected.
 
-PG_SCOPES = ("DEVELOPMENT", "STAGING", "PRODUCTION")
+# STAGING first, and PRODUCTION never by default -- staging is the intended
+# source of schema documentation and production is only reached when explicitly
+# asked for with --db-scope production.
+PG_SCOPES = ("STAGING", "DEVELOPMENT")
+
+# The WeRoad cloud_sql_proxy convention (documented in the jungle `psql` skill):
+# staging on localhost:15432, production on localhost:25433. The tunnel is a
+# prerequisite -- both Cloud SQL instances are PRIVATE IP ONLY, so nothing
+# reaches them from a laptop without it.
+PG_TUNNEL_DEFAULTS = {"STAGING": ("127.0.0.1", "15432"),
+                      "PRODUCTION": ("127.0.0.1", "25433")}
+
+K8S_NAMESPACE_DEFAULT = "microservices"
+# Pods that are the same service but not a good place to read config from.
+K8S_POD_EXCLUDE = ("-worker", "-cron", "-scheduler", "-migrat", "-seed", "-job")
 
 # One script, four record shapes, each tagged by its first column so the output
 # parses unambiguously. Tabs and newlines are scrubbed inside SQL because they
@@ -1218,15 +1232,157 @@ CONTYPE_LABEL = {"p": "PRIMARY KEY", "f": "FOREIGN KEY", "u": "UNIQUE",
 
 
 def pg_scope_config(scope: str) -> Optional[dict]:
+    """Where to connect for a scope. STAGING/PRODUCTION fall back to the
+    cloud_sql_proxy tunnel convention when nothing is configured, because those
+    Cloud SQL instances have no public IP and the tunnel is the only route."""
     host = (os.environ.get(f"POSTGRESQL_{scope}_HOST") or "").strip()
+    port = (os.environ.get(f"POSTGRESQL_{scope}_PORT") or "").strip()
+    tunnelled = False
+    if not host and scope in PG_TUNNEL_DEFAULTS:
+        # All-or-nothing: a stray POSTGRESQL_STAGING_PORT=5432 sitting in
+        # .env.local next to an EMPTY host must not be spliced onto the tunnel
+        # host, or "staging" silently resolves to 127.0.0.1:5432 -- the LOCAL
+        # server -- and every failure reads as `role "..." does not exist`.
+        host, port = PG_TUNNEL_DEFAULTS[scope]
+        port = (os.environ.get(f"IDP_DB_{scope}_TUNNEL_PORT") or port).strip()
+        tunnelled = True
     if not host:
         return None
     return {
         "host": host,
-        "port": (os.environ.get(f"POSTGRESQL_{scope}_PORT") or "5432").strip(),
+        "port": port or "5432",
         "user": (os.environ.get(f"POSTGRESQL_{scope}_USER") or "").strip(),
         "password": os.environ.get(f"POSTGRESQL_{scope}_PASSWORD") or "",
+        "tunnelled": tunnelled,
     }
+
+
+class K8sDbCredentials:
+    """Resolve a database's credentials from the running service that owns it.
+
+    There is no single staging credential that can read every database: the
+    instance has 424 BUILT_IN users and each service has exactly one, scoped to
+    its own database. `simone_basso` is NOT among them -- that ~/.pgpass entry
+    is a PRODUCTION credential, which is why using it against the staging
+    tunnel fails with "password authentication failed" rather than anything
+    that points at the real problem.
+
+    So credentials come from the pod that already uses them, which is both the
+    only workable route and the least-privileged one: each database is read with
+    its own service's user. Laravel images expose DB_USERNAME/DB_DATABASE, Node
+    images DB_USER/DB_NAME; in every service checked the user equals the
+    database name. Nothing is written to the cluster -- this is `kubectl exec`
+    of a `printf`, not a deployment.
+    """
+
+    def __init__(self, namespace: str = K8S_NAMESPACE_DEFAULT):
+        self.namespace = namespace
+        self._pods: Optional[list[tuple[str, list[str]]]] = None
+        self._cache: dict[str, Optional[tuple[str, str, str]]] = {}
+        self.available = bool(shutil_which("kubectl"))
+        self.context = ""
+
+    def _load_pods(self) -> list[tuple[str, list[str]]]:
+        if self._pods is not None:
+            return self._pods
+        self._pods = []
+        if not self.available:
+            return self._pods
+        ctx = subprocess.run(["kubectl", "config", "current-context"],
+                             capture_output=True, text=True)
+        self.context = ctx.stdout.strip()
+        jp = ('{range .items[*]}{.metadata.name}{"\\t"}'
+              '{range .spec.containers[*]}{.name}{" "}{end}{"\\n"}{end}')
+        try:
+            res = subprocess.run(
+                ["kubectl", "get", "pods", "-n", self.namespace,
+                 "--field-selector", "status.phase=Running", "-o", f"jsonpath={jp}"],
+                capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return self._pods
+        if res.returncode != 0:
+            return self._pods
+        for line in res.stdout.splitlines():
+            if "\t" not in line:
+                continue
+            name, containers = line.split("\t", 1)
+            if name:
+                self._pods.append((name.strip(), containers.split()))
+        return self._pods
+
+    def _pick_pod(self, dbname: str) -> Optional[tuple[str, str]]:
+        prefix = dbname.replace("_", "-")
+        pods = self._load_pods()
+        matches = [(n, c) for n, c in pods if n.startswith(prefix + "-")
+                   and not any(x in n for x in K8S_POD_EXCLUDE)]
+        if not matches:
+            return None
+        # A plain Deployment replica is `<name>-<replicaset>-<pod>`; prefer it
+        # over anything with extra name segments.
+        plain = re.compile(r"^" + re.escape(prefix) + r"-[a-z0-9]+-[a-z0-9]+$")
+        matches.sort(key=lambda nc: (0 if plain.match(nc[0]) else 1, len(nc[0])))
+        name, containers = matches[0]
+        # PHP pods run an nginx sidecar which holds no DB env; the app container
+        # is the one named after the service.
+        container = ""
+        if prefix in containers:
+            container = prefix
+        else:
+            for c in containers:
+                if not c.endswith("-nginx"):
+                    container = c
+                    break
+        return name, container
+
+    def credentials_for(self, dbname: str) -> Optional[tuple[str, str, str]]:
+        """Returns (user, password, how) or None. Cached, including misses."""
+        if dbname in self._cache:
+            return self._cache[dbname]
+        self._cache[dbname] = None
+        if not self.available:
+            return None
+        picked = self._pick_pod(dbname)
+        if not picked:
+            return None
+        pod, container = picked
+        cmd = ["kubectl", "exec", "-n", self.namespace, pod]
+        if container:
+            cmd += ["-c", container]
+        # THREE env conventions are in use across the fleet and a resolver that
+        # knows only one silently reports "no pod owns this database":
+        #   Laravel   DB_USERNAME     / DB_PASSWORD        / DB_DATABASE
+        #   Node      DB_USER         / DB_PASSWORD        / DB_NAME
+        #   Bitnami   POSTGRESQL_USER(NAME) / POSTGRESQL_PASSWORD / POSTGRESQL_DBNAME
+        # DATABASE_URL is taken as a last resort for anything that carries only
+        # a connection string.
+        cmd += ["--", "sh", "-c",
+                'printf "%s\\n%s\\n%s\\n" '
+                '"${DB_USERNAME:-${DB_USER:-${POSTGRESQL_USERNAME:-'
+                '${POSTGRESQL_USER:-$POSTGRES_USER}}}}" '
+                '"${DB_PASSWORD:-${POSTGRESQL_PASSWORD:-'
+                '${POSTGRES_PASSWORD:-$PGPASSWORD}}}" '
+                '"${DATABASE_URL:-}"']
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        lines = (res.stdout or "").splitlines()
+        if res.returncode != 0 or len(lines) < 2:
+            return None
+        user, password = lines[0].strip(), lines[1].strip()
+        if not password and len(lines) >= 3 and lines[2].strip():
+            parsed = urllib.parse.urlparse(lines[2].strip())
+            if parsed.password:
+                user = user or urllib.parse.unquote(parsed.username or "")
+                password = urllib.parse.unquote(parsed.password)
+        if not password:
+            return None
+        # Every service checked names its user after its database; fall back to
+        # that rather than failing if the env var was empty.
+        user = user or dbname
+        got = (user, password, f"pod {pod}")
+        self._cache[dbname] = got
+        return got
 
 
 def load_wr_postgres_env():
@@ -1243,7 +1399,8 @@ def load_wr_postgres_env():
                 os.environ.setdefault(k.strip(), v.strip())
 
 
-def introspect_database(dbname: str, scopes: list[str]) -> dict:
+def introspect_database(dbname: str, scopes: list[str],
+                        k8s: Optional[K8sDbCredentials] = None) -> dict:
     """Read one database's catalog. Returns a result dict that always records
     what happened -- an unreachable database is a documented outcome, never a
     silent empty schema."""
@@ -1256,13 +1413,34 @@ def introspect_database(dbname: str, scopes: list[str]) -> dict:
         if not cfg:
             attempts.append(f"{scope.lower()}: not configured")
             continue
+
+        user, password = cfg["user"], cfg["password"]
+        how = f"{scope.lower()} (env credentials)"
+        if cfg["tunnelled"]:
+            how = f"{scope.lower()} tunnel {cfg['host']}:{cfg['port']}"
+        # Only staging resolves credentials from the cluster. Production is
+        # env-only on purpose: reaching it must be a deliberate act, not a
+        # fallback the exporter takes on its own.
+        if (not password) and k8s and scope == "STAGING":
+            got = k8s.credentials_for(dbname)
+            if got:
+                user, password, src = got
+                how = f"{scope.lower()} tunnel, credentials from {src}"
+            else:
+                attempts.append(f"{scope.lower()}: no running pod owns `{dbname}`"
+                                " and no POSTGRESQL_STAGING_USER/PASSWORD is set")
+                continue
+        if not password:
+            attempts.append(f"{scope.lower()}: no credentials"
+                            f" (set POSTGRESQL_{scope}_USER/PASSWORD)")
+            continue
+
         env = dict(os.environ)
-        if cfg["password"]:
-            env["PGPASSWORD"] = cfg["password"]
+        env["PGPASSWORD"] = password
         conn = (f"host={cfg['host']} port={cfg['port']} dbname={dbname} "
-                f"connect_timeout=6")
-        if cfg["user"]:
-            conn += f" user={cfg['user']}"
+                f"connect_timeout=6 sslmode=prefer")
+        if user:
+            conn += f" user={user}"
         try:
             res = subprocess.run(
                 ["psql", "-X", "-q", "-A", "-t", "-F", "\t",
@@ -1280,6 +1458,7 @@ def introspect_database(dbname: str, scopes: list[str]) -> dict:
         parsed = parse_introspection(res.stdout)
         parsed["status"] = "introspected"
         parsed["scope"] = scope.lower()
+        parsed["how"] = how
         parsed["dbname"] = dbname
         parsed["attempts"] = attempts
         return parsed
@@ -1342,16 +1521,53 @@ def parse_introspection(stdout: str) -> dict:
                        "table_comments": described_t, "column_comments": described_c}}
 
 
+def schema_columns(result: dict) -> set:
+    """The logical schema as a set of `schema.table.column:type` facts."""
+    out = set()
+    for sch, tables in (result.get("schemas") or {}).items():
+        for tbl, t in tables.items():
+            for c in t["columns"]:
+                out.add(f"{sch}.{tbl}.{c['name']}:{c['type']}")
+    return out
+
+
 def schema_fingerprint(result: dict) -> str:
-    """Identity of a schema's *shape*, so the five markets of a multi-market
-    service can be proven identical instead of rendered five times."""
+    """Identity of a schema's LOGICAL shape, so the five markets of a
+    multi-market service can be proven identical instead of rendered five times.
+
+    Deliberately ORDER-INDEPENDENT (columns sorted by name, not by attnum).
+    An attnum-ordered fingerprint reports drift that is not drift: api_booking_we
+    holds exactly the same 704 columns with the same types as its four siblings,
+    but `tour.roomingReleaseDays` sits at position 31 instead of 25 because
+    migrations were applied in a different sequence. That is worth reporting as a
+    note -- see schema_order_fingerprint -- but calling it "a migration has not
+    been applied everywhere" is false and would send someone chasing nothing.
+    """
+    return sha256("|".join(sorted(schema_columns(result))).encode()).hexdigest()[:16]
+
+
+def schema_order_fingerprint(result: dict) -> str:
+    """Identity including physical column order (attnum)."""
     parts = []
     for sch in sorted(result.get("schemas") or {}):
         for tbl in sorted(result["schemas"][sch]):
-            t = result["schemas"][sch][tbl]
-            cols = ",".join(f"{c['name']}:{c['type']}" for c in t["columns"])
+            cols = ",".join(f"{c['name']}:{c['type']}"
+                            for c in result["schemas"][sch][tbl]["columns"])
             parts.append(f"{sch}.{tbl}({cols})")
     return sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+def order_differences(a: dict, b: dict) -> list[str]:
+    """Tables whose column ORDER differs between two identical logical schemas."""
+    diffs = []
+    for sch, tables in (a.get("schemas") or {}).items():
+        for tbl, t in tables.items():
+            other = ((b.get("schemas") or {}).get(sch) or {}).get(tbl)
+            if not other:
+                continue
+            if [c["name"] for c in t["columns"]] != [c["name"] for c in other["columns"]]:
+                diffs.append(tbl if sch == "public" else f"{sch}.{tbl}")
+    return sorted(diffs)
 
 
 # -- Database renderer --------------------------------------------------------
@@ -1359,8 +1575,15 @@ def schema_fingerprint(result: dict) -> str:
 def render_database(service: str, databases: list, detail: dict, source_url: str,
                     introspections: list[dict]) -> str:
     got = [r for r in introspections if r.get("status") == "introspected"]
-    total = {"tables": sum(r["counts"]["tables"] for r in got),
-             "columns": sum(r["counts"]["columns"] for r in got)}
+    # Group identical schemas FIRST, so the totals describe the schema rather
+    # than the number of per-market copies of it: five identical markets is 72
+    # tables documented five times, not 360 tables.
+    groups: dict[str, list[dict]] = {}
+    for r in got:
+        groups.setdefault(schema_fingerprint(r), []).append(r)
+    reps = [m[0] for m in groups.values()]
+    total = {"tables": sum(r["counts"]["tables"] for r in reps),
+             "columns": sum(r["counts"]["columns"] for r in reps)}
 
     out = [
         f"# {service} — Databases",
@@ -1380,7 +1603,7 @@ def render_database(service: str, databases: list, detail: dict, source_url: str
         for i, db in enumerate(databases, 1):
             r = by_name.get(db) or {}
             if r.get("status") == "introspected":
-                src = f"`{r.get('scope')}`"
+                src = md_escape(r.get("how") or r.get("scope"))
                 tb, cl = r["counts"]["tables"], r["counts"]["columns"]
             else:
                 src = md_escape(r.get("status") or "not attempted")
@@ -1420,25 +1643,63 @@ def render_database(service: str, databases: list, detail: dict, source_url: str
                 f" migrations rather than from a live server.", ""]
         return "\n".join(out).rstrip() + "\n"
 
-    # Group identical schemas so a five-market service is documented once.
-    groups: dict[str, list[dict]] = {}
-    for r in got:
-        groups.setdefault(schema_fingerprint(r), []).append(r)
-
-    described = sum(r["counts"]["column_comments"] for r in got)
+    described = sum(r["counts"]["column_comments"] for r in reps)
+    if len(groups) > 1:
+        scope_note = (f" across **{len(groups)} differing schemas**"
+                      f" found among {len(got)} databases")
+    elif len(got) > 1:
+        scope_note = (f" — the same schema is deployed across {len(got)} databases,"
+                      f" counted once here")
+    else:
+        scope_note = ""
     out += [f"**Schema totals:** {total['tables']} tables · {total['columns']} columns"
-            f" · {described} column(s) carry a `COMMENT ON` description", ""]
+            f" · {described} column(s) carry a `COMMENT ON` description{scope_note}", ""]
 
     if len(groups) > 1:
-        out += ["> ⚠️ **These databases do not share one schema.** The derived"
-                " names are per-market copies that are expected to be identical;"
-                f" they resolved into **{len(groups)} different shapes**, which is"
-                " a real drift signal — a migration has not been applied"
-                " everywhere. Each shape is documented separately below.", ""]
+        biggest = max(groups.values(), key=len)
+        base = schema_columns(biggest[0])
+        lines = []
+        for members in groups.values():
+            if members is biggest:
+                continue
+            other = schema_columns(members[0])
+            only_base = sorted(base - other)
+            only_other = sorted(other - base)
+            label = ", ".join(m["dbname"] for m in members)
+            for col in only_other[:10]:
+                lines.append(f"- `{col}` exists in `{label}` but not in the other databases")
+            for col in only_base[:10]:
+                lines.append(f"- `{col}` is missing from `{label}`")
+            if len(only_base) + len(only_other) > 20:
+                lines.append(f"- …and {len(only_base) + len(only_other) - 20} more differences")
+        out += ["> ⚠️ **These databases do not share one schema.** The derived names"
+                " are per-market copies that are expected to be identical; they"
+                f" resolved into **{len(groups)} different column sets**. This is a"
+                " real drift signal — a migration has not been applied everywhere."
+                " Each shape is documented separately below.", ""]
+        if lines:
+            out += ["What differs:", ""] + lines + [""]
     elif len(got) > 1:
-        out += [f"> All {len(got)} databases share one identical schema"
-                " (verified by comparing every table and column, not assumed);"
-                " it is documented once below.", ""]
+        out += [f"> All {len(got)} databases share one identical schema — verified by"
+                " comparing every table, column and type, not assumed. It is"
+                " documented once below.", ""]
+        # Same columns in a different physical order is a different migration
+        # SEQUENCE, not a missing migration. Report it, do not alarm about it.
+        base = got[0]
+        order_groups: dict[str, list[dict]] = {}
+        for r in got:
+            order_groups.setdefault(schema_order_fingerprint(r), []).append(r)
+        if len(order_groups) > 1:
+            odd = [r for r in got if schema_order_fingerprint(r)
+                   != schema_order_fingerprint(base)]
+            tbls = order_differences(base, odd[0]) if odd else []
+            out += ["> Note: physical column order differs between these databases"
+                    + (f" in {len(tbls)} table(s) (`" + "`, `".join(tbls[:6]) + "`)"
+                       if tbls else "")
+                    + f" — e.g. `{odd[0]['dbname']}` orders them differently from"
+                    f" `{base['dbname']}`. The column sets and types are identical,"
+                    " so this reflects migrations applied in a different SEQUENCE,"
+                    " **not** a missing migration.", ""]
 
     if described == 0:
         out += ["> Note: this schema has no `COMMENT ON` metadata, so the"
@@ -1450,11 +1711,12 @@ def render_database(service: str, databases: list, detail: dict, source_url: str
         rep = members[0]
         if len(groups) > 1:
             out += [f"## Schema shape {gi} — `{', '.join(m['dbname'] for m in members)}`",
-                    "", f"Read from `{rep['scope']}` · fingerprint `{fp}`", ""]
+                    "", f"Read from {md_escape(rep.get('how') or rep['scope'])}"
+                    f" · fingerprint `{fp}`", ""]
         else:
-            out += [f"## Schema", "",
-                    f"Read from `{rep['scope']}` · database"
-                    f" `{rep['dbname']}` · fingerprint `{fp}`", ""]
+            out += ["## Schema", "",
+                    f"Read from {md_escape(rep.get('how') or rep['scope'])}"
+                    f" · database `{rep['dbname']}` · fingerprint `{fp}`", ""]
 
         for sch in sorted(rep["schemas"]):
             tables = rep["schemas"][sch]
@@ -1709,6 +1971,7 @@ def export(args) -> int:
     # Resolve which Postgres scopes are usable once, up front: an unconfigured
     # scope must not be retried per database for 85 services.
     load_wr_postgres_env()
+    k8s = None
     if args.no_db_introspect:
         pg_scopes = []
         print("→ database introspection disabled (--no-db-introspect)")
@@ -1720,6 +1983,23 @@ def export(args) -> int:
         else:
             print("→ no POSTGRESQL_<SCOPE>_HOST configured; database.md will carry"
                   " names only (the IDP has no schema information)")
+        if "STAGING" in pg_scopes and not args.no_db_via_k8s:
+            k8s = K8sDbCredentials(args.k8s_namespace)
+            k8s._load_pods()
+            if k8s.available and k8s.context:
+                print(f"→ staging credentials from cluster `{k8s.context}`"
+                      f" namespace `{args.k8s_namespace}`"
+                      f" ({len(k8s._load_pods())} running pods)")
+                if "staging" not in k8s.context:
+                    print("  ! WARNING: that context does not look like staging —"
+                          " credentials would come from the wrong cluster."
+                          " Skipping cluster credential lookup.", file=sys.stderr)
+                    k8s = None
+            else:
+                print("  ! kubectl unavailable or no pods listed;"
+                      " staging needs POSTGRESQL_STAGING_USER/PASSWORD instead",
+                      file=sys.stderr)
+                k8s = None
 
     rows = []
     files_written = 0
@@ -1811,7 +2091,7 @@ def export(args) -> int:
             introspections = []
             if pg_scopes:
                 for db in databases:
-                    introspections.append(introspect_database(db, pg_scopes))
+                    introspections.append(introspect_database(db, pg_scopes, k8s))
             db_md = render_database(name, databases, detail,
                                     f"{api_base}/api/v1/services/{name}/databases",
                                     introspections)
@@ -1819,16 +2099,18 @@ def export(args) -> int:
                 if write_if_changed(db_path, db_md):
                     files_written += 1
             got = [r for r in introspections if r.get("status") == "introspected"]
+            distinct = {schema_fingerprint(r): r for r in got}
+            reps = list(distinct.values())
             entry_reg["databases"] = {
                 "status": "exported", "hash": content_hash(db_md),
                 "count": len(databases), "introspected": len(got),
-                "tables": sum(r["counts"]["tables"] for r in got),
-                "columns": sum(r["counts"]["columns"] for r in got),
+                "distinct_schemas": len(reps),
+                "tables": sum(r["counts"]["tables"] for r in reps),
+                "columns": sum(r["counts"]["columns"] for r in reps),
             }
             stats["databases"] += 1
             stats["introspected"] += len(got)
-            if got:
-                stats["tables"] += sum(r["counts"]["tables"] for r in got)
+            stats["tables"] += sum(r["counts"]["tables"] for r in reps)
         else:
             if os.path.isfile(db_path):
                 os.remove(db_path)
@@ -1869,7 +2151,7 @@ def export(args) -> int:
     print(f"\n→ done: {len(rows)} services · {files_written} file(s) written")
     print(f"  openapi {stats['openapi']} · asyncapi {stats['asyncapi']} · "
           f"graphql {stats['graphql']} · databases {stats['databases']}"
-          f" ({stats['introspected']} introspected, {stats['tables']} tables)")
+          f" ({stats['introspected']} introspected, {stats['tables']} distinct tables)")
     if stats["missing"]:
         print(f"  ⚠ {stats['missing']} declared document(s) the IDP did not serve — see index.md")
     return 0
@@ -1915,6 +2197,11 @@ def main() -> int:
                          "(development|staging|production); default tries each in that order")
     ap.add_argument("--no-db-introspect", action="store_true",
                     help="skip Postgres introspection; database.md carries names only")
+    ap.add_argument("--no-db-via-k8s", action="store_true",
+                    help="do not read staging credentials from the cluster; "
+                         "requires POSTGRESQL_STAGING_USER/PASSWORD instead")
+    ap.add_argument("--k8s-namespace", default=K8S_NAMESPACE_DEFAULT,
+                    help=f"namespace holding the service pods (default {K8S_NAMESPACE_DEFAULT})")
     ap.add_argument("--list", action="store_true", help="show the registry and exit")
     args = ap.parse_args()
 
