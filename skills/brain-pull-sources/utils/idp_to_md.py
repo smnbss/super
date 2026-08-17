@@ -523,7 +523,7 @@ def render_openapi(service: str, spec: dict, source_url: str) -> str:
         f" · **Version:** {one_line(info.get('version')) or '(none)'}"
         f" · **OpenAPI:** {spec.get('openapi') or spec.get('swagger') or '(unknown)'}",
         f"**Paths:** {len(paths)} · **Operations:** {op_count} · **Component schemas:** {len(schemas)}",
-        f"**Exported:** {utc_stamp()}",
+        f"**Last changed:** {utc_stamp()}",
         "",
     ]
 
@@ -743,7 +743,7 @@ def render_asyncapi(service: str, spec: dict, source_url: str) -> str:
         f"**Channels:** {len(channels)} · **Operations:** {len(operations)}"
         f" · **Messages:** {len(messages)} · **Schemas:** {len(schemas)}",
         f"**Default content type:** `{spec.get('defaultContentType') or '(unset)'}`",
-        f"**Exported:** {utc_stamp()}",
+        f"**Last changed:** {utc_stamp()}",
         "",
     ]
     if info.get("description"):
@@ -1078,7 +1078,7 @@ def render_graphql(service: str, raw: bytes, source_url: str) -> str:
         f"**Operations:** {len(ops)}"
         + (" (" + ", ".join(f"{k}: {len(v)}" for k, v in sorted(by_kind.items())) + ")" if by_kind else "")
         + f" · **Type definitions:** {len(defs)}",
-        f"**Exported:** {utc_stamp()}",
+        f"**Last changed:** {utc_stamp()}",
         "",
         "> The IDP serves GraphQL documentation as a rendered SpectaQL HTML page —"
         " it contains no introspection JSON and no SDL, so the schema below was"
@@ -1390,7 +1390,10 @@ class K8sDbCredentials:
         # Every service checked names its user after its database; fall back to
         # that rather than failing if the env var was empty.
         user = user or dbname
-        got = (user, password, f"pod {pod}")
+        # Deliberately NOT the pod name. Pod names carry a ReplicaSet hash that
+        # changes on every deploy, and recording it here would rewrite
+        # database.md whenever staging redeploys -- churn with no new schema.
+        got = (user, password, "the owning service's pod")
         self._cache[dbname] = got
         return got
 
@@ -1602,7 +1605,7 @@ def render_database(service: str, databases: list, detail: dict, source_url: str
         f"**Declared `hasDatabase`:** {'yes' if detail.get('hasDatabase') else 'no'}"
         f" · **Derived names:** {len(databases)}"
         f" · **Introspected:** {len(got)}/{len(databases)}",
-        f"**Exported:** {utc_stamp()}",
+        f"**Last changed:** {utc_stamp()}",
         "",
     ]
 
@@ -1737,12 +1740,10 @@ def render_database(service: str, databases: list, detail: dict, source_url: str
                 t = tables[tname]
                 sub = heading if (sch == "public" and len(rep["schemas"]) == 1) else heading + "#"
                 out += [f"{sub} `{tname}`", ""]
-                meta = [f"**Kind:** {t['kind']}"]
-                if t["rows"] is not None and t["rows"] >= 0:
-                    meta.append(f"**Approx. rows:** {t['rows']:,} (planner estimate)")
-                if t["size"]:
-                    meta.append(f"**Size:** {t['size']}")
-                out += [" · ".join(meta), ""]
+                # Row counts and on-disk size are deliberately omitted: they are
+                # planner estimates that drift with the data and would rewrite
+                # this file most mornings without a single schema change.
+                out += [f"**Kind:** {t['kind']}", ""]
                 if t["comment"]:
                     out += [t["comment"], ""]
                 if t["columns"]:
@@ -1784,7 +1785,7 @@ def render_service_index(detail: dict, listing: dict, databases: list,
         f"# {name}",
         "",
         f"**Source:** [{ui_base}/catalog/{name}]({ui_base}/catalog/{name})",
-        f"**Exported:** {utc_stamp()}",
+        f"**Last changed:** {utc_stamp()}",
         "",
     ]
     if detail.get("description"):
@@ -1925,12 +1926,39 @@ def write_if_changed(path: str, content: str) -> bool:
     return True
 
 
+STAMP_PREFIXES = ("**Exported:**", "**Last changed:**", "**Last indexed:**")
+
+
 def strip_export_stamp(text: str) -> str:
-    """Drop the `**Exported:** …` / `**Last indexed:** …` lines before hashing,
-    so a re-run with genuinely unchanged upstream content does not churn the
-    whole tree every day."""
+    """Drop the timestamp lines before comparing, so a re-run with genuinely
+    unchanged upstream content does not churn the whole tree every day."""
     return "\n".join(l for l in text.splitlines()
-                     if not l.startswith("**Exported:**") and not l.startswith("**Last indexed:**"))
+                      if not l.startswith(STAMP_PREFIXES))
+
+
+def write_if_content_changed(path: str, content: str) -> bool:
+    """Write only when the content changes IGNORING its timestamp line.
+
+    This is what makes a morning re-run free. `write_if_changed` compares the
+    whole file, so a page carrying a run timestamp is rewritten every single
+    day even when nothing upstream moved -- and every rewritten page is
+    re-chunked and re-embedded by `gbrain sync`, which costs real embedding
+    spend for zero new information. 85 service.md files were churning daily for
+    exactly that reason. Their stamp therefore means "content last changed";
+    the time of the most recent RUN lives in catalog.md and in the registry's
+    `last_run`.
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                if strip_export_stamp(f.read()) == strip_export_stamp(content):
+                    return False
+        except OSError:
+            pass
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return True
 
 
 def content_hash(text: str) -> str:
@@ -2022,6 +2050,7 @@ def export(args) -> int:
             continue
         slug = slugify_service(name)
         out_dir = os.path.join(OUTPUT_BASE, slug)
+        files_before = files_written
 
         status, detail = client.get_json(f"/api/v1/services/{urllib.parse.quote(name)}")
         if status != 200 or not isinstance(detail, dict):
@@ -2083,7 +2112,7 @@ def export(args) -> int:
                 stats[dtype] += 1
                 continue
 
-            if write_if_changed(fpath, rendered):
+            if write_if_content_changed(fpath, rendered):
                 files_written += 1
             doc_status[dtype] = "exported"
             stats[dtype] += 1
@@ -2106,7 +2135,7 @@ def export(args) -> int:
                                     f"{api_base}/api/v1/services/{name}/databases",
                                     introspections)
             if args.force or content_hash(db_md) != (entry_reg.get("databases") or {}).get("hash"):
-                if write_if_changed(db_path, db_md):
+                if write_if_content_changed(db_path, db_md):
                     files_written += 1
             got = [r for r in introspections if r.get("status") == "introspected"]
             distinct = {schema_fingerprint(r): r for r in got}
@@ -2127,7 +2156,7 @@ def export(args) -> int:
             entry_reg.pop("databases", None)
 
         idx_md = render_service_index(detail, entry, databases, doc_status, ui_base)
-        if write_if_changed(os.path.join(out_dir, SERVICE_PAGE), idx_md):
+        if write_if_content_changed(os.path.join(out_dir, SERVICE_PAGE), idx_md):
             files_written += 1
         # An older layout wrote this page as index.md, which gbrain skips.
         stale_idx = os.path.join(out_dir, "index.md")
@@ -2136,7 +2165,10 @@ def export(args) -> int:
 
         entry_reg["name"] = name
         entry_reg["slug"] = slug
-        entry_reg["exported_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # Only stamp a service that actually changed, so the registry's diff is
+        # proportional to real change instead of 85 timestamp lines every day.
+        if files_written != files_before:
+            entry_reg["exported_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         rows.append({"name": name, "slug": slug, "detail": detail,
                      "databases": databases, "doc_status": doc_status})
