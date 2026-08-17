@@ -8,8 +8,8 @@ Pulls the whole service catalog from the Internal Developer Platform
 per service under src/idp/, containing the full API documentation rendered as
 markdown:
 
-    src/idp/index.md              catalog-wide index (all services, one table)
-    src/idp/<service>/index.md    catalog metadata, links, doc availability
+    src/idp/catalog.md            catalog-wide index (all services, one table)
+    src/idp/<service>/service.md  catalog metadata, links, doc availability
     src/idp/<service>/openapi.md  every path + operation + component schema
     src/idp/<service>/asyncapi.md every channel + operation + message payload
     src/idp/<service>/graphql.md  every query/mutation + type definition
@@ -1171,6 +1171,16 @@ PG_SCOPES = ("STAGING", "DEVELOPMENT")
 PG_TUNNEL_DEFAULTS = {"STAGING": ("127.0.0.1", "15432"),
                       "PRODUCTION": ("127.0.0.1", "25433")}
 
+# gbrain's sync classifier SKIPS these basenames outright --
+# SYNC_SKIP_FILES = ['schema.md', 'index.md', 'log.md', 'README.md'] in
+# src/core/sync.ts, reason 'metafile' -- so a file named index.md is silently
+# NEVER INDEXED and is invisible to every gbrain search. Its own comment says
+# "a user who genuinely wants to index one of these basenames should rename
+# it", so these pages are named service.md / catalog.md instead. Do not rename
+# them back to index.md.
+SERVICE_PAGE = "service.md"
+CATALOG_PAGE = "catalog.md"
+
 K8S_NAMESPACE_DEFAULT = "microservices"
 # Pods that are the same service but not a good place to read config from.
 K8S_POD_EXCLUDE = ("-worker", "-cron", "-scheduler", "-migrat", "-seed", "-job")
@@ -1846,7 +1856,7 @@ def render_catalog_index(rows: list[dict], api_base: str, ui_base: str,
         f"**Services exported:** {len(rows)} of {total_in_catalog} in the catalog",
         f"**Last indexed:** {utc_stamp()}",
         "",
-        "One folder per service. Each holds `index.md` (catalog metadata and links)"
+        "One folder per service. Each holds `service.md` (catalog metadata and links)"
         " plus a markdown rendering of every API document the IDP actually serves.",
         "",
         "> `Declared` columns come from the catalog's `has*` booleans; `✓` means the"
@@ -1870,7 +1880,7 @@ def render_catalog_index(rows: list[dict], api_base: str, ui_base: str,
         if d.get("runtimeVersion"):
             runtime = f"{runtime} {d['runtimeVersion']}".strip()
         out.append(
-            f"| [{md_escape(r['name'])}]({r['slug']}/index.md) "
+            f"| [{md_escape(r['name'])}]({r['slug']}/{SERVICE_PAGE}) "
             f"| {md_escape(d.get('teamName'))} "
             f"| {md_escape(d.get('tier'))} "
             f"| {md_escape(d.get('type'))} "
@@ -2117,8 +2127,12 @@ def export(args) -> int:
             entry_reg.pop("databases", None)
 
         idx_md = render_service_index(detail, entry, databases, doc_status, ui_base)
-        if write_if_changed(os.path.join(out_dir, "index.md"), idx_md):
+        if write_if_changed(os.path.join(out_dir, SERVICE_PAGE), idx_md):
             files_written += 1
+        # An older layout wrote this page as index.md, which gbrain skips.
+        stale_idx = os.path.join(out_dir, "index.md")
+        if os.path.isfile(stale_idx):
+            os.remove(stale_idx)
 
         entry_reg["name"] = name
         entry_reg["slug"] = slug
@@ -2134,9 +2148,12 @@ def export(args) -> int:
     # Catalog index: only rewrite it for a full run, otherwise a --limit run
     # would truncate the index to the subset it happened to touch.
     partial = bool(args.limit or args.service)
-    index_path = os.path.join(OUTPUT_BASE, "index.md")
+    index_path = os.path.join(OUTPUT_BASE, CATALOG_PAGE)
+    stale_root = os.path.join(OUTPUT_BASE, "index.md")
+    if os.path.isfile(stale_root):
+        os.remove(stale_root)
     if partial and os.path.isfile(index_path):
-        print("→ src/idp/index.md left untouched (partial run)")
+        print(f"→ src/idp/{CATALOG_PAGE} left untouched (partial run)")
     else:
         if write_if_changed(index_path, render_catalog_index(rows, api_base, ui_base, total_in_catalog)):
             files_written += 1
@@ -2153,7 +2170,8 @@ def export(args) -> int:
           f"graphql {stats['graphql']} · databases {stats['databases']}"
           f" ({stats['introspected']} introspected, {stats['tables']} distinct tables)")
     if stats["missing"]:
-        print(f"  ⚠ {stats['missing']} declared document(s) the IDP did not serve — see index.md")
+        print(f"  ⚠ {stats['missing']} declared document(s) the IDP did not serve"
+              f" — see src/idp/{CATALOG_PAGE}")
     return 0
 
 
