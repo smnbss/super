@@ -804,6 +804,18 @@ def event_to_meeting(ev: dict) -> dict:
     start_dt = _iso_to_epoch(start)
     end_dt = _iso_to_epoch(end)
     duration = int((end_dt - start_dt) / 60) if start_dt and end_dt else 0
+    # A MULTI-DAY TIMED event is the second way a day total gets wrecked, and the
+    # all_day flag does not catch it: a hotel stay or flight has real dateTimes
+    # (so all_day is False) and spans days -- "Stay at ... Sanur" ran
+    # 07-09 14:00 -> 07-13 10:00 = 92h, summed into ONE day.
+    #
+    # The test is the SPAN, not the date boundary. Excluding everything that
+    # crosses midnight would also drop a genuine late meeting (23:30 -> 00:15 is
+    # 45 real minutes and belongs in the total), while a "meeting" of 12h+ is a
+    # calendar block whichever dates it touches. 12h is comfortably above any real
+    # meeting, including an all-day offsite booked 09:00-18:00.
+    LONG_BLOCK_MINUTES = 12 * 60
+    multi_day = duration >= LONG_BLOCK_MINUTES
     org = ev.get("organizer", {})
     conf = ev.get("conferenceData", {})
     conf_id = conf.get("conferenceId", "")
@@ -814,6 +826,7 @@ def event_to_meeting(ev: dict) -> dict:
         "endTime": end,
         "durationMinutes": duration,
         "allDay": all_day,
+        "multiDay": multi_day,
         "organizer": {"name": org.get("displayName", ""), "email": org.get("email", "")},
         "attendees": [
             {"name": a.get("displayName", ""), "email": a.get("email", ""),
@@ -1408,10 +1421,10 @@ def write_index(day_dir: str, d: date, rows: list[dict]) -> None:
     n_notes = n_rec = n_tr = 0
     for r in rows:
         m = r["meeting"]
-        # See the all-day note in the meeting builder: never sum these.
-        if m.get("allDay"):
+        # See the all-day / multi-day notes in the meeting builder: never sum these.
+        if m.get("allDay") or m.get("multiDay"):
             n_all_day += 1
-            t = "all-day"
+            t = "all-day" if m.get("allDay") else "12h+ block"
         else:
             total_min += m["durationMinutes"]
             t = f"{_hhmm(m['startTime'])}–{_hhmm(m['endTime'])}"
@@ -1438,8 +1451,9 @@ def write_index(day_dir: str, d: date, rows: list[dict]) -> None:
     if n_all_day:
         # State the exclusion on the page, so nobody re-derives it: an all-day
         # entry's end date is exclusive and would add 24h per day to this figure.
-        total += (f" · **{n_all_day} all-day entr{'y' if n_all_day == 1 else 'ies'} excluded"
-                  f" from the total** (calendar blocks, not meetings)")
+        total += (f" · **{n_all_day} all-day / 12h+ entr{'y' if n_all_day == 1 else 'ies'}"
+                  f" excluded from the total** (calendar blocks, not meetings held on"
+                  f" this day)")
     lines += ["", total,
               f"**Artifacts found:** {n_notes} notes, {n_rec} recordings, {n_tr} transcripts", ""]
     with open(os.path.join(day_dir, "index.md"), "w", encoding="utf-8") as f:
