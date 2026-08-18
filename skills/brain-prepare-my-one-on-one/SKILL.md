@@ -43,8 +43,13 @@ For every 1:1 calendar event:
    - `full_name`: the full-name variant in **Name patterns**
    - `role`: **Role** column
    - `team` / `department`: **Team / Department** column
-   - `email`: **Email** column, or the calendar attendee email
-   - `linear_teams`: **Linear teams** column (`—` means the person does not use Linear)
+   - `email`: **Email** column, or the calendar attendee email. **This is the Linear join key** — see Step 3.
+   - `linear_teams`: **Linear teams** column. ⚠️ **Do not read a blank here as "does not use Linear."**
+     The generated values are explicit — `none (no Linear account)`, `none (Linear account, no team)`,
+     `— (not in Personio; join not possible)` — and only the first of those means "no Linear".
+     A **bare `—`** means the row predates the 2026-08-18 fix or the rebuild failed to join, i.e.
+     **unknown, not empty**: treat it as missing data, fall through to the email-keyed queries in
+     Step 3, and flag it in the run summary (Step 6).
 
 5. **If not found in the roster**, search the brain with `mcp__gbrain__query` for `"<identifier> role position team"` and `"<identifier> people hr"`. If that yields a confident full name, derive the slug as `lowercase(full name)` with spaces → hyphens and accents preserved (matching the roster's existing style, e.g. `abel-hernández-martín`) — i.e. **still a full-name slug**, never a first name.
 
@@ -127,13 +132,34 @@ Never write two files for one person. If both a canonical and a legacy file exis
 - They are a member of the project
 - The project is in a team they manage (unless they are also the lead)
 
-Only fetch Linear data if brain search indicates the person uses Linear (e.g., they are listed as a member/lead of Linear teams, or `mcp__gbrain__query` with `"<full_name> Linear"` returns relevant hits).
+**Query by email first. The `linear_teams` column is a fallback, not the gate.**
 
-If Linear teams are known, query each with `list_projects`:
-- `team`: each known Linear team name
-- `limit`: 50
+⚠️ **Gating on `linear_teams` is what broke this skill.** On 2026-08-18, 188 of 199 roster rows read
+`—` while 73 of those people had live Linear teams; Alberto Marinelli — lead of 9 active projects
+with 27 open issues — got an agenda with every Linear section silently omitted. It read as complete.
+Never let the roster's team cell decide whether Linear gets queried.
 
-If no Linear context is found, **skip all Linear sections entirely** (Sections 2–4 of the agenda can be populated from brain context and previous agendas only). Do not issue blanket cross-team Linear queries for people who are not on Linear.
+1. **If `email` is known (it should be for every roster row), query Linear by person, not by team:**
+   - `mcp__linear__list_projects` with `member: <email>`, `limit: 50`, then **paginate on `cursor`
+     until `hasNextPage` is false** — the tool caps at 50 and truncates *silently*, returning a
+     valid page with no hint more exist.
+   - `mcp__linear__list_issues` with `assignee: <email>`.
+
+   This is both simpler and strictly more complete than the team fan-out: Alberto's assigned issues
+   span `BI, DE, GRO, TIUM, AIG` while he is a *member* of only three of those teams, so a
+   team-driven query would have missed TIUM and AIG even with a correctly populated column.
+
+2. **Use `linear_teams` only to widen** — for team-level context (cycles, team boards, sibling
+   projects) once the person-level queries have run. Query each named team with `list_projects`
+   (`team: <name>`, `limit: 50`, paginate).
+
+3. **Skip Linear entirely only when the roster explicitly says there is nothing to query** —
+   `none (no Linear account)`. Even then, say so in the output (Step 6) rather than just omitting
+   the sections.
+
+4. **If `email` is unknown AND `linear_teams` is a bare `—`**, you have no join key and unknown
+   membership. Do **not** treat that as "not on Linear": try `mcp__linear__list_users` with
+   `query: <full name>` once to recover the email, and if that fails, emit the loud banner in Step 6.
 
 Filter to active projects (not Completed, not Cancelled). **CRITICAL:** Only keep projects where `lead.name` matches the person's name (case-insensitive) OR `lead.email` matches the person's email.
 
@@ -154,8 +180,9 @@ Collect:
 
 ### 3b. Issues assigned to this person (high priority / overdue)
 
-If the person has known Linear teams, query `list_issues` for each team. If no Linear context is found, skip this step entirely. Filters:
-- Assignee: the person (match by name or email)
+Query `list_issues` with `assignee: <email>` (the person-keyed query from 3a). Only fan out per team
+when the email is unavailable. If Linear is skipped, say so per Step 6 rather than omitting silently. Filters:
+- Assignee: the person (match by email first, name only as fallback)
 - Priority: Urgent or High
 - Status: not Done, not Cancelled
 - Limit: 20
@@ -214,6 +241,30 @@ If a project has no update text, say "No update text since <date>." — don't dr
 
 ### Agenda generation rules
 
+⚠️⚠️ **HARD SIZE CAP: ~8 KB and at most 5 discussion items in the whole agenda.**
+This is a **30-minute meeting with a hard stop**, and the agenda has to be readable in the
+two minutes before it starts. Measured 2026-08-18: Matteo's agenda came out at
+**60,438 bytes and cost 12.2M tokens** — roughly 7.5× the cap, for a meeting that could
+never consume it. Alberto's was **16 KB, cost half as much, and was if anything more
+actionable.** Length actively made the artifact worse: the five things worth saying were
+buried in fifty.
+
+Enforce it while writing, not by trimming afterwards:
+
+- **Five items total across Sections 1–4**, not five per section. If a sixth is a
+  candidate, it replaces a weaker one — the ranking is the work.
+- **One fact + one question per item, two lines.** No paragraph of context. If the fact
+  needs a paragraph to matter, it is not a 1:1 item.
+- **No exhaustive lists.** `## Linear Projects — <Person> Active` is a reference appendix,
+  not a discussion section; keep it to the projects that carry one of the five items.
+- **Nothing without a concrete data point.** A theme with no date, ticket or number is
+  the first thing cut.
+- **Check before writing the file**: `wc -c` the draft. Over ~8 KB means cut items, not
+  shorten sentences — trimming prose keeps the wrong five things.
+
+An agenda that omits something important must say so via the coverage banner (Step 6) —
+that is the pressure valve, not a longer document.
+
 **Section 1: Follow-ups from last 1:1**
 - Review the previous agenda (`outputs/agents/my-one-on-one/<slug>.md`)
 - For each item that had a question or action: check if the answer is now visible in Linear data, meeting notes, or project updates
@@ -264,12 +315,40 @@ Write **exactly one file per person**, to `outputs/agents/my-one-on-one/<slug>.m
 - Any `## Archive — …` sections already at the bottom of the file are **preserved verbatim**; re-append them below the fresh agenda. They are the only long-term history this directory keeps.
 - A legacy-slug file found in Step 2 is archived into this file and then deleted.
 
+### Coverage banner — an omitted section must announce itself
+
+⚠️ **Never let a skipped data source look like an empty one.** If any Linear section is thin or
+absent because the *lookup* did not run — not because the person genuinely has nothing — the agenda
+MUST carry a banner directly under the `<!-- canonical-slug -->` line, and the reason must be
+restated in place of each section it suppressed:
+
+```markdown
+> ⚠️ **Linear sections skipped for <Full Name>** — <reason>. This agenda is INCOMPLETE, not empty:
+> the person may have active projects and issues that were never queried.
+> Fix: <fix>, then re-run.
+```
+
+Reason / fix pairs, in the order you should prefer them:
+
+| Condition | Reason text | Fix text |
+|---|---|---|
+| Roster `Linear teams` is a bare `—` **and** no email | `no Linear teams recorded and no email in memory/L1/team-members.md, so no Linear query could be keyed` | `add the Email cell (it exists on every Personio row) or run brain-rebuild-memory` |
+| Email known but every Linear query returned nothing | *(no banner — this is a true empty; say "No active projects." explicitly)* | — |
+| Roster says `none (no Linear account)` | `roster records no Linear account for this person` | — *(state it, no fix needed)* |
+| Person not in the roster at all (external, candidate, founder/ExCo) | `not in memory/L1/team-members.md — Personio omits founders, ExCo and externals, so the Personio→Linear join cannot cover them` | `confirm the person's Linear email with the user` |
+| A Linear call errored or hit an unpaginated cap | `Linear query failed/truncated: <detail>` | `re-run; if it persists, check the MCP server` |
+
+Also write `<!-- linear-coverage: full | partial | skipped (<reason slug>) -->` next to the
+`canonical-slug` comment on **every** agenda, so a later run can tell a genuinely quiet person from
+an unqueried one.
+
 Format:
 
 ```markdown
 # 1:1 <Full Name> — W<NN> (<Day>, <Mon DD>, <HH:MM>)
 <!-- generated: YYYY-MM-DD -->
 <!-- canonical-slug: <slug> (memory/L1/team-members.md) -->
+<!-- linear-coverage: full -->
 
 ## Follow-ups from last 1:1
 - **<Topic>** — <what changed since last agenda, with source>
@@ -307,6 +386,19 @@ Print a summary:
 - For each: person name, resolved canonical slug, date/time, number of active projects, number of follow-ups from last agenda, number of flags
 - Path to each generated file
 - **Any legacy-slug file merged and deleted** (`merged mattia.md → mattia-riva.md`), and **any identifier that needed disambiguation** — both are signals the roster or the calendar invite wording could be tidied up.
+- ⚠️ **A `Linear coverage` line for every person, always printed, even when everything worked** —
+  `full` / `partial` / `skipped`. For anything other than `full`, print the banner reason verbatim,
+  e.g.:
+
+  ```
+  ⚠️ Linear coverage: SKIPPED for Alberto Marinelli — no Linear teams recorded in
+     memory/L1/team-members.md and no email to key the query on. Agenda has no project or
+     issue context. Fix: run brain-rebuild-memory (or add the Email cell) and re-run.
+  ```
+
+  **Silence is not a pass.** A run that queried nobody and a run that found nothing must not print
+  the same summary. If ≥1 person came back `skipped`, end the summary with a single explicit line —
+  `N of M agendas are missing Linear context` — so the omission survives being skimmed.
 
 ---
 

@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Resync super's canonical skills/ into every vendored copy.
+#
+# WHY THIS IS A SCRIPT: this is mechanical work that was being done by an LLM every
+# morning -- 4.3M tokens on 2026-08-18 to apply one version bump and rsync a drifted
+# copy, and the same drift appeared four mornings running. It is a diff and a copy.
+#
+# WHY IT IS NOT A SYMLINK: two of the three copies are COMBINED trees that hold other
+# people's skills alongside super's (the Drive `.agents/skills` had 196 skills against
+# super's 19). Symlinking or `rsync --delete` at the tree level would destroy them, so
+# this syncs PER SKILL DIRECTORY and never deletes.
+#
+# Usage:
+#   resync-vendored-skills            # report drift and fix it
+#   resync-vendored-skills --check    # report only; exit 1 if any copy has drifted
+#
+# Exit: 0 = all copies in sync (or fixed). 1 = drift found (--check) or unfixable.
+
+set -uo pipefail
+
+CANON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CANON="$CANON_ROOT/skills"
+CHECK_ONLY=0
+[[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
+
+[[ -d "$CANON" ]] || { echo "resync: no canonical skills/ at $CANON" >&2; exit 1; }
+
+# Known vendored copies. A missing one is skipped, not an error -- not every machine
+# has the Drive mount or a brain checkout.
+CANDIDATES=(
+  "$HOME/.super/skills"
+  "$HOME/.claude/skills"
+  "$HOME/.agents/skills"
+  "$HOME/.codex/skills"
+  "$HOME/.gemini/skills"
+)
+# Drive path contains a space and a parenthesised account name; glob for it.
+for d in "$HOME"/My\ Drive*/.agents/skills; do
+  [[ -d "$d" ]] && CANDIDATES+=("$d")
+done
+# A brain checkout keeps its own copy; find it via the caller's cwd if present.
+[[ -d "$PWD/.claude/skills" ]] && CANDIDATES+=("$PWD/.claude/skills")
+
+EXCL=(--exclude='__pycache__' --exclude='.DS_Store' --exclude='*.pyc')
+drifted=0; fixed=0; checked=0
+
+for dest in "${CANDIDATES[@]}"; do
+  [[ -d "$dest" ]] || continue
+  # De-dup: the same dir can be reached by two paths.
+  real="$(cd "$dest" && pwd -P)"
+  [[ "$real" == "$(cd "$CANON" && pwd -P)" ]] && continue
+  case " ${seen:-} " in *" $real "*) continue ;; esac
+  seen="${seen:-} $real"
+
+  # ONLY sync copies that ALREADY carry super's skills. ~/.claude/skills,
+  # ~/.agents/skills and ~/.codex/skills all exist on a normal machine and hold
+  # OTHER skills (gstack, plugins) with zero super skills among them -- treating
+  # those as sync targets would silently perform a new global install of 19
+  # skills nobody asked for, not a resync.
+  established=0
+  for d in "$CANON"/*/; do
+    [[ -d "$dest/$(basename "$d")" ]] && { established=1; break; }
+  done
+  if [[ "$established" -eq 0 ]]; then
+    printf '  – %-58s not a super distribution target (skipped)\n' "${dest/#$HOME/~}"
+    continue
+  fi
+  checked=$((checked+1))
+
+  # Only compare skills that exist canonically; ignore extra skills in the copy.
+  diffs=0; newer=0
+  for d in "$CANON"/*/; do
+    name="$(basename "$d")"
+    [[ -d "$dest/$name" ]] || { diffs=$((diffs+1)); echo "  · missing skill: $name" >&2; continue; }
+    if ! diff -rq "${EXCL[@]}" "$d" "$dest/$name" >/dev/null 2>&1; then
+      diffs=$((diffs+1))
+      # Warn if the COPY is newer -- that is a local edit about to be overwritten.
+      while IFS= read -r f; do
+        rel="${f#$dest/$name/}"
+        [[ -f "$d/$rel" ]] || continue
+        [[ "$f" -nt "$d/$rel" ]] && { echo "  ⚠ copy is NEWER: $name/$rel" >&2; newer=$((newer+1)); }
+      done < <(find "$dest/$name" -type f -name '*.md' -o -type f -name '*.py' 2>/dev/null)
+    fi
+  done
+
+  label="${dest/#$HOME/~}"
+  if [[ "$diffs" -eq 0 ]]; then
+    printf '  ✓ %-58s in sync\n' "$label"
+    continue
+  fi
+  drifted=$((drifted+1))
+  printf '  ✗ %-58s %s skill(s) drifted\n' "$label" "$diffs"
+  if [[ "$newer" -gt 0 ]]; then
+    echo "    NOT syncing: $newer file(s) in the copy are newer than canonical." >&2
+    echo "    Resolve by hand — a vendored copy is not supposed to be edited." >&2
+    continue
+  fi
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    continue
+  fi
+  for d in "$CANON"/*/; do
+    name="$(basename "$d")"
+    mkdir -p "$dest/$name"
+    rsync -a "${EXCL[@]}" "$d" "$dest/$name/" || {
+      echo "    rsync failed for $name" >&2; continue; }
+  done
+  # Re-verify rather than trusting rsync's exit status.
+  post=0
+  for d in "$CANON"/*/; do
+    name="$(basename "$d")"
+    diff -rq "${EXCL[@]}" "$d" "$dest/$name" >/dev/null 2>&1 || post=$((post+1))
+  done
+  if [[ "$post" -eq 0 ]]; then printf '    → resynced, verified in sync\n'; fixed=$((fixed+1))
+  else printf '    → STILL DRIFTED after resync: %s skill(s)\n' "$post" >&2; fi
+done
+
+echo "resync: $checked copy(ies) checked · $drifted drifted · $fixed fixed"
+if [[ "$CHECK_ONLY" -eq 1 && "$drifted" -gt 0 ]]; then exit 1; fi
+if [[ "$drifted" -gt 0 && "$fixed" -lt "$drifted" ]]; then exit 1; fi
+exit 0

@@ -595,8 +595,32 @@ be audited rather than trusted — the orchestrator gates on this, and an unexpl
 
 ### 1. Read the repo thoroughly
 
-*(Full read — for first generation and non-docs-first repos. On an incremental
-pass, Step 0.3 has already narrowed this to the changed files.)*
+*(Full read — for first generation and non-docs-first repos ONLY.)*
+
+⚠️⚠️ **STOP. On an incremental pass this section does not apply, and the list below is
+the most expensive thing in this skill.** Measured 2026-08-18: this skill was handed 18
+repos and read whole working trees for them, at **~24M tokens**. Step 0.3 already
+narrows the input to the changed files; the failure mode is reading this list anyway
+because it is right here and concrete.
+
+**The changed-file list is a REQUIRED INPUT, not something you may choose to compute.**
+It must already be in your task prompt (the orchestrator computes it — see
+`brain-morning-start` Part 2b) or be the first command you run:
+
+```bash
+git -C <repo-path> diff --name-only "$RECORDED..HEAD"
+```
+
+**If that list is empty or absent, you do not have a job to do — stop and report, do not
+fall back to a full read.** Reading a path that is not in the list, and is not something
+you must open to explain a path that IS in the list (the entity a new migration alters,
+the module a new controller registers into), is a defect — not a thoroughness bonus.
+
+Self-check before you write the doc: every file you opened is either in the changed set
+or named in a one-line justification in your report. If you cannot say that, you did a
+full read on an incremental pass and the run cost ~10× what it should have.
+
+The full-read list below is for a repo with **no doc yet**, or `RECORDED_FULL == unknown`.
 
 Read these files in this order (skip any that don't exist):
 

@@ -76,7 +76,20 @@ Use the `list_projects` Linear MCP tool:
 - `team`: the Linear team name
 - `limit`: 50
 
-If the `Linear teams` column is `—` (none), skip all Linear queries and build the agenda from brain context only.
+If the `Linear teams` column is `—` (none), skip the Linear queries and build the agenda from brain
+context only — **but say so in the output.** Put this banner under the agenda's header, and repeat
+the reason in place of the `## Linear Projects` table rather than dropping the section:
+
+```markdown
+> ⚠️ **Linear sections skipped for <TEAM>** — no Linear teams recorded for this team in
+> `memory/L1/teams.md`. This agenda is INCOMPLETE, not empty. Fix: run `brain-rebuild-memory`
+> (or add the team's Linear team names to `$BRAIN_CONFIG` `teams[]`), then re-run.
+```
+
+Also print `⚠️ Linear coverage: SKIPPED for <TEAM> — <reason>` in the run summary. An omitted
+section that announces itself is recoverable; one that just isn't there reads as "nothing to
+report". ⚠️ And note `mcp__linear__list_projects` **pages at 50 and truncates silently** — paginate
+on `cursor` before counting anything.
 
 Do this for **each Linear team** in the row. If a row has multiple teams (e.g., `DEVOPS, IT`), query each and merge results, deduplicating by project ID.
 

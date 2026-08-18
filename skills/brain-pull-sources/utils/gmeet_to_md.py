@@ -792,6 +792,13 @@ def keep_event(ev: dict) -> bool:
 
 
 def event_to_meeting(ev: dict) -> dict:
+    # Google Calendar gives an all-day event `start.date` (YYYY-MM-DD) and NO
+    # `start.dateTime`. Its end date is exclusive, so a 5-day all-day entry
+    # measures 7,200 minutes = 120 HOURS. Summed into a day's meeting total that
+    # produced the "124h 15m" index artifact -- a three-digit hour figure on a
+    # day with under three hours of actual meetings. All-day entries are calendar
+    # blocks, not meetings: they are kept as rows but MUST NOT be summed.
+    all_day = not ev.get("start", {}).get("dateTime")
     start = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date", "")
     end = ev.get("end", {}).get("dateTime") or ev.get("end", {}).get("date", "")
     start_dt = _iso_to_epoch(start)
@@ -806,6 +813,7 @@ def event_to_meeting(ev: dict) -> dict:
         "startTime": start,
         "endTime": end,
         "durationMinutes": duration,
+        "allDay": all_day,
         "organizer": {"name": org.get("displayName", ""), "email": org.get("email", "")},
         "attendees": [
             {"name": a.get("displayName", ""), "email": a.get("email", ""),
@@ -1396,11 +1404,17 @@ def write_index(day_dir: str, d: date, rows: list[dict]) -> None:
     lines.append("| Time | Meeting | Attendees | Artifacts |")
     lines.append("|------|---------|-----------|-----------|")
     total_min = 0
+    n_all_day = 0
     n_notes = n_rec = n_tr = 0
     for r in rows:
         m = r["meeting"]
-        total_min += m["durationMinutes"]
-        t = f"{_hhmm(m['startTime'])}–{_hhmm(m['endTime'])}"
+        # See the all-day note in the meeting builder: never sum these.
+        if m.get("allDay"):
+            n_all_day += 1
+            t = "all-day"
+        else:
+            total_min += m["durationMinutes"]
+            t = f"{_hhmm(m['startTime'])}–{_hhmm(m['endTime'])}"
         att_n = len(m["attendees"])
         att = f"{att_n} attendees" if att_n > 3 else ", ".join(
             a["name"] or a["email"].split("@")[0] for a in m["attendees"]) or "—"
@@ -1419,7 +1433,14 @@ def write_index(day_dir: str, d: date, rows: list[dict]) -> None:
             arts = "_no artifacts_"
         lines.append(f"| {t} | {_td(m['title'])} | {_td(att)} | {arts} |")
     h, mnt = divmod(total_min, 60)
-    lines += ["", f"**Total:** {len(rows)} meetings, {h}h {mnt}m total meeting time",
+    timed = len(rows) - n_all_day
+    total = f"**Total:** {timed} timed meeting{'' if timed == 1 else 's'}, {h}h {mnt}m total meeting time"
+    if n_all_day:
+        # State the exclusion on the page, so nobody re-derives it: an all-day
+        # entry's end date is exclusive and would add 24h per day to this figure.
+        total += (f" · **{n_all_day} all-day entr{'y' if n_all_day == 1 else 'ies'} excluded"
+                  f" from the total** (calendar blocks, not meetings)")
+    lines += ["", total,
               f"**Artifacts found:** {n_notes} notes, {n_rec} recordings, {n_tr} transcripts", ""]
     with open(os.path.join(day_dir, "index.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

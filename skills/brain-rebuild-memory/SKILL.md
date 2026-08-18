@@ -12,7 +12,38 @@ Rebuild the memory layers L2 and L1 from `outputs/` and `src/`.
 
 ## Execution discipline
 
-If you parallelize target generation across worker agents (waves of L2 workers, then cascade L1s), you MUST **block on every worker and verify its file writes before moving on or returning** — check the target files exist on disk with fresh mtimes. Never dispatch a wave and return "dispatched": detached workers die with your context and write nothing (observed 2026-07-14: "Wave 1 dispatched" → 0 files on disk). The rebuild is only done when Phases 4–5 have run against files that actually exist.
+⚠️⚠️ **ONE SHORT-LIVED WORKER PER TARGET FILE. Do not walk the target list in one context.**
+
+This phase is the worst cost-weighted step in the morning routine — **4.9M input-equivalent
+tokens**, of which **2.9M were CACHE WRITES over just 66 requests** (2026-08-18). A cache-write
+figure that size against that few requests means the prompt cache was being **rebuilt almost
+every request**, which is what an 80-minute runtime with multi-minute thinking gaps produces:
+one long-lived context that grows with every target it touches, re-paying for the whole prefix
+each time and outliving the cache TTL in the gaps.
+
+The fix is structural, and this skill already has the mechanism for it — **every target
+declares its own `inputs`** (see the state-file schema below). So:
+
+- **One worker per output file.** It receives that target's `inputs` glob set and nothing else.
+  It reads, writes one file, and exits. Its context stays small and stays hot.
+- **Never hand a worker the whole `src/` or `outputs/` tree** "for context". The declared
+  inputs ARE the context; anything else is prefix you pay to re-cache.
+- **Batch by independence, not by convenience:** all L2 targets are independent of each other,
+  so they go in one fan-out. L1 MOCs depend on L2 output, so they are a second fan-out after it.
+  `AGENTS.md` is last because it depends on both.
+- **A worker that would touch more than a handful of files is mis-scoped** — split the target,
+  or fix its `inputs`.
+
+**You MUST still block on every worker and verify its file writes before moving on or
+returning** — check the target files exist on disk with fresh mtimes. Never dispatch a wave and
+return "dispatched": detached workers die with your context and write nothing (observed
+2026-07-14: "Wave 1 dispatched" → 0 files on disk). The rebuild is only done when Phases 4–5
+have run against files that actually exist.
+
+⚠️ **Verify the whole write set, not just `memory/`.** This skill also rewrites the top-level
+**`AGENTS.md`** and **`DEVELOPER.md`**. A completion check globbing `memory/**/*.md` does not
+match either, and on 2026-08-18 that is exactly how a regenerated `AGENTS.md` **missed the
+commit** and had to be redone in a follow-up run.
 
 ## Mode
 
@@ -61,7 +92,7 @@ For each top-level directory in `src/`, count files and list immediate children:
 
 | Source | Structure |
 |--------|-----------|
-| `src/clickup/` | `Docs BUKTU/`, `Docs Tium/`, `🐵 Monkeys Wiki/` |
+| ~~`src/clickup/`~~ | **RETIRED 2026-08-06 and the tree DELETED.** The wiki moved to Outline — use `src/outline/🐵 Monkeys Wiki/`. An input glob naming `src/clickup/` matches nothing, so its target silently never regenerates. |
 | `src/confluence/` | `Intranet/`, `Monkeys Wiki/` |
 | `src/gdrive/` | `Monkeys/`, `Monkeys Heads/`, `Monkeys_Projects/`, `<Org> ExCo/`, `<Org>/` |
 | `github/` | `<org>/` (repos), personal repos |
@@ -98,7 +129,7 @@ Also re-check each clone's HEAD resolves; report any that don't (`git -C <dir> r
 
 Count `.agent.md` files under `outputs/services/**` (owner subdirs — `weroad/`, `weroad/jungle/`, `smnbss/`, …) and list `outputs/services/weroad/jungle/cross/` entries:
 
-- ~77 service docs, nested by owner: `<owner>/<service>.agent.md` (code/stack) + `<owner>/<service>.db.agent.md` (database schema). Filenames are de-prefixed (`weroad/community.agent.md`, not `weroad-community.agent.md`); the basename stays globally unique for `global_basename` resolution.
+- service docs, nested by owner (**re-measure; 64 `.agent.md` + 7 `.db.agent.md` on 2026-08-18** after 27 `.db` docs were superseded by `src/idp/<service>/database.md`): `<owner>/<service>.agent.md` (code/stack) + `<owner>/<service>.db.agent.md` (database schema). Filenames are de-prefixed (`weroad/community.agent.md`, not `weroad-community.agent.md`); the basename stays globally unique for `global_basename` resolution.
 - 3 cross-cutting: `<org>-rabbitmq-topology.md`, `<org>-rabbitmq-schema.md`, `<org>-rabbitmq-producers-consumers.md`
 
 Record all counts — they go in the Phase 5 digest.
@@ -116,7 +147,7 @@ Record all counts — they go in the Phase 5 digest.
      "run_at": "2026-04-19T08:00:00Z",
      "targets": {
        "memory/L2/team-buktu.md": {
-         "inputs": ["src/personio/staff-roster.tsv", "src/clickup/Docs BUKTU/**", "outputs/services/**/*.agent.md"],
+         "inputs": ["src/personio/staff-roster.tsv", "src/outline/**", "outputs/services/**/*.agent.md"],
          "max_mtime": 1713398400,
          "content_hash": "sha256:..."
        },
@@ -165,7 +196,7 @@ Each L2 file draws from specific inputs. Read those inputs, synthesize, write th
 
 ### 2a. Team files (`team-*.md`)
 
-**Inputs:** `src/personio/staff-roster.tsv` + `src/clickup/Docs {TeamName}/` + `src/linear/<org>/` + `outputs/services/**/*.agent.md` (ownership)
+**Inputs:** `src/personio/staff-roster.tsv` + `src/outline/**` + `src/linear/<org>/` + `outputs/services/**/*.agent.md` (ownership)
 
 For each team, produce `memory/L2/team-<name>.md`:
 - **Members** — from `staff-roster.tsv` + any org config in github repos
@@ -185,7 +216,7 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2c. monkeys-wiki.md
 
-**Inputs:** `src/clickup/🐵 Monkeys Wiki/` + `src/confluence/Monkeys Wiki/`
+**Inputs:** `src/outline/🐵 Monkeys Wiki/` + `src/confluence/Monkeys Wiki/`
 
 - Section inventory from both sources
 - Merge overlapping content, note which source is authoritative for what
@@ -291,7 +322,7 @@ For each source in `src/`, create/update `memory/L1/<source>.md`:
 
 | L1 File | Reads from |
 |---------|-----------|
-| `clickup.md` | `src/clickup/` structure + L2 files that cite clickup |
+| ~~`clickup.md`~~ | **DO NOT GENERATE.** The source was retired 2026-08-06, `src/clickup/` deleted, and the L1 MOC dropped. Listed here only so a future run does not recreate it. |
 | `confluence.md` | `src/confluence/` structure + L2 files that cite confluence |
 | `gdrive.md` | `src/gdrive/` structure + L2 files that cite gdrive |
 | `github.md` | `github/` structure + L2 files that cite github |
@@ -343,7 +374,7 @@ Each source MOC contains:
 
 #### `memory/L1/teams.md`
 
-Generate this file from `$BRAIN_CONFIG` `teams[]` + `memory/L2/team-*.md` + `src/personio/staff-roster.tsv` + any team data in `src/linear/` or `src/clickup/`.
+Generate this file from `$BRAIN_CONFIG` `teams[]` + `memory/L2/team-*.md` + `src/personio/staff-roster.tsv` + any team data in `src/linear/` or `src/outline/`.
 
 **`$BRAIN_CONFIG` is a declared input of this target** — it MUST appear in the target's `inputs` list in `memory/.rebuild-state.json` (as `.super/brain.config.yml`), so that editing `teams[]` marks `teams.md` dirty on the next incremental run. Without it a new team row sits in config and never reaches the table, and the prep skills go on re-deriving that calendar event by hand every run (observed 2026-08-06: the `GED - Deep dive` recurring event had no row).
 
@@ -359,14 +390,24 @@ The file must contain a **machine-readable mapping table** at the top (after fro
 - **Team name**: canonical team name (e.g., `Buktu`, `Tium`, `DevOps & IT`)
 - **Calendar patterns**: comma-separated, case-insensitive patterns used in calendar summaries (e.g., `Buktu`, `SAITAMA - Deep Dive`)
 - **File slug**: lowercase, no spaces, used for output filenames (e.g., `buktu`, `devops-it`)
-- **Linear teams**: comma-separated Linear team names, or `—` if none (e.g., `TEAM_BUKTU`, `DEVOPS, IT`)
+- **Linear teams**: comma-separated Linear team **names** as returned by `mcp__linear__list_teams`, or `—` if none (e.g., `BUKTU`, `DEVOPS, IT`). ⚠️ **Names, never keys** — `SAITAMA` not `STM`, `DEVOPS` not `DVO`, `Data Engineering` not `DE`. Mixed forms were shipping in `team-members.md` until 2026-08-18 and nothing downstream matched both.
 - **Members**: count of members from `team-members.md`, or list of names if count is small
 
 Below the table, keep human-readable sections (services owned, deep dive links, external systems) derived from L2 files.
 
 #### `memory/L1/team-members.md`
 
-Generate this file from `src/personio/staff-roster.tsv` (columns: `First Name | Last Name | Position | Department | Hire Date | Status | Supervisor`) + the Members sections of `memory/L2/team-*.md` + any `src/linear/` team membership exports.
+Generate this file from `src/personio/staff-roster.tsv` + the Members sections of `memory/L2/team-*.md` + **a live Linear read** (see *Linear-teams join* below).
+
+**Read the roster's real header, never a remembered column list.** The export carries
+`ID | First Name | Last Name | Email | Position | Department | Team | Office | Hire Date | Status | Supervisor | Contract End Date | Occupation Type`.
+⚠️ Two of those columns were missing from this skill's documented list and from `$BRAIN_CONFIG`
+`sources.personio.columns` until 2026-08-18 — `Email` above all — and the consequence was not an
+error but a **silent `—`**: `Email` is populated on **205/205** exported rows and rendered `—` on
+**190/199** roster rows for months. Start this target by diffing
+`head -1 src/personio/personio-staff.tsv` against `$BRAIN_CONFIG` `sources.personio.columns`; if
+they disagree, **fix the config first**, then generate. A column you do not know about cannot fail
+loudly — it just renders empty.
 
 The file must contain a **machine-readable mapping table** at the top (after frontmatter) with these exact columns:
 
@@ -377,12 +418,91 @@ The file must contain a **machine-readable mapping table** at the top (after fro
 
 - **Name patterns**: pipe-separated, case-insensitive identifiers that could appear in calendar summaries (e.g., `Bera | Simone Berardozzi` or `Alex | Alessandro`)
 - **File slug**: lowercase, spaces → hyphens, used for output filenames (e.g., `bera`, `alex`)
-- **Email**: from Personio or Linear, or `—` if unknown
+- **Email**: the roster's `Email` cell, verbatim. **`—` is only legal when that TSV cell is
+  genuinely empty** — which, on the current export, is never. This column is the join key for every
+  downstream Linear and Workspace lookup, so an unnecessary `—` here disables those lookups
+  silently. Do not "leave it out for brevity"; do not fill it by guessing
+  `first.last@<domain>` either — Personio holds the real local-part and it does not always follow
+  the pattern (`giulio.ricotti@` drops "Prina", `serhiy.kovalchuk@` for *Sergio* Kovalchuk).
 - **Role**: Position from Personio (e.g., `Senior Digital Product Manager`)
 - **Team / Department**: Department from Personio, or team name from L2 files if different
-- **Linear teams**: comma-separated Linear team names the person belongs to, or `—` if none / not applicable
+- **Linear teams**: see *Linear-teams join* below. **Never a bare `—`.**
 
 Only include Active employees from the staff roster. If a nickname or alias is known from calendar patterns but not in Personio, add it as an extra Name pattern and mark the source as `user`.
+
+##### Linear-teams join — derive it live, and label the blanks
+
+⚠️ **This column is load-bearing and it was wrong for months.** `brain-prepare-my-one-on-one` and
+`brain-prepare-my-deep-dives` read it to decide whether to query Linear at all, so a `—` does not
+degrade an agenda — it **removes every Linear section from it while the agenda still looks
+complete**. Audited 2026-08-18: **188 of 199 rows read `—`, and 73 of those people had live Linear
+team membership.** Alberto Marinelli (`alberto.marinelli@weroad.com`, member of BI / Data
+Engineering / Growth, lead of 9 active projects, 27 open issues) rendered as `—` and got a 1:1
+agenda with no project or issue context at all.
+
+Derive the column **from live Linear on every rebuild**, never from `src/linear/` alone:
+
+1. `mcp__linear__list_teams` (`limit: 250`) → the full team list with `key` and `name`. Keep both:
+   the roster must print the **`name`** (`SAITAMA`, `DEVOPS`, `CONTENT&SEO`), never the `key`
+   (`STM`, `DVO`). Both forms were in the table before 2026-08-18 and downstream matched on neither
+   reliably.
+2. For each team, list its members — `mcp__linear__list_users` with `team:`, or
+   `wr-linear teams members <key> --all`. Build `email → {team names}`.
+3. Join to the roster **on the Personio `Email` cell, lowercased**. Name matching is not a fallback
+   here: Linear display names drift from Personio legal names (`Sergio Kovalchuk` vs `serhiy.`,
+   `Matteo - Frag - Crosta`, `Victoria Guevara` vs Personio's `Maria Victoria Guevara`), and three
+   Linear accounts carry an email as their `name`.
+4. **Drop org-wide container teams from the cell** — `Digital: Others`,
+   `Digital: Product Development`, `Digital: Guilds`, `Monkeys Triage`, `AI Specialist`, `HEADS`,
+   `Simon`. They contain 17–42 people each, they are not query targets, and including them makes
+   every engineer's cell look identical. Keep the guilds (`Backend Guild`, `Frontend Guild`) and
+   `STAFF` — those own real projects.
+
+**Then label every cell. A blank must say which kind of blank it is:**
+
+| Situation | Cell value |
+|---|---|
+| Joined, has team membership | `BI, Data Engineering, Growth` (Linear team **names**, comma-separated, alphabetical) |
+| Joined, Linear account exists, zero team membership | `none (Linear account, no team)` |
+| Joined, no Linear account for that email | `none (no Linear account)` |
+| Personio row absent — founder / ExCo / external / candidate | `— (not in Personio; join not possible)` |
+
+⚠️ **The Personio→Linear join is not total and must not be presented as if it were.** Personio omits
+founders and part of ExCo entirely (Fabio Bin has no row) and carries no departure dates, so the
+unjoined set legitimately contains real people. Conversely, live Linear carries members with **no**
+Personio row — as of 2026-08-18: `tech@weroad.com` (AUTOMATIONS) and `team-crm@weroad.com` (service
+accounts, never add them), `chiara.bertorelle.ext@` (external guest), Chung Fei Wu (deliberately
+excluded from this table) and Himali Mishra. **Report the unjoined count in the section prose; never
+let an unjoinable person render the same as a person with no Linear presence.**
+
+⚠️ **Team membership under-covers where a person actually works — say so, don't silently widen the
+cell.** Alberto Marinelli is not a member of `AI Guild` yet leads six AI Guild projects, and his
+assigned issues span `BI, DE, GRO, TIUM, AIG` — five teams against three memberships. Do **not**
+paper over this by unioning in the teams of every project someone leads: multi-team projects would
+hand Matteo Risso eleven extra teams that are project scope, not his teams. The correct fix lives
+downstream — `brain-prepare-my-one-on-one` queries Linear **by email** (`list_projects member:`,
+`list_issues assignee:`), which is complete regardless of this column. Keep this column as the
+membership fact, and keep the email column populated so downstream never needs it.
+
+⚠️ **`mcp__linear__list_projects` pages at 50 and truncates silently** — a valid page with no hint
+more exist. Paginate with `cursor` before counting anything. `wr-linear projects list` is worse:
+`--all` and `--limit 250` both fail with `400 Query too complex`, and **`--state` is accepted and
+ignored** (every state filter returns the same first 50 rows). `wr-linear teams members --all` and
+`wr-linear users list --all` do paginate correctly.
+
+##### ⚠️ Byte budget — this page can no longer rotate its way under the cap
+
+Populating `Email` on ~199 rows added **~4.7 KB to the roster table**, which is **not rotatable** —
+rotation moves dated prose sections, and the table is the point of the file. As of 2026-08-18 the
+table alone is **~32.5 KB of the 40,960-byte cap**, so the page sits **~1 KB over** with only one
+dated section and a condensed archive list left on it.
+
+**Do not resolve this by deleting the Linear/email warnings above — they are the whole reason the
+column is populated.** Handle it in this order: (1) keep prose sections lean, one dated resync at a
+time, rotating the previous one every run; (2) if that is not enough, raise the cap **for this page
+specifically** or split the table into a companion page — and put the decision to the user rather
+than silently shedding content. A rebuild that hits the cap here and starts trimming warnings will
+reintroduce exactly the silent failure this section documents.
 
 These two files are the **canonical source** for `brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one`. They must be regenerated on every rebuild so skills never use stale hardcoded mappings.
 

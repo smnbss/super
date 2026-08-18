@@ -41,7 +41,49 @@ the goal, not a sign the routine misfired.
 
 1. Tell every phase subagent explicitly: *do the work inline/sequentially in your own context; do NOT dispatch detached background workers and return — orphaned workers write nothing.* If it must spawn helpers, it must block on them and verify their file writes before returning.
 2. On any ambiguous/early return, check ground truth before re-dispatching: output-file **mtimes** (`find <outdir> -newermt 'today 00:00' | wc -l`) and live worker processes. Match workers by **command + start time**, never by generic name — long-`etime` `claude` processes are unrelated pre-existing sessions.
-3. Completion signal = expected outputs exist with today's mtime AND nothing written in the last ~90s. Only then advance the chain. Never launch a duplicate export/rebuild while the previous one is still running.
+3. ⚠️⚠️ **ONE BLOCKING WAIT PER PHASE. NEVER POLL.** This is the single largest
+   self-inflicted cost in the routine, and it is the orchestrator's own doing.
+   Measured 2026-08-18: **219 orchestrator requests, of which ~40 were substantive** —
+   the rest were wait-loops and wake-ups, each one re-sending the **full ~198K-token
+   orchestrator context**. Cutting ~100 avoidable requests is worth **~20M tokens, ~15%
+   of the morning.**
+
+   A wait must happen **inside one shell call**, where blocking is free, not by
+   re-invoking the model to look again. One `Bash` call costs one request whether it
+   returns in 1 second or 20 minutes:
+
+   ```bash
+   # ONE request. Blocks until the phase is genuinely done, then exits.
+   until <completion-predicate>; do sleep 20; done; echo PHASE-DONE
+   ```
+
+   Use `run_in_background: true` only when you have other *substantive* work to do
+   meanwhile — never as a way to check back repeatedly. **Do not** write a `sleep N`
+   then re-check as a separate call; that is the anti-pattern this rule exists to kill.
+   If a phase can hang, put a deadline in the same call
+   (`timeout 3000 bash -c 'until …; do sleep 20; done'`) so one request still bounds it.
+
+4. ⚠️ **Use the phase's OWN completion predicate — a narrower one silently truncates the
+   phase.** "Expected outputs exist" is not specific enough to be safe. On 2026-08-18 the
+   memory phase was waited on with `memory/**/*.md`, which **does not match `AGENTS.md`
+   at the repo root** — the phase was declared complete before the generator had rewritten
+   it, and `AGENTS.md` **missed the commit entirely** and had to be regenerated and
+   committed in a follow-up run. Watch the **whole tree** a phase writes, not the
+   directory you happen to be thinking about:
+
+   | Phase | Completion predicate (the whole set it writes) |
+   |---|---|
+   | 2a `brain-pull-sources` | `src/` **and** `github/` quiet — `[ -z "$(find src github -newermt '-90 seconds' -type f 2>/dev/null | head -1)" ]` |
+   | 2b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` either has a doc with today's mtime or is gated SKIP |
+   | 3 meeting harvest | `src/gmeet/` quiet AND a per-day `index.md` exists for every day since the last harvest |
+   | 4 `brain-rebuild-memory` | **`memory/` AND `AGENTS.md` AND `DEVELOPER.md`** quiet — the generator writes all three. `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null | head -1)" ]` |
+   | 4d/4e agendas | one file per dispatched meeting under `outputs/agents/my-{deep-dives,one-on-one}/` |
+
+   **Before Part 5's commit, run `git status --porcelain` and read it.** It is the only
+   check that cannot miss a file by construction, and it costs one request. An unexpected
+   *absence* there — a phase that wrote nothing — is as informative as a presence.
+
+5. Never launch a duplicate export/rebuild while the previous one is still running.
 
 ## Part 0 — First-run bootstrap
 
@@ -68,6 +110,28 @@ Run the independent updaters **concurrently in the background**, then collect:
   of 217 and 420 — because the skill re-runs install-type detection and an interactive
   `AskUserQuestion` every single morning, almost always to conclude nothing needed doing.
   Consider `gstack-config set auto_upgrade true` so the real upgrades don't stop to ask.
+
+- **Vendored-skill drift — run the script, do not do this with a model.** super's canonical
+  `skills/` is copied into several vendored trees, and they drift. On 2026-08-18 fixing one
+  version bump plus one drifted copy cost **4.3M tokens**, and the same drift had appeared
+  **four mornings running**. It is a diff and a copy:
+
+  ```bash
+  github/smnbss/super/bin/resync-vendored-skills --check   # exit 1 = drift; prints which copies
+  github/smnbss/super/bin/resync-vendored-skills           # fix, then re-verify
+  ```
+
+  It syncs **per skill directory and never deletes**, because two of the copies are combined
+  trees holding other people's skills (the Drive `.agents/skills` had 196 against super's 19) —
+  a tree-level `rsync --delete` or a symlink would destroy them. It also **skips any tree that
+  does not already contain super's skills** (`~/.claude/skills`, `~/.agents/skills` and
+  `~/.codex/skills` all exist and hold *other* skills; syncing into them would be a new global
+  install, not a resync), and it **refuses to overwrite a copy whose file is newer** than
+  canonical rather than silently clobbering a local edit.
+
+  ⚠️ Drift is not cosmetic — it silently corrupts data. On 2026-08-14 Outline exported **stale
+  content for a full day with a clean exit status** because the installed copy had drifted.
+  Treat a non-zero `--check` as a real finding, not housekeeping.
 - `git pull --rebase --autostash` — `--autostash` is required: leftover working-tree WIP from prior sessions otherwise aborts the pull ("cannot pull with rebase: You have unstaged changes")
 
 Note: `brew upgrade` may fail on casks that need interactive sudo (e.g. `windows-app`) — non-fatal in a scheduled run; report and move on.
@@ -93,6 +157,25 @@ Dispatch each as a subagent invoking the named skill; collect a short summary.
   straight to 2b.5. Do not dispatch a subagent "just to check" — that check is what the ledger
   already is. Otherwise dispatch with the explicit repo list; the skill's own Step 0 gate
   re-confirms each one's recorded `head:` before reading source.
+
+  ⚠️ **Pass the CHANGED FILE LIST, not just the repo name — this is the same lever as the
+  repo-level gate, one level down.** The repo gate above took the phase from 55% of the
+  morning to near-free on a quiet day; on a busy day the remaining cost is workers reading
+  whole working trees for repos that legitimately moved (2026-08-18: 18 repos, ~24M tokens).
+  A repo name invites a full read; a file list does not. Compute it here — it is one
+  `git -C` per repo, zero model requests — and put it in each dispatch prompt:
+
+  ```bash
+  while IFS=$'\t' read -r repo path; do
+    rec=$(grep -oE 'head: [0-9a-f]+' "outputs/services/**/$repo.agent.md" 2>/dev/null | head -1 | cut -d' ' -f2)
+    [ -n "$rec" ] && printf '=== %s\n%s\n' "$repo" \
+      "$(git -C "$path" diff --name-only "$rec..HEAD" 2>/dev/null)"
+  done < .github-changed-repos.tsv
+  ```
+
+  A repo whose list comes back **empty** is inert — do not dispatch it at all. The worker
+  is instructed to stop rather than fall back to a full read if the list is missing, so
+  omitting it does not fail safe: it fails expensive.
 
   This phase was **55% of the entire morning routine** (6,881 model requests over 30 days,
   peaking at 684 in one day) because nothing ever told it which repos to look at, so it
@@ -176,17 +259,25 @@ One chunk fails embedding with `Forbidden` (a permanently 403-filtered page) —
 **Large-sync deferral — read the sync output.** When the day's diff is big (hundreds of files), `gbrain sync` **defers embed and extract** and says so ("Large sync: deferring link/timeline extraction… Run 'gbrain embed --stale'"). In that case you must run both explicitly, in this order (extract before the link-scoping `DELETE`, since extract is what creates the edges):
 
 ```bash
-gbrain extract links --source db --source-id default --since $(date +%F)
+gbrain extract links --source fs --repo "$(pwd)"     # full sweep — see why below
 gbrain embed --stale                      # foreground — see caveat below
 # then the link-scoping DELETE from above
 ```
 
-⚠️ **Do NOT use the `gbrain extract --stale` form the sync output suggests** — it silently
-creates **zero** `wikilink_basename` edges (`extractStaleFromDB` still passes `nullResolver` and
-no `globalBasename` opt, so bare `[[name]]` refs are dropped twice over) while still stamping
-`links_extracted_at`, so the pages look done. Confirmed again 2026-08-05: `--stale` returned
-0 links; the `--source db` form above created 153 edges over the same 314 pages. Because the
-deferral path is exactly where the large-sync diff lands, this is the case that matters most.
+⚠️ **Two extract forms are wrong here and one is right. Use `--source fs`.**
+
+| form | what it does | verdict |
+|---|---|---|
+| `extract --stale` | stamps `links_extracted_at` while creating **zero** `wikilink_basename` edges (`extractStaleFromDB` passes `nullResolver` and no `globalBasename` opt, so bare `[[name]]` refs are dropped twice over). Pages look done. | **never** |
+| `extract links --source db --since <today>` | creates real edges, but only for pages whose row it can date. On 2026-08-18 it **silently under-covered a large diff** — exactly the case the deferral path exists for. | **no** |
+| `extract links --source fs --repo "$(pwd)"` | re-reads the working tree, so coverage does not depend on a DB timestamp being right. | **yes** |
+
+The `--since` form was recommended here until 2026-08-18 on the strength of one good
+measurement (153 edges over 314 pages on 08-05). It is a **date filter on a mutable column**,
+and a large sync is precisely when those timestamps are least trustworthy — the failure is
+silent and looks identical to success. The `fs` sweep costs more wall clock and is the only
+form whose coverage is self-evident. Always follow it with the link-scoping `DELETE`, which is
+what keeps the extra `src/` edges out of the curated graph.
 
 ⚠️ `gbrain embed --stale --background` returned a job id but the jobs worker **did not drain it** (2026-07-14: queue showed empty, chunks stayed unembedded). Until that's fixed, run the embed in the **foreground**.
 
