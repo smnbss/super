@@ -418,15 +418,84 @@ mirror of a manifest, not of the wiki.
 
 Two things still have to exist, and neither is the per-repo narrative:
 
-- **`.db.agent.md` stays, in full.** The wikis do not document columns — **re-measured
-  2026-08-14 and still true**: `Catalog Wiki` gives a column table for **0** of the 98
-  tables in `api-catalog.db.agent.md`; `Draghi Wiki` **0 of 15 pages** carry any schema;
-  `Beye Wiki` reaches **1 of 14** tables. **31 jungle repos have now created an empty
-  `docs/domain/tech/db/` directory** — the slot exists, the content does not. When those
-  fill in, re-run the measurement and delete the `.db` docs the wikis actually replace;
-  until then a deleted `.db.agent.md` loses the only column-level reference there is.
-  **34 survive** — unchanged by the 2026-08-12 and 08-14 sweeps, which deleted only
-  `.agent.md` files (28 of the 34 sit under `weroad/jungle/`).
+- ⚠️ **`.db.agent.md` IS NOW SUPERSEDED — by `src/idp/`, not by the wikis.** The condition
+  this section used to state ("when a real column-level source exists, re-run the
+  measurement and delete the `.db` docs it replaces") was **met on 2026-08-18**, by a
+  source nobody expected: `idp_to_md` writes `src/idp/<service>/database.md` from **live
+  staging PostgreSQL**, carrying tables, columns, types, nullability, defaults,
+  constraints, enums and `COMMENT ON` descriptions — **7,179 of 8,104 columns are
+  described**. That is strictly better than a migration-derived snapshot, so **26
+  `.db.agent.md` files were deleted** on 2026-08-18, leaving **8 repo-wide** (2 under
+  `weroad/jungle/`).
+
+  The wikis remain irrelevant to this: they still document **no** columns. The replacement
+  is the IDP export.
+
+  **DO NOT GENERATE a `.db.agent.md` when the live schema already covers it.** The gate is
+  a file test plus an introspection test, both cheap:
+
+  ```bash
+  # $REPO is the repo the doc is named after. Resolve repo -> service(s) via
+  # src/idp/catalog.md's Repository column, then require an INTROSPECTED schema.
+  python3 - "$REPO" <<'EOF'
+  import json, re, sys
+  repo = sys.argv[1]
+  # Repos whose schema lives under a DIFFERENT service because the database is
+  # SHARED and owned elsewhere. Not derivable from catalog.md -- the `my`
+  # monorepo has no database of its own, it reads/writes `api_myweroad`.
+  ALIAS = {'my': 'api-myweroad'}
+  reg = json.load(open('src/idp/.registry.json'))['services']
+
+  def covered(svc, why):
+      db = (reg.get(svc) or {}).get('databases') or {}
+      if db.get('introspected', 0) > 0:
+          print(f"SKIP {repo}.db.agent.md -- {why} src/idp/{svc}/database.md "
+                f"({db['introspected']}/{db['count']} db, {db.get('tables',0)} tables)")
+          return True
+      return False
+
+  # 1. shared-database alias
+  if repo in ALIAS and covered(ALIAS[repo], 'shared database, live schema in'):
+      sys.exit(0)
+  # 2. the doc name may itself be a SERVICE name, not a repo name -- a monorepo
+  #    service doc (`api-coordinators.db.agent.md` lives in `weroad/coordinators`)
+  #    is never found by a repo lookup.
+  if covered(repo, 'live schema in'):
+      sys.exit(0)
+  # 3. otherwise treat the name as a repo and check every service it ships
+  for line in open('src/idp/catalog.md'):
+      m = re.match(r'\|\s*\[([^\]]+)\]\([^)]+\)(?:[^|]*\|){5}\s*`([^`]*)`', line)
+      if not m: continue
+      svc, r = m.group(1).strip(), m.group(2).strip().split('/')[-1]
+      if r != repo: continue
+      db = (reg.get(svc) or {}).get('databases') or {}
+      if db.get('introspected', 0) > 0:
+          print(f"SKIP {repo}.db.agent.md — live schema in src/idp/{svc}/database.md "
+                f"({db['introspected']}/{db['count']} db, {db.get('tables',0)} tables)")
+          sys.exit(0)
+  print(f"GENERATE {repo}.db.agent.md — no introspected live schema")
+  EOF
+  ```
+
+  ⚠️ **`introspected > 0` is the whole test — a `database.md` existing is NOT enough.**
+  Every service with `hasDatabase` gets the file; an unreachable one contains database
+  *names* and an explicit "connection failed, not an empty schema" notice. Two repos are in
+  exactly that state (`erp-buddy`, `idp`: no pod in the staging `microservices` namespace to
+  borrow credentials from), and **their `.db.agent.md` are the two that must still be
+  generated.** If staging credentials become reachable for them, re-run the gate and delete
+  those two as well.
+
+  ⚠️ **The mapping is repo → service and it is not the identity.** `.db.agent.md` is named
+  after the **repo**; `src/idp/` is keyed by **service**. `booking` → `api-booking`,
+  `my` → `api-myweroad` (the `my` monorepo has no database of its own — it shares
+  `api_myweroad`), `coordinators` **and** `api-coordinators` → the same
+  `api-coordinators` live schema. Never assume `<repo>` is a service name.
+
+  ⚠️ **What the live schema CANNOT tell you is recorded in
+  `outputs/services/TRAPS-from-deleted-docs.md` entries 13–16**: who writes a shared table,
+  a migration that has not run on staging (`mailcarrier` defines 6 tables absent there),
+  migration counts, and dropped tables (`coordinators`' 12 `tol_*`). Read those before
+  concluding the export lost something.
 - **The `cross/` RabbitMQ topology files stay**, and Step 4 still runs for docs-first
   repos — read exchange/queue/routing-key **names** from source for that purpose only.
   Do not let it become a pretext for re-reading controllers.
@@ -440,7 +509,7 @@ concluding something was lost:
 | API Surface | the wiki's own generated spec, e.g. `Payments Backend Wiki/Tech/Api/api-payments — OpenAPI.md` |
 | Glossary / domain vocabulary | `docs/domain/tech/glossary.md` + the wiki's Glossary page |
 | Source Structure, Key Files, Testing, Configuration | the repo — cheap to `ls`/read on demand, worthless to snapshot daily |
-| Database columns, enums, status lifecycles | **`{repo}.db.agent.md`** — kept, no substitute |
+| Database columns, enums, status lifecycles | **`src/idp/<service>/database.md`** — live staging schema with `COMMENT ON` descriptions. `{repo}.db.agent.md` survives only for the 2 repos with no reachable database |
 | Exchange / queue / routing keys | the **`cross/`** topology files, maintained by Step 4 |
 | Stack per repo | `memory/L2/technologies.md`, which aggregates from manifests directly |
 | Team ownership | `CODEOWNERS` + `memory/L1/teams.md` |
@@ -510,7 +579,7 @@ Order of work per repo, cheapest exit first:
 | 0.1 frozen `SUPERSEDED` doc | stamp `head:` if missing, then skip; **never regenerate** |
 | 0.2 HEAD unchanged | write nothing, touch no date |
 | 0.4 inert diff | stamp `head:` + `verified:` only |
-| 0.5 docs-first | **write nothing at all**; never grep the source tree. `.db.agent.md` + `cross/` only |
+| 0.5 docs-first | **write nothing at all**; never grep the source tree. `cross/` only — plus `.db.agent.md` ONLY if the src/idp gate says GENERATE |
 | 0.6 incremental | `Edit` the affected sections |
 | else | full read + `Write` |
 
