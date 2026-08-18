@@ -70,6 +70,7 @@ import html as _html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -1908,6 +1909,48 @@ def render_catalog_index(rows: list[dict], api_base: str, ui_base: str,
     return "\n".join(out).rstrip() + "\n"
 
 
+# -- Orphan sweep -------------------------------------------------------------
+
+def prune_orphan_services(seen_slugs: set, registry: dict) -> list[str]:
+    """Delete `src/idp/<slug>/` trees for services that have LEFT the catalog.
+
+    Without this the export only ever grows: a service removed upstream keeps its
+    folder and its registry entry forever, and nothing on the page says it is
+    gone. Found 2026-08-18 -- `backend-starter` left the catalog and its
+    directory (graphql.md, service.md) stayed on disk, so the tree read as 85
+    services against a 84-row catalog.md. Same defect class as the Outline
+    collection-rename prune.
+
+    Callers MUST only run this after a FULL, successful run: on a --limit or
+    --service run `seen_slugs` is a subset and this would delete the rest of the
+    catalog.
+    """
+    removed = []
+    base_real = os.path.realpath(OUTPUT_BASE)
+    for entry in sorted(os.listdir(OUTPUT_BASE)):
+        path = os.path.join(OUTPUT_BASE, entry)
+        if not os.path.isdir(path) or entry.startswith("."):
+            continue
+        if entry in seen_slugs:
+            continue
+        # Never follow a symlink or step outside src/idp.
+        real = os.path.realpath(path)
+        if not real.startswith(base_real + os.sep):
+            print(f"  ! refusing to prune outside src/idp: {path}", file=sys.stderr)
+            continue
+        try:
+            shutil.rmtree(real)
+        except OSError as exc:
+            print(f"  ! could not prune {entry}: {exc}", file=sys.stderr)
+            continue
+        removed.append(entry)
+    # Drop the matching registry entries by slug.
+    for name in [n for n, e in (registry.get("services") or {}).items()
+                 if (e or {}).get("slug") in removed or n in removed]:
+        registry["services"].pop(name, None)
+    return removed
+
+
 # -- Writing ------------------------------------------------------------------
 
 def write_if_changed(path: str, content: str) -> bool:
@@ -2189,6 +2232,23 @@ def export(args) -> int:
     else:
         if write_if_changed(index_path, render_catalog_index(rows, api_base, ui_base, total_in_catalog)):
             files_written += 1
+
+    # Prune services that have left the catalog — full runs only, and only when
+    # the listing looked sane. A partial run sees a subset by design.
+    if not partial:
+        seen = {r["slug"] for r in rows}
+        if len(seen) < max(1, int(total_in_catalog * 0.5)):
+            print(f"  ! skipping orphan sweep: only {len(seen)} of {total_in_catalog}"
+                  f" services exported — too few to trust as the full set", file=sys.stderr)
+        else:
+            pruned = prune_orphan_services(seen, registry)
+            for name in pruned:
+                print(f"  - {name}/ pruned (no longer in the IDP catalog)")
+            if pruned:
+                # The catalog index was written before the prune; rewrite it so its
+                # totals and its table cannot disagree with the tree.
+                write_if_changed(index_path,
+                                 render_catalog_index(rows, api_base, ui_base, total_in_catalog))
 
     registry["api_base"] = api_base
     registry["ui_base"] = ui_base
