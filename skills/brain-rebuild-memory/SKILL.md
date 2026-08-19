@@ -493,16 +493,47 @@ ignored** (every state filter returns the same first 50 rows). `wr-linear teams 
 ##### ⚠️ Byte budget — this page can no longer rotate its way under the cap
 
 Populating `Email` on ~199 rows added **~4.7 KB to the roster table**, which is **not rotatable** —
-rotation moves dated prose sections, and the table is the point of the file. As of 2026-08-18 the
-table alone is **~32.5 KB of the 40,960-byte cap**, so the page sits **~1 KB over** with only one
-dated section and a condensed archive list left on it.
+rotation moves dated prose sections, and the table is the point of the file. The table alone is
+**~30 KB of the 40,960-byte cap**, so the prose has to fit in what is left.
 
 **Do not resolve this by deleting the Linear/email warnings above — they are the whole reason the
-column is populated.** Handle it in this order: (1) keep prose sections lean, one dated resync at a
-time, rotating the previous one every run; (2) if that is not enough, raise the cap **for this page
-specifically** or split the table into a companion page — and put the decision to the user rather
-than silently shedding content. A rebuild that hits the cap here and starts trimming warnings will
+column is populated.** A rebuild that hits the cap here and starts trimming warnings will
 reintroduce exactly the silent failure this section documents.
+
+⚠️⚠️ **HARD PROSE BUDGET — COMPUTE IT, DO NOT ESTIMATE IT.** Before writing the page, measure the
+table and subtract:
+
+```bash
+TBL=$(sed -n '/^| Name patterns | File slug/,$p' memory/L1/team-members.md | wc -c)
+echo "prose budget = $(( 40960 - TBL - 1024 ))"   # 1 KB reserved for headcount growth
+```
+
+**Everything above the table must fit that budget.** Compacted 2026-08-19 to **9,156 B of prose /
+39,184 B total** with all 37 durable facts intact and the table byte-identical — that is the proven
+shape, so treat ~9.2 KB as the working target and re-derive it if the table grows.
+
+To stay inside it, these are **rules, not preferences**:
+- **Exactly ONE dated roster-state section is live at a time, and it is ≤ ~1.3 KB.** Rotate the
+  previous one every run. Net growth per rebuild must be ~0.
+- **The dated section carries durable facts only — never the measurement narrative.** Specifically
+  do NOT re-emit: "the whole diff is one added line", per-run spot-check tallies ("13 cells
+  re-checked, 0 contradictions"), or a restatement of rules already in *Standing lookup rules*.
+  One compact join-coverage line (`N teams · N account-no-team · N no-account`) is the whole
+  quantitative budget.
+- **The `## Archive` section is a pointer plus its two warnings** (cap-driven-not-age-driven; never
+  read a headcount out of an archived resync) **plus any archived claim that is a trap rather than
+  history**. It is **not** a table of contents for the log — the log has headings.
+- **Do not re-add the `mcp__linear__list_projects` / `wr-linear projects list` pagination traps
+  here.** They are Linear tooling traps, not roster rules, and they now live in `memory/L1/linear.md`
+  (relocated 2026-08-19). Duplicating them is what pushed this page over the cap.
+- **Never reword the three `Linear teams` blank tokens.** `brain-prepare-my-one-on-one` matches
+  `none (no Linear account)`, `none (Linear account, no team)` and
+  `— (not in Personio; join not possible)` as **exact strings** in its decision table. Shortening
+  them to save bytes silently breaks that consumer — it is not a valid compaction lever.
+
+If the computed budget is still not met **with all durable facts kept**, stop and put the choice to
+the user: raise the cap for this page specifically, or split the table into a companion page. Do not
+silently shed content.
 
 These two files are the **canonical source** for `brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one`. They must be regenerated on every rebuild so skills never use stale hardcoded mappings.
 
