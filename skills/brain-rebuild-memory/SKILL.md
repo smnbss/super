@@ -33,6 +33,19 @@ declares its own `inputs`** (see the state-file schema below). So:
   `AGENTS.md` is last because it depends on both.
 - **A worker that would touch more than a handful of files is mis-scoped** — split the target,
   or fix its `inputs`.
+- ⚠️⚠️ **EVERY NESTED `Agent` DISPATCH MUST PASS `subagent_type: "general-purpose"` EXPLICITLY.
+  Never omit it and never let it default.** The `wr-agents` plugin ships a `PreToolUse` hook
+  (`hooks/enforce-subagents.sh`) that forces an interactive confirmation whenever an `Agent` call
+  **without** `subagent_type` (which defaults to `"claude"`) carries a prompt/description
+  mentioning a known jungle service/repo name (`coordinators`, `cashew`, …) — which a team-L2
+  target's content routinely does, since it names the services that team owns. That "ask"
+  overrides `defaultMode: bypassPermissions` by design (it's meant to catch real coding work
+  routed to the wrong agent), so on an **unattended** morning run it stalls forever with nobody to
+  answer it. Confirmed 2026-08-20: a `team-stomp.md` worker dispatched without `subagent_type`
+  tripped this hook on its "coordinators" mention and the whole rebuild sat blocked until a human
+  intervened. `general-purpose` is on the hook's allow-list and passes through silently — it is
+  the correct type for this skill's workers regardless (they synthesize markdown from declared
+  inputs, never touch service source code), so there is no tradeoff in always setting it.
 
 **You MUST still block on every worker and verify its file writes before moving on or
 returning** — check the target files exist on disk with fresh mtimes. Never dispatch a wave and
