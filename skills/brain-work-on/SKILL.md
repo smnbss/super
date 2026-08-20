@@ -6,8 +6,9 @@ description: >
   outputs/services, and prior project workspace notes in outputs/projects. Use
   when the user says "work on <name>", "/brain-work-on <name>", "start working on",
   "I want to build <x>", "let's build <x>", or passes a project/capability name
-  and asks to set up context before coding. Run this BEFORE writing code so the
-  session has the full picture.
+  and asks to set up context before coding. Also use when the user wants a working
+  session tracked in Linear, or names a Linear project or issue to work under. Run
+  this BEFORE writing code so the session has the full picture.
 ---
 
 # Brain — Work On
@@ -16,7 +17,13 @@ Prepare to build a new capability on a specific project. Gather developer contex
 find the relevant repos, pull in existing architecture docs, and read any prior
 workspace notes — then summarize what was found and wait for the user's direction.
 
-This skill does **not** write code. It loads context and confirms readiness.
+This skill does **not** write code. It loads context, agrees a plan, and opens the
+Linear record the session is tracked in.
+
+**Superpowers is active by default.** Steps 1–7 are the read phase; Step 8 hands
+off to `superpowers:brainstorming` and then `superpowers:writing-plans`. Do not
+skip to implementation because the context looked sufficient — the plan file is
+what Step 9 projects into Linear, so there is nothing to track without it.
 
 ## Input
 
@@ -189,6 +196,11 @@ add the cross-project synthesis section if more than one name was given.
 - <lint/test/build gates from CLAUDE.md / AGENTS.md>
 - <any repo-specific patterns worth flagging>
 
+**Tracking (proposed — confirm in Step 7):**
+- Linear team: <KEY> (from IDP owning team `<owner>` | SIM — no owning team)
+- Project: <best-matching active project | none found>
+- Existing record: <STM-412 from .linear.json — will reattach | none, will create>
+
 **Open questions before we start:**
 1. <question about scope / surface area>
 2. <question about integration points>
@@ -218,22 +230,218 @@ actually matter — don't enumerate every shared dependency. The goal is: when
 the user names their first capability, neither of you has to re-learn how the
 pieces connect.
 
-## Step 7 — Stop and wait
+## Step 7 — Resolve the Linear tracking target
 
-Do **not** start implementing. Ask:
-
-> "Ready to build. What's the first capability you want to add?"
-> (For multi-project runs: "…and which surface does it start on?")
-
-Then wait for the user's direction. The next step (brainstorming, planning, or
-direct implementation) is the user's call — route into the appropriate skill
-(`brainstorming`, `writing-plans`, `office-hours`, etc.) based on their reply.
+Propose a specific target and have the user confirm it. Never open with a blank
+"which Linear project?" — Steps 2–3 already found the repo, so the owning team is
+derivable and the question should be a yes/no, not an interrogation.
 
 If Step 2 ended in a disambiguation question ("did you mean…"), wait for that
-answer first before asking the capability question — the two should not be
-stacked.
+answer first. Never stack the two questions.
+
+### 7a — Derive the owning team from the repo
+
+**First resolve the repo name to IDP service directories — they are not the same
+thing.** A repo commonly maps to two prefixed services, and `src/idp/<repo>/` may
+not exist at all:
+
+```bash
+ls -d src/idp/*<repo>* 2>/dev/null      # cashew -> admin-cashew AND api-cashew
+```
+
+- one hit → use it
+- several hits, **owners agree** → use that owner
+- several hits, **owners disagree** → ask which surface the work is on; don't pick
+- no hits → the repo isn't an IDP service, go to 7b
+
+⚠️ If you loop over the glob results in a shell, quote/array them — this shell is
+**zsh**, which does not word-split unquoted variables, so `for d in $hits` iterates
+once over the whole multi-line blob and silently yields an empty owner on exactly
+the multi-hit repos that need it. Prefer a short Python block over shell here.
+
+Then read the owner:
+
+```bash
+grep -iE "^\|\s*Owning team\s*\|" src/idp/<service>/service.md
+```
+
+All 84 IDP services carry this field (verified 2026-08-20: 84/84, no gaps). Map it
+with the table below. **Read the table — do not infer the key from the name**, two
+entries don't follow:
+
+| IDP `Owning team` | Linear key | Linear team |
+|---|---|---|
+| `staff` | `STF` | STAFF |
+| `buktu` | `BUK` | BUKTU |
+| `saitama` | `STM` | SAITAMA |
+| `stomp` | `STO` | STOMP |
+| `devops` | `DVO` | DEVOPS |
+| `data-engineers` | `DE` | Data Engineering |
+| `tium` | `TIUM` | TIUM |
+| `cyclops` | `CYC` | CYCLOPS |
+| `saian` | **`AI`** | SAIAN |
+| `rocket` | `RKT` | ROCKET |
+
+⚠️ `saian` → **`AI`**, not `SAI`. `data-engineers` → **`DE`** (Data Engineering),
+not `BI`.
+
+### 7b — No owning team → SIM
+
+`SIM` ("Simon", private, cycles disabled) is the fallback, **not the default**. Use
+it only when no owning team resolves:
+
+- the repo isn't an IDP service — `super`, this brain repo, `gstack`
+- the service is deliberately absent from the IDP catalog — `wetracker`
+  (marketing-owned) and `wemeet-hosted-ops` (ops-built)
+- the user picks it explicitly
+
+SIM carries no `Idea:`/`Task:` prefix from this skill. Those prefixes belong to
+other skills' conventions and this skill must not emit them anywhere.
+
+### 7c — Pick the project, then propose
+
+List the team's active projects with the **MCP** `list_projects` (resolve the tool
+name as in Step 9), passing `team: "<KEY>"` and `state: "started"`.
+
+⚠️ **Do not use `wr-linear projects list --team`.** Verified 2026-08-20: it returns
+**0 projects for every team**, with both the key and the full name, and exits 0 —
+a silent zero that reads exactly like an empty board. TIUM alone has 8+ active
+projects the MCP returns fine. Bulk *issue* reads on `wr-linear` are unaffected;
+it's the projects `--team` filter that's broken.
+
+⚠️ `list_projects` caps `limit` at **50** and truncates silently — follow `cursor`
+while `hasNextPage` is true before concluding a project doesn't exist. Note also
+that a project can span many teams, so a hit on the owning team doesn't mean it's
+that team's project alone.
+
+Pick the best title match against the work, then propose one line and stop for
+confirmation:
+
+> Tracking under **STM** → project *Cashew Cost Approval*, new issue.
+> Confirm, name a different project/issue, or say "no tracking".
+
+Accept all three answers. **"No tracking" is first-class** — a session that only
+reads code shouldn't open a ticket. Also accept a target given up front
+(`/brain-work-on cashew --issue STM-412`) and skip this step entirely.
+
+### 7d — Reattach, never duplicate
+
+Before creating anything, read the pointer file:
+
+```
+outputs/projects/<name>/.linear.json
+```
+
+```json
+{
+  "team": "STM",
+  "linearProject": "Cashew Cost Approval",
+  "issue": "STM-412",
+  "issueUrl": "https://linear.app/weroad/issue/STM-412",
+  "planFile": "outputs/projects/cashew/plan-2026-08-20.md",
+  "logThreadId": "<comment id>"
+}
+```
+
+If it exists and the issue is still open, **reattach to that issue** — a re-run
+continues the session, it does not start a second one. Write the file as soon as
+the issue exists, before any sub-issue, so an interrupted run is resumable.
+
+## Step 8 — Brainstorm, then write the plan
+
+Hand off to `superpowers:brainstorming` to settle intent and scope, then
+`superpowers:writing-plans` to write the plan to
+`outputs/projects/<name>/plan-<YYYY-MM-DD>.md`.
+
+**The plan file is authoritative. Linear is a projection of it.** Sync one
+direction only: plan → Linear. Never read state back out of Linear and into the
+plan — the moment both are authoritative they diverge on the first update that
+lands in only one, and then neither can be trusted.
+
+## Step 9 — Project the plan into Linear
+
+### Resolving the Linear tools
+
+The Linear MCP is a remotely-managed connector with an **opaque, unstable server
+id**. Never hardcode a tool name. Resolve by suffix at run time:
+
+```
+ToolSearch  query: "+save_issue linear"        → mcp__<id>__save_issue
+ToolSearch  query: "+save_comment linear"      → mcp__<id>__save_comment
+ToolSearch  query: "+list_issues linear"       → mcp__<id>__list_issues
+```
+
+Hardcoded Linear tool names are the known failure mode here: other skills in this
+repo still reference bare `list_issues` / `update_issue` that no longer resolve.
+
+Bulk reads stay on `wr-linear` (roughly 95% smaller payloads). Writes go through
+the MCP.
+
+### The three tiers
+
+| Tier | Linear object | Holds |
+|---|---|---|
+| Session | one issue | the goal, the plan file path + commit sha |
+| Phase | sub-issue per plan phase (`parentId`) | one top-level plan task each |
+| Request log | one comment thread on the session issue | every request, chronologically |
+
+Create the session issue with `save_issue`: `title`, `team`, `project`,
+`description` (goal + `planFile` path + commit sha so the projection is
+auditable). Then one sub-issue per plan phase with `parentId` set.
+
+**Leave `estimate` and `cycle` unset — always.** That is what keeps this work off
+the owning team's burndown while still showing on their board, which is correct:
+it's their codebase. Do not set a label unless the user names one that already
+exists on that team — **never create a label**, labels are per-team board
+configuration and heterogeneous across teams.
+
+Use the `patch` array for later description edits rather than rewriting the whole
+description. Anchors must match exactly once and the whole patch aborts if one
+fails, so it either applies cleanly or changes nothing.
+
+## Step 10 — Log requests as the session runs
+
+Every request the user makes gets appended as a **reply in the single log thread**
+on the session issue (`save_comment` with `parentId` = the thread's root comment,
+id stored as `logThreadId`).
+
+One issue per request is wrong — a session is dozens of conversational turns, and
+issue-per-request makes the board untriageable and distorts every count. The
+thread is the log; issues are the structure.
+
+As each plan phase completes, move its sub-issue's `state` forward. That is the
+only Linear write driven by progress rather than by a user request.
 
 ## Why this shape
+
+Starting a session without context is the single biggest source of wasted tokens
+and wrong-headed first drafts. WeRoad has 60+ repos, deep service docs, and prior
+project notes — a capability rarely exists in isolation. This skill front-loads
+the read phase so the build phase has something to anchor to, and makes the
+"what exists vs. what's greenfield" distinction explicit before a single line
+of code is written.
+
+The Linear projection exists because that read phase used to evaporate at session
+end. The plan file persists the thinking; the Linear record puts it where the work
+actually lives, on the board of the team that owns the code — without inventing a
+second source of truth for what the plan says.
+
+## Common mistakes
+
+| Mistake | Why it breaks |
+|---|---|
+| Asking "which Linear project?" cold | The owning team is derivable from the repo. Propose; don't interrogate. |
+| `grep`ing `src/idp/<repo>/service.md` directly | Repo ≠ service dir. `cashew` is `admin-cashew` + `api-cashew`. Glob first. |
+| `wr-linear projects list --team` | Returns a silent 0 for every team. Use the MCP `list_projects`. |
+| Trusting the first page of `list_projects` | Caps at 50 and truncates silently. Follow `cursor`. |
+| Hardcoding `mcp__<uuid>__save_issue` | The connector id is unstable. Resolve by suffix via ToolSearch. |
+| Inferring `SAI` from `saian` | The Linear key is `AI`. Read the mapping table. |
+| Creating an issue per request | Untriageable board, distorted counts. Comments in one thread. |
+| Setting `estimate` or `cycle` | Pulls the session into the owning team's burndown. |
+| Creating a label to tag the work | Labels are per-team board config. Only use one that exists. |
+| Reading state back from Linear into the plan | Two sources of truth diverge. Plan → Linear, one direction. |
+| Creating a second issue on re-run | Read `.linear.json` first and reattach. |
+| Emitting `Idea:`/`Task:` titles | Those belong to other skills' conventions. Plain titles here. |
 
 Starting a session without context is the single biggest source of wasted tokens
 and wrong-headed first drafts. WeRoad has 60+ repos, deep service docs, and prior
