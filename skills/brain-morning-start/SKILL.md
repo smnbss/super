@@ -77,33 +77,16 @@ pull_sources still exporting, memory "Wave 1 dispatched" with 0 files written).
 If `agents/morning-start-additional/SKILL.md` (relative to the brain root) does not exist, seed it
 once from `resources/morning-start-additional.template.md` (relative to this skill).
 
-## Part 1 — Update tools (parallel) & pull
+## Part 1 — Update tools & pull
 
-Run concurrently in the background, then collect:
+Dispatch **`brain-upgrade`** and collect its one-line report. It runs brew / npm / uv in parallel,
+resyncs the vendored copies of super's skills via `bin/resync-vendored-skills`, and pulls the brain
+repo with `--rebase --autostash`.
 
-- `brew update && brew upgrade` — may fail on casks needing interactive sudo (e.g. `windows-app`);
-  non-fatal in a scheduled run, report and move on
-- `npm update -g`
-- `uv sync --upgrade`
-- **Vendored-skill drift — run the script, never do this with a model.** super's canonical `skills/`
-  (19 dirs) is copied into several vendored trees and they drift:
-
-  ```bash
-  github/smnbss/super/bin/resync-vendored-skills --check   # exit 1 = drift; prints which copies
-  github/smnbss/super/bin/resync-vendored-skills           # fix, then re-verify
-  ```
-
-  It syncs **per skill directory and never deletes** — two copies are combined trees holding other
-  people's skills (the Drive `.agents/skills` has 196 against super's 19), so a tree-level
-  `rsync --delete` or a symlink would destroy them. It **skips any tree that does not already carry
-  super's skills** (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills` all exist and hold
-  *other* skills; syncing into them would be a new global install), and it **refuses to overwrite a
-  copy whose file is newer** than canonical.
-
-  ⚠️ Drift silently corrupts data: on 2026-08-14 Outline exported **stale content for a full day
-  with a clean exit status** because the installed copy had drifted. A non-zero `--check` is a real
-  finding, not housekeeping.
-- `git pull --rebase --autostash` — `--autostash` is required, or leftover WIP aborts the pull
+Nothing in that phase needs a model to decide anything, so it is cheap — but ⚠️ **do not skip the
+skill-resync half.** A drifted skill copy exports **stale content with a clean exit status** (Outline,
+a full day, 2026-08-14), and that failure is invisible downstream: every later phase in this routine
+reads what the exporters wrote.
 
 **No gbrain step here.** The reindex runs once at the very end (Part 4); running it now would index
 nothing new.
@@ -239,7 +222,7 @@ check that a freshly-rewritten page has outgoing links: `gbrain backlinks memory
 ```
 Morning start complete:
 
-Tools:    brew <N> upgraded · npm/python <status> · git <status>
+Tools:    brew <N> upgraded · npm/python <status> · skills <in sync | N resynced> · git <status>
 Sources:  <N> exported (X ok, Y failed)
 Clones:   <N> repos with local work — <merged | skipped | CONFLICT> (else "all clean mirrors")
 Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
@@ -267,7 +250,7 @@ Worth one line a day.
 ## Dependency chain
 
 ```
-Part 1 tools (parallel) ─┐
+Part 1 brain-upgrade ────┐
                          ↓
 Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (markdown only)
 Part 3 harvest ────────┘  (3 runs parallel to 2a)                        ↓
@@ -284,6 +267,7 @@ the reverse. On Postgres the sync runs concurrently with the always-on server, s
 
 | Skill | Output |
 |-------|--------|
+| `brain-upgrade` | local tooling + vendored `skills/` copies (no repo content) |
 | `brain-pull-sources` | `src/<source>/` |
 | `brain-rebuild-services` | `outputs/services/` |
 | `brain-rebuild-memory` | `memory/L1/`, `memory/L2/`, `AGENTS.md`, `DEVELOPER.md` |
