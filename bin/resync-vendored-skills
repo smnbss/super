@@ -39,8 +39,37 @@ CANDIDATES=(
   "$HOME/.codex/skills"
   "$HOME/.gemini/skills"
 )
-# A brain checkout keeps its own copy; find it via the caller's cwd if present.
-[[ -d "$PWD/.claude/skills" ]] && CANDIDATES+=("$PWD/.claude/skills")
+# A brain checkout keeps its own copy. Finding it via a bare `$PWD/.claude/skills`
+# test made the whole run cwd-dependent: invoked from anywhere but the brain root --
+# from $SUPER_HOME, or from any SUBDIRECTORY of the brain -- it silently checked one
+# fewer copy and still printed a clean all-clear. Resolve it properly instead:
+#   1. $BRAIN_ROOT / $SUPER_PROJECT_DIR when set (same override super itself honours)
+#   2. walk UP from $PWD for a brain marker, so a subdirectory works
+#   3. the brain that owns this script, when $SUPER_HOME is a sibling checkout
+# and then refuse to exit 0 having checked nothing (see the tail of this script).
+brain_root() {
+  local d
+  for d in "${BRAIN_ROOT:-}" "${SUPER_PROJECT_DIR:-}"; do
+    [[ -n "$d" && -d "$d/.agents/skills" ]] && { printf '%s\n' "$d"; return 0; }
+  done
+  d="$PWD"
+  local canon_root="${SUPER_HOME:-$HOME/.super}"
+  while [[ "$d" != "/" && -n "$d" ]]; do
+    # $HOME itself has BOTH markers on a normal machine ($HOME/.super is the
+    # super install, $HOME/.agents/skills holds other people's skills), so the
+    # walk must never accept it -- nor the super install dir. super's own
+    # cmdInstall refuses these two roots for the same reason.
+    if [[ "$d" != "$HOME" && "$d" != "$canon_root" ]] \
+       && [[ -d "$d/.super" && -d "$d/.agents/skills" ]]; then
+      printf '%s\n' "$d"; return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+BRAIN="$(brain_root || true)"
+[[ -n "$BRAIN" && -d "$BRAIN/.claude/skills" ]] && CANDIDATES+=("$BRAIN/.claude/skills")
+[[ -n "$BRAIN" && -d "$BRAIN/.agents/skills" ]] && CANDIDATES+=("$BRAIN/.agents/skills")
 
 EXCL=(--exclude='__pycache__' --exclude='.DS_Store' --exclude='*.pyc')
 drifted=0; fixed=0; checked=0
@@ -116,6 +145,26 @@ for dest in "${CANDIDATES[@]}"; do
 done
 
 echo "resync: $checked copy(ies) checked · $drifted drifted · $fixed fixed"
+
+# Checking NOTHING is a failure, not a pass. This used to print "0 copy(ies)
+# checked · 0 drifted" and exit 0 -- indistinguishable from "everything is in
+# sync", which is how a cwd-dependent run reported success while verifying
+# nothing at all.
+if [[ "$checked" -eq 0 ]]; then
+  {
+    echo "resync: FAILED — no distribution copy was checked, so nothing was verified."
+    echo "  Canonical: $CANON"
+    if [[ -z "$BRAIN" ]]; then
+      echo "  No brain checkout found from \$PWD ($PWD)."
+      echo "  Run this from inside your brain, or set BRAIN_ROOT=/path/to/brain."
+    else
+      echo "  Brain found at $BRAIN but it carries none of super's skills yet."
+      echo "  Run 'super install all --skills-only' from there first."
+    fi
+  } >&2
+  exit 1
+fi
+
 if [[ "$CHECK_ONLY" -eq 1 && "$drifted" -gt 0 ]]; then exit 1; fi
 if [[ "$drifted" -gt 0 && "$fixed" -lt "$drifted" ]]; then exit 1; fi
 exit 0

@@ -46,9 +46,13 @@ git -C "${SUPER_HOME:-$HOME/.super}" pull --rebase --autostash   # the super ins
 super install all --skills-only                                  # project skills into .claude/skills
 ```
 
-**Run `resync-vendored-skills` from the brain root, not from `$SUPER_HOME`.** It discovers the brain's
-copy via `$PWD/.claude/skills`, so running it from the wrong directory checks one fewer copy and still
-prints a clean all-clear.
+**`resync-vendored-skills` is cwd-independent as of 2026-08-21, and it now fails loudly instead of
+passing vacuously.** It resolves the brain from `$BRAIN_ROOT`/`$SUPER_PROJECT_DIR` or by walking up from
+`$PWD`, and it **exits 1 with `FAILED — no distribution copy was checked`** when it cannot find one.
+Before that fix it discovered the brain via a bare `$PWD/.claude/skills` test, so running it from
+`$SUPER_HOME` — or from any *subdirectory* of the brain — checked one fewer copy and still printed
+`0 copy(ies) checked · 0 drifted` and exited 0, which is indistinguishable from "all in sync". If you
+ever see that FAILED line, the run verified **nothing**; pass `BRAIN_ROOT=/path/to/brain` and re-run.
 
 ### Why `super install all --skills-only`, and never bare `super install`
 
