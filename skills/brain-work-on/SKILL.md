@@ -265,7 +265,7 @@ Then read the owner:
 grep -iE "^\|\s*Owning team\s*\|" src/idp/<service>/service.md
 ```
 
-All 84 IDP services carry this field (verified 2026-08-20: 84/84, no gaps). Map it
+All 84 IDP services carry this field (verified 2026-08-21: 84/84, no gaps). Map it
 with the table below. **Read the table — do not infer the key from the name**, two
 entries don't follow:
 
@@ -303,11 +303,27 @@ other skills' conventions and this skill must not emit them anywhere.
 List the team's active projects with the **MCP** `list_projects` (resolve the tool
 name as in Step 9), passing `team: "<KEY>"` and `state: "started"`.
 
-⚠️ **Do not use `wr-linear projects list --team`.** Verified 2026-08-20: it returns
-**0 projects for every team**, with both the key and the full name, and exits 0 —
-a silent zero that reads exactly like an empty board. TIUM alone has 8+ active
-projects the MCP returns fine. Bulk *issue* reads on `wr-linear` are unaffected;
-it's the projects `--team` filter that's broken.
+⚠️ **Use the MCP for projects, not `wr-linear projects list` — but not for the
+reason this skill used to give.** Re-measured 2026-08-21, and the earlier claim that
+`--team` "returns 0 projects for every team" is **FALSIFIED**: the plain call works
+and filters correctly (`--team TIUM` → 50 rows, all 50 genuinely carrying TIUM).
+The real defect is narrower and worse — **every flag that would take you past 50
+returns a silent zero, exit 0:**
+
+| Invocation | Rows |
+|---|---|
+| `projects list --team TIUM` | 50 — correct, but capped at the default `--limit` |
+| `projects list --team TIUM --all` | **0** |
+| `projects list --team TIUM --limit 100` (or 250) | **0** |
+
+So you cannot page past 50 projects on this CLI at all, and the attempt looks like
+an empty board rather than an error. The MCP `list_projects` also caps at 50 but
+**does** expose `cursor`, so it is the only path that can enumerate a full board —
+which is why the recommendation stands even though its old justification did not.
+
+⚠️ Do not generalise this to issues: `wr-linear issues list --project "<name>" --all`
+auto-paginates correctly (verified 2026-08-21: 359 rows on Bugs Triage, where the MCP
+silently caps at 250). `--all` is broken for **projects**, not for the CLI.
 
 ⚠️ `list_projects` caps `limit` at **50** and truncates silently — follow `cursor`
 while `hasNextPage` is true before concluding a project doesn't exist. Note also
