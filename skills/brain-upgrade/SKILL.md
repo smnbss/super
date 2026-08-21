@@ -43,7 +43,34 @@ propagates stale skills everywhere and reports success.
 git -C "${SUPER_HOME:-$HOME/.super}" pull --rebase --autostash   # the super install itself
 "${SUPER_HOME:-$HOME/.super}/bin/resync-vendored-skills" --check # exit 1 = drift; names the copies
 "${SUPER_HOME:-$HOME/.super}/bin/resync-vendored-skills"         # fix, then re-verify
+super install all --skills-only                                  # project skills into .claude/skills
 ```
+
+**Run `resync-vendored-skills` from the brain root, not from `$SUPER_HOME`.** It discovers the brain's
+copy via `$PWD/.claude/skills`, so running it from the wrong directory checks one fewer copy and still
+prints a clean all-clear.
+
+### Why `super install all --skills-only`, and never bare `super install`
+
+The resync keeps the vendored copies equal to canonical; `super install` is what makes each skill
+*visible to Claude Code*, by symlinking every `.agents/skills/<name>` into `.claude/skills/<name>`.
+`.agents/skills` is the canonical project store and `.claude/skills` is a view of it, so a skill that
+never gets projected is invisible no matter how in-sync it is.
+
+- **`--skills-only` is mandatory here.** A full `super install` also runs the configure phase, which
+  calls `cleanClaudeJsonMcps()` → `data.mcpServers = {}`. That *empties* `~/.claude.json` rather than
+  removing the keys super manages, so it deletes user-scope MCPs from outside the catalog (`gbrain`,
+  `mailtrap`, …). `gbrain` self-heals via a SessionStart hook; anything needing interactive OAuth does
+  not, and this skill is run often enough that the loss would be routine.
+- **Pass the `all` target explicitly.** With no target, `cmdInstall` falls through to an interactive
+  CLI picker and an unattended run hangs there.
+
+⚠️ **`DIVERGED and skipped` in its output is a finding, not noise.** A *real directory* at
+`.claude/skills/<name>` shadows `.agents/skills/<name>`: the two stop being one store, so later writes
+land on one and the other goes stale invisibly. Install repairs the case where the shadowing copy holds
+nothing unique, and refuses to touch one that has diverged — those need a human to diff the two, keep
+what matters, and delete the shadow to restore the symlink. Report the count; don't try to auto-resolve
+them.
 
 ⚠️ **The resync syncs `skills/` and nothing else**, so it cannot update the install's own `bin/`,
 `lib/` or `super.mjs`. That is a real split-brain worth checking: measured 2026-08-21, the installed
@@ -127,8 +154,11 @@ pull with *"cannot pull with rebase: You have unstaged changes"*.
 One line, naming what actually moved:
 
 ```
-Tools: brew <N> upgraded · npm/python <status> · super <up to date | N commits pulled> · skills <in sync | N copies resynced> · gstack <up to date | vA→vB | skipped> · git <status>
+Tools: brew <N> upgraded · npm/python <status> · super <up to date | N commits pulled> · skills <in sync | N copies resynced> · install <N projected, N repaired, N DIVERGED> · gstack <up to date | vA→vB | skipped> · git <status>
 ```
 
 Flag errors and notable version bumps. **A run where nothing moved is a good outcome, not a
 misfire** — say "already current" rather than reporting nothing.
+
+Always surface the `DIVERGED` count from Step 2's install, even when it is unchanged from the last run —
+a shadowed skill stays stale until someone resolves it, so a silent count lets it rot.
