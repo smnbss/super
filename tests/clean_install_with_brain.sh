@@ -5,7 +5,7 @@ set -euo pipefail
 # Clean Install Test for super with brain
 # =============================================================================
 # This script automates the CLEAN_INSTALL_WITH_BRAIN test procedure.
-# Run from the weroad_brain project root.
+# Run from a brain project root (the dir containing .super/).
 # =============================================================================
 
 BRAIN_DIR="${PWD}"

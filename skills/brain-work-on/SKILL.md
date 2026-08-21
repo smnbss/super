@@ -55,8 +55,11 @@ If no name is provided, stop and ask:
 
 ## Step 1 — Load developer context
 
-Check for `DEVELOPER.md` at the repo root (`$BRAIN_ROOT/DEVELOPER.md`, typically
-`/Users/simone.basso/code/weroad/weroad_brain/DEVELOPER.md`).
+Check for `DEVELOPER.md` at the brain root — `$BRAIN_ROOT/DEVELOPER.md`, where
+`$BRAIN_ROOT` is the project dir containing `.super/`, found by walking up from cwd.
+
+⚠️ Never hardcode a path to a particular brain or user. That a brain happens to sit
+at some `~/code/<org>/<name>` on one machine is a local accident; resolve it.
 
 - If it exists → read it in full. It contains prerequisites, local setup, and
   pointers to cross-cutting architecture docs (jungle, terraform, dev guidelines).
@@ -256,7 +259,7 @@ add the cross-project synthesis section if more than one name was given.
 - <any repo-specific patterns worth flagging>
 
 **Tracking (proposed — confirm in Step 7):**
-- Linear team: <KEY> (from IDP owning team `<owner>` | SIM — no owning team)
+- Linear team: <KEY> (from owning team `<owner>` via config | fallback_team — none resolved)
 - Project: <best-matching active project | none found>
 - Existing record: <STM-412 from .linear.json — will reattach | none, will create>
 
@@ -324,38 +327,40 @@ Then read the owner:
 grep -iE "^\|\s*Owning team\s*\|" src/idp/<service>/service.md
 ```
 
-All 84 IDP services carry this field (verified 2026-08-21: 84/84, no gaps). Map it
-with the table below. **Read the table — do not infer the key from the name**, two
-entries don't follow:
+In this brain every catalogued service carries that field (measured 2026-08-21:
+84/84, no gaps) — but the value is an **org's own team label**, so it is not
+translatable in the skill. **Resolve it through `brain.config.yml`**, matching
+`teams[].idp_owner` and taking that entry's `linear_key`:
 
-| IDP `Owning team` | Linear key | Linear team |
-|---|---|---|
-| `staff` | `STF` | STAFF |
-| `buktu` | `BUK` | BUKTU |
-| `saitama` | `STM` | SAITAMA |
-| `stomp` | `STO` | STOMP |
-| `devops` | `DVO` | DEVOPS |
-| `data-engineers` | `DE` | Data Engineering |
-| `tium` | `TIUM` | TIUM |
-| `cyclops` | `CYC` | CYCLOPS |
-| `saian` | **`AI`** | SAIAN |
-| `rocket` | `RKT` | ROCKET |
+```bash
+"${BRAIN_CONFIG:-$BRAIN_ROOT/.super/brain.config.yml}"
+```
 
-⚠️ `saian` → **`AI`**, not `SAI`. `data-engineers` → **`DE`** (Data Engineering),
-not `BI`.
+⚠️ **Never infer the Linear key from the team name.** In WeRoad's config `saian` →
+`AI` (not `SAI`) and `saitama` → `STM` (not `SAITAMA`) — a name-shaped guess resolves
+to no team, and `list_projects` answers a wrong-but-plausible key with an empty list
+rather than an error. Read `linear_key`; if the matching entry has none, go to 7b.
 
-### 7b — No owning team → SIM
+For reference, WeRoad's ten mappings resolve as `staff`→`STF`, `buktu`→`BUK`,
+`saitama`→`STM`, `stomp`→`STO`, `devops`→`DVO`, `data-engineers`→`DE`, `tium`→`TIUM`,
+`cyclops`→`CYC`, `saian`→`AI`, `rocket`→`RKT`. **That is one org's config, not this
+skill's contract** — read the file, don't copy the list.
 
-`SIM` ("Simon", private, cycles disabled) is the fallback, **not the default**. Use
-it only when no owning team resolves:
+### 7b — No owning team → `linear.fallback_team`, or ask
 
-- the repo isn't an IDP service — `super`, this brain repo, `gstack`
-- the service is deliberately absent from the IDP catalog — `wetracker`
-  (marketing-owned) and `wemeet-hosted-ops` (ops-built)
+When 7a resolves nothing, use `linear.fallback_team` from the config — a personal or
+scratch team. It is the fallback, **not the default**. Legitimate cases:
+
+- the repo isn't a catalogued service at all — a tool repo, the brain itself
 - the user picks it explicitly
 
-SIM carries no `Idea:`/`Task:` prefix from this skill. Those prefixes belong to
-other skills' conventions and this skill must not emit them anywhere.
+⚠️ **If `linear.fallback_team` is unset, ASK which team — never invent one.** And
+check `sources.idp.absent_services` before falling through: a real service that is
+deliberately missing from the catalog looks identical to "not a service", and
+defaulting it to a personal team hides the work from the team that actually owns it.
+
+Do not emit `Idea:`/`Task:` title prefixes anywhere, on any team. Those belong to
+other skills' conventions.
 
 ### 7c — Pick the project, then propose
 
@@ -524,7 +529,8 @@ second source of truth for what the plan says.
 | `wr-linear projects list --team` | Returns a silent 0 for every team. Use the MCP `list_projects`. |
 | Trusting the first page of `list_projects` | Caps at 50 and truncates silently. Follow `cursor`. |
 | Hardcoding `mcp__<uuid>__save_issue` | The connector id is unstable. Resolve by suffix via ToolSearch. |
-| Inferring `SAI` from `saian` | The Linear key is `AI`. Read the mapping table. |
+| Guessing a Linear key from the team name | Read `teams[].linear_key` from config. A wrong-but-plausible key returns an empty list, not an error. |
+| Hardcoding an org's team map into this skill | It belongs in `brain.config.yml`. The skill reads it. |
 | Creating an issue per request | Untriageable board, distorted counts. Comments in one thread. |
 | Setting `estimate` or `cycle` | Pulls the session into the owning team's burndown. |
 | Creating a label to tag the work | Labels are per-team board config. Only use one that exists. |

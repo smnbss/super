@@ -19,6 +19,10 @@ organization:
 linear:
   # Your Linear org slug. From URLs like linear.app/<org>/project/...
   org: weroad
+  # Where brain-work-on tracks a session whose repo has no owning team (a tool repo,
+  # the brain itself). Leave unset and it will ASK rather than guess — silently
+  # defaulting is how work stops appearing on the board of the team that owns it.
+  fallback_team: SIM
 
 medium:
   # Medium handle for src/medium exports (e.g. medium.com/@<handle>)
@@ -46,6 +50,15 @@ sources:
     enabled: true
     orgs: [weroad]
     personal_orgs: [smnbss]
+  idp:
+    # Internal developer portal / service catalog exported to src/idp/<service>/.
+    # brain-work-on reads each service's "Owning team" field and maps it to a Linear
+    # team via teams[].idp_owner below.
+    enabled: true
+    # Real services deliberately ABSENT from the catalog. Without this list they look
+    # like "not a service" and fall to linear.fallback_team, hiding them from the team
+    # that actually owns them.
+    absent_services: [wetracker, wemeet-hosted-ops]
   gws:
     enabled: true
   bigquery:
@@ -71,54 +84,78 @@ sources:
       - Status
       - Supervisor
 
-# Engineering teams. Drives L2 team-*.md scaffolding and calendar → file-slug mapping
-# for brain-prepare-my-deep-dives.
+# Engineering teams. Drives L2 team-*.md scaffolding, calendar → file-slug mapping for
+# brain-prepare-my-deep-dives, and repo → owning-team resolution for brain-work-on.
+#
+# `linear_key` is the Linear team KEY, not its display name — the short prefix on issue
+# ids (`STM-412` -> `STM`). Several are NOT derivable from the name (`SAIAN` -> `AI`,
+# `SAITAMA` -> `STM`), so read them off Linear rather than guessing:
+#   wr-linear teams list --all        # each row carries both `key` and `name`
+# Verified against live Linear 2026-08-21. An entry with no live team keeps
+# `linear_key:` empty; that is honest, and it makes brain-work-on ask instead of guess.
+#
+# `idp_owner` is the value this team has in the service catalog's "Owning team" field.
+# brain-work-on maps a repo to its team through it. Omit for teams that own no service.
 teams:
   - name: Buktu
     slug: buktu
     calendar_patterns: [Buktu]
-    linear_teams: [TEAM_BUKTU]
+    linear_key: BUK
+    idp_owner: buktu
   - name: Tium
     slug: tium
     calendar_patterns: [Tium]
-    linear_teams: [TIUM]
+    linear_key: TIUM
+    idp_owner: tium
   - name: Saitama
     slug: saitama
     calendar_patterns: [SAITAMA, "SAITAMA - Deep Dive"]
-    linear_teams: [SAITAMA]
+    linear_key: STM
+    idp_owner: saitama
   - name: SAIan
     slug: saian
     calendar_patterns: [SAIan]
-    linear_teams: []
+    linear_key: AI          # NOT "SAI" — the key does not follow the name
+    idp_owner: saian
   - name: Voyager
     slug: voyager
     calendar_patterns: [Voyager]
-    linear_teams: [VOYAGER]
+    linear_key:             # no live Linear team — calendar mapping only
   - name: DevOps
     slug: devops
     calendar_patterns: [DevOps]
-    linear_teams: [DEVOPS]
+    linear_key: DVO
+    idp_owner: devops
   - name: CyclOps
     slug: cyclops
     calendar_patterns: [CyclOps]
-    linear_teams: [CYCLOPS]
+    linear_key: CYC
+    idp_owner: cyclops
   - name: Stomp
     slug: stomp
     calendar_patterns: [Stomp]
-    linear_teams: [STOMP]
+    linear_key: STO
+    idp_owner: stomp
   - name: Rocket
     slug: rocket
     calendar_patterns: [Rocket]
-    linear_teams: [ROCKET]
+    linear_key: RKT
+    idp_owner: rocket
+  - name: Data Engineering
+    slug: data
+    calendar_patterns: [Data, YoData]
+    linear_key: DE
+    idp_owner: data-engineers
   - name: YoData
     slug: yodata
     calendar_patterns: [YoData]
-    linear_teams: [YODATA]
+    linear_key:             # no live Linear team — superseded by Data Engineering
   - name: IT
     slug: it
     calendar_patterns: [IT]
-    linear_teams: [IT]
+    linear_key: IT
   - name: Staff
     slug: staff
     calendar_patterns: [Staff]
-    linear_teams: []
+    linear_key: STF
+    idp_owner: staff

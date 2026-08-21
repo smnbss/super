@@ -264,7 +264,7 @@ If running as a subagent and the `Write` tool is blocked by harness policy,
 fall back to a Bash heredoc — same result, no permission prompt:
 
 ```bash
-cat > /Users/.../outputs/releases/<slug>-impact-summary.md <<'EOF'
+cat > "$BRAIN_ROOT"/outputs/releases/<slug>-impact-summary.md <<'EOF'
 ---
 title: ...
 EOF
