@@ -36,17 +36,40 @@ function test(name, fn) {
 console.log('Install-phase / ~/.claude.json MCP boundary tests');
 console.log('═'.repeat(50));
 
-writeFileSync(join(tmp, '.super', 'super.config.yaml'),
-  ['system: []', 'clis: []', 'skills: []', 'plugins: []', 'mcps: []', ''].join('\n'));
+// A catalog with one ENABLED mcp (super manages it) and one DISABLED (it does
+// not) — the two sides of the cleanup predicate.
+writeFileSync(join(tmp, '.super', 'super.config.yaml'), [
+  'system: []',
+  'clis: []',
+  'skills: []',
+  'plugins: []',
+  'mcps:',
+  '  linear:',
+  '    type: http',
+  '    url: https://mcp.linear.app/mcp',
+  '    enabled: true',
+  '  bigquery:',
+  '    type: http',
+  '    url: https://bigquery.googleapis.com/mcp',
+  '    enabled: false',
+  '',
+].join('\n'));
 
 const claudeJson = join(home, '.claude.json');
 const seed = () => writeFileSync(claudeJson, JSON.stringify({
-  // Two user-scope MCPs outside super's catalog — the real-world case.
   mcpServers: {
+    // Outside super's catalog — must survive. mailtrap has no self-heal, and
+    // anything OAuth-based cannot be restored non-interactively.
     gbrain: { type: 'http', url: 'http://localhost:3131/mcp' },
     mailtrap: { command: 'npx', args: ['-y', 'mailtrap-mcp'] },
+    // Enabled in the catalog: super writes this to settings.local.json, so a
+    // same-named entry here really does shadow it and must be removed.
+    linear: { type: 'http', url: 'https://stale.example/mcp' },
+    // In the catalog but DISABLED: super never writes it, so this entry is the
+    // user's own registration and must survive.
+    bigquery: { type: 'http', url: 'https://user-registered.example/mcp' },
   },
-  projects: { [tmp]: { mcpServers: { someproject: { command: 'x' } } } },
+  projects: { [tmp]: { mcpServers: { someproject: { command: 'x' }, linear: { command: 'stale' } } } },
 }, null, 2));
 
 const read = () => JSON.parse(readFileSync(claudeJson, 'utf8'));
@@ -54,18 +77,16 @@ const read = () => JSON.parse(readFileSync(claudeJson, 'utf8'));
 seed();
 installPhaseInstall(['claude'], { debugMode: false });
 
-test('installPhaseInstall preserves user-scope mcpServers', () => {
+const ALL = ['bigquery', 'gbrain', 'linear', 'mailtrap'];
+
+test('installPhaseInstall touches nothing at all', () => {
   const d = read();
-  assert.deepEqual(Object.keys(d.mcpServers || {}).sort(), ['gbrain', 'mailtrap'],
-    'the skill-sync phase must not clear user-scope MCPs');
+  assert.deepEqual(Object.keys(d.mcpServers || {}).sort(), ALL,
+    'the skill-sync phase must not clear ANY user-scope MCP');
+  assert.deepEqual(Object.keys(d.projects?.[tmp]?.mcpServers || {}).sort(), ['linear', 'someproject']);
 });
 
-test('installPhaseInstall preserves per-project mcpServers', () => {
-  const d = read();
-  assert.deepEqual(Object.keys(d.projects?.[tmp]?.mcpServers || {}), ['someproject']);
-});
-
-test('installPhaseInstall preserves the MCP entry contents, not just the keys', () => {
+test('installPhaseInstall preserves entry contents, not just keys', () => {
   const d = read();
   assert.equal(d.mcpServers.gbrain.url, 'http://localhost:3131/mcp');
   assert.deepEqual(d.mcpServers.mailtrap.args, ['-y', 'mailtrap-mcp']);
@@ -73,18 +94,41 @@ test('installPhaseInstall preserves the MCP entry contents, not just the keys', 
 
 test('installPhaseInstall is still non-destructive on a second run', () => {
   installPhaseInstall(['claude'], { debugMode: false });
-  assert.deepEqual(Object.keys(read().mcpServers || {}).sort(), ['gbrain', 'mailtrap']);
+  assert.deepEqual(Object.keys(read().mcpServers || {}).sort(), ALL);
 });
 
-// Documents TODAY'S behaviour of the configure phase. This is the destructive
-// half described in the header: it is asserted so the blast radius is explicit
-// and any deliberate fix has to update this test on purpose.
-test('installPhaseConfigure clears both scopes (known destructive behaviour)', () => {
-  seed();
+// The configure phase is the only one allowed to touch ~/.claude.json, and it
+// may remove ONLY the names super itself writes to settings.local.json.
+seed();
+installPhaseConfigure(['claude']);
+
+test('configure removes the enabled catalog MCP that shadows settings.local.json', () => {
+  assert.ok(!('linear' in (read().mcpServers || {})), 'enabled catalog entry should be cleaned');
+});
+
+test('configure preserves user-scope MCPs outside the catalog', () => {
+  const m = read().mcpServers || {};
+  assert.ok('gbrain' in m, 'gbrain must survive');
+  assert.ok('mailtrap' in m, 'mailtrap must survive — it has no self-heal');
+  assert.equal(m.mailtrap.command, 'npx', 'and survive intact, not as an empty stub');
+});
+
+test('configure preserves a DISABLED catalog name (super never writes it)', () => {
+  const m = read().mcpServers || {};
+  assert.ok('bigquery' in m, 'a disabled catalog entry here is the user\'s own registration');
+  assert.equal(m.bigquery.url, 'https://user-registered.example/mcp');
+});
+
+test('configure applies the same predicate at project scope', () => {
+  const p = read().projects?.[tmp]?.mcpServers || {};
+  assert.ok(!('linear' in p), 'shadowing catalog entry removed');
+  assert.ok('someproject' in p, 'unmanaged project entry kept');
+});
+
+test('configure is idempotent — a second run removes nothing more', () => {
   installPhaseConfigure(['claude']);
-  const d = read();
-  assert.deepEqual(Object.keys(d.mcpServers || {}), [], 'configure empties user-scope MCPs today');
-  assert.deepEqual(Object.keys(d.projects?.[tmp]?.mcpServers || {}), [], 'configure empties project MCPs today');
+  const m = read().mcpServers || {};
+  assert.deepEqual(Object.keys(m).sort(), ['bigquery', 'gbrain', 'mailtrap']);
 });
 
 rmSync(tmp, { recursive: true, force: true });

@@ -57,11 +57,13 @@ The resync keeps the vendored copies equal to canonical; `super install` is what
 `.agents/skills` is the canonical project store and `.claude/skills` is a view of it, so a skill that
 never gets projected is invisible no matter how in-sync it is.
 
-- **`--skills-only` is mandatory here.** A full `super install` also runs the configure phase, which
-  calls `cleanClaudeJsonMcps()` → `data.mcpServers = {}`. That *empties* `~/.claude.json` rather than
-  removing the keys super manages, so it deletes user-scope MCPs from outside the catalog (`gbrain`,
-  `mailtrap`, …). `gbrain` self-heals via a SessionStart hook; anything needing interactive OAuth does
-  not, and this skill is run often enough that the loss would be routine.
+- **`--skills-only` keeps the step in scope.** It runs the core phase and stops, so a tooling refresh
+  does not also rebuild external catalog skills, plugins, MCPs and context files — work this skill has
+  no reason to do, and which needs `.env.local` secrets to be current. It is a scope choice, not a
+  safety one: `cleanClaudeJsonMcps()` used to empty `~/.claude.json`'s `mcpServers` wholesale (taking
+  out non-catalog user-scope MCPs like `gbrain` and `mailtrap`), but it now removes only the enabled
+  catalog names super actually writes, and logs what it kept. A full `super install` is no longer
+  destructive to MCP config — `--skills-only` is simply the narrower, faster step.
 - **Pass the `all` target explicitly.** With no target, `cmdInstall` falls through to an interactive
   CLI picker and an unattended run hangs there.
 
