@@ -4,6 +4,9 @@ lib/__pycache__/
 __pycache__/
 node_modules/
 super-debug.log
+super.log
+sessions/
+session-context.md
 .DS_Store
 .last-update-check
 .claude/settings.json
