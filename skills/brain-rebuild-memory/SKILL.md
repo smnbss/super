@@ -558,23 +558,70 @@ Every AI coding assistant that lands in the brain project — Claude Code, Gemin
 
 **Anchor:** `<brain_root>` = the project directory found by the existing `$BRAIN_CONFIG` walk (same anchor as the rest of this skill). Never write to `$HOME`.
 
-### 3.5a. Regenerate `<brain_root>/AGENTS.md`
+### 3.5a. Regenerate ONLY this skill's block in `<brain_root>/AGENTS.md`
 
-Dirty when `hub.md` is dirty, when `src/` top-level structure changed, when Phase 1 inventory counts changed vs. the values baked into the current `AGENTS.md`, or in full-rebuild mode.
+⚠️⚠️ **NEVER REWRITE THE WHOLE FILE.** `AGENTS.md` belongs to the brain it runs in, not to this
+skill. Most of it is hand-maintained knowledge about *that* brain — its sources, its repos, its
+tooling, its open decisions — and a rebuild that regenerates the file wholesale destroys work no
+generator can reproduce. This skill owns **one demarcated block** and nothing else:
 
-Content (assemble from Phase 1 inventory + the just-rebuilt L1 files):
+```markdown
+<!-- BEGIN GENERATED: brain-rebuild-memory -->
+…this skill's content, and only this skill's content…
+<!-- END GENERATED: brain-rebuild-memory -->
+```
 
-1. **Intro paragraph** — who the brain belongs to (read `<brain_root>/.super/brain.config.yml` for owner + org), one-line purpose.
-2. **Repository Layout** — code fence showing `memory/`, `src/`, `outputs/` with live counts from Phase 1 (subdirs + file counts). L1 and L2 counts come from `ls memory/L1 | wc -l` and `ls memory/L2 | wc -l` after rebuild. Once `memory/L2/archive/` exists, list it as its own layout line with its file count (rolled-out dated sections; see "Size Caps & Archive Rotation").
-   **Every count here is re-measured from disk this run — never copied from the AGENTS.md already on disk.** The `github/` line in particular must use the Phase 1a-i figures: the `repos.sh` tracked-clone count for the jungle monorepo (not the subdirectory count), the stale clones named, and any clone with an unresolvable HEAD called out with the date it was last re-confirmed.
-3. **How to Navigate** — 4-step path starting at `memory/L1/hub.md` + a `Quick Access` list pointing at the highest-signal L1 files (`entities.md`, `data-model.md`, `product-areas.md`, `teams.md`, `system-map.md`) plus `outputs/services/<owner>/<repo>.agent.md`. Then a **`### Knowledge Map`** subsection: a complete index of every L1 MOC grouped (Entry & cross-cutting · People & org · Product & business · Data & analytics · Engineering & systems · Sources · Content & voice), each L1 showing the L2 pages it connects to as `[[wikilinks]]`. Derive the groupings + L1→L2 edges from the just-rebuilt files (the Phase 3 derivation table + each L2's `Topics:` footer). This is the agent's traversal spine — it must stay accurate to the actual link graph.
-4. **Freshness Tracking** — explain `verified:` fact blocks, `staleness_threshold:` frontmatter, and the `superseded:` marker convention.
-5. **Searching** — always use the gbrain MCP tools (`mcp__gbrain__query`, `mcp__gbrain__search`, `mcp__gbrain__get_page`); the HTTP server is always-on so they're always available. Grep is for exact matches only. **Always include the lowercase-extension warning:** gbrain's sync classifier (`isMarkdownFilePath`, `src/core/sync.ts`) tests `path.endsWith('.md')` case-sensitively, so an uppercase `.MD` file is rejected with reason `strategy` and silently never imported; there is no config surface for it (`gbrain.yml` include/exclude globs are applied *after* the extension gate). This is why service docs are `<repo>.agent.md` / `<repo>.db.agent.md` — the old `.AGENT.MD` form kept all 108 of them out of the index until 2026-07-27, and it couldn't be rescued by a wikilink rewrite either (link extraction strips only a lowercase `.md`, and `normalizeBasename` drops dots, so `[[cms.AGENT.MD]]` → `cmsagentmd` can never meet the page key `cmsagent`). Never introduce an uppercase-extension page.
-6. **External Tools** — only include sections for tools the user actually has (detect via `command -v`): `gws` CLI, Chrome DevTools, etc. Skip sections whose CLI isn't installed.
-7. **Skill Routing** — pull the routing table from `<brain_root>/.super/brain.config.yml` key `skill_routing` if present. If absent, write a short generic pointer: "skills live in `.claude/skills/` — invoke by name when the user's request matches their description."
-8. **Editing Skills — Patch Upstream First** — always emit this section; it is a property of the brain, not of any one skill, and a skill cannot carry it because the rule is about editing skills. State: the installed copies under `<brain_root>/.claude/skills/`, `~/.claude/skills/`, `~/.codex/skills/` and `~/.gemini/skills/` are **distribution artifacts** and drift from upstream; fix bugs in the super checkout at `${SUPER_HOME:-~/.super}/skills/<skill>/` first, then propagate with `${SUPER_HOME:-~/.super}/bin/resync-vendored-skills`. Give the reason — the canonical repo is what ships to every machine that installs super, so patching only a local copy leaves the bug in place for every future install. And give the consequence, because it is not merely a maintenance concern: **a drifted copy silently corrupts data.** On 2026-08-14 the Outline export ran for a full day producing stale content **with a clean exit status**, because the installed skill copy had drifted — the exit status describes the exporter, not the export. ⚠️ Note also that the resync covers `skills/` only, so it cannot update the install's own `bin/`, `lib/` or `super.mjs`; pull the checkout for those. **Do not name a path inside any particular brain's `github/` tree** — that a super clone happens to sit under `github/smnbss/super` in one brain is a local accident, and a skill or nav doc that hardcodes it is wrong on every other install.
+**Marker contract — follow it exactly:**
 
-Apply the same content-hash short-circuit as Phases 2/3: if regenerated content matches what's on disk, don't rewrite.
+| State of the file | What to do |
+|---|---|
+| Both markers present, once each | Replace **only** the text between them |
+| Neither marker present | Insert the block once, directly **before the first `## ` heading** (so navigation sits near the top), and say so in the Phase 5 digest |
+| Exactly **one** marker present | **ABORT. Change nothing.** Report it — a half-marked file must never be guessed at |
+| Either marker appears more than once | **ABORT. Change nothing.** Report it |
+
+- Everything before `BEGIN` and after `END` is preserved **byte for byte** — including blank lines,
+  section order and trailing whitespace. Do not reflow, reorder, retitle or "tidy" the host file.
+- Emit **nothing** outside the block. If a fact does not describe `memory/`, it does not belong to
+  this skill, however useful it is.
+- Apply the same content-hash short-circuit as Phases 2/3: if the regenerated block matches what is
+  already between the markers, do not rewrite the file at all.
+
+**Dirty when** `hub.md` is dirty, when the L1/L2/archive inventory changed, or in full-rebuild mode.
+⚠️ Note what is NOT a trigger any more: a change under `src/`, `github/` or `outputs/`. Those live
+outside the block, so they cannot make it dirty.
+
+**Block content — four items, all about `memory/` and nothing else:**
+
+1. **Memory Layout** — a fence covering `memory/L1/`, `memory/L2/` and `memory/L2/archive/` only,
+   with counts **re-measured from disk this run** (`ls memory/L1 | wc -l`, `ls memory/L2/*.md | wc -l`,
+   `ls memory/L2/archive/*.md | wc -l`) and one line on what each layer is for. **Never copy a count
+   from the AGENTS.md already on disk** — stale counts have survived multiple rebuilds by being read
+   back out of the previous output instead of recomputed. ⚠️ **Do not describe `src/`, `github/` or
+   `outputs/` here.** Those are the brain's own layout, hand-maintained outside the block.
+2. **How to Navigate** — the 4-step path starting at `memory/L1/hub.md`, a `Quick Access` list of the
+   highest-signal L1 pages, and a **`### Knowledge Map`** subsection indexing every L1 MOC grouped by
+   theme, each showing the L2 pages it connects to as `[[wikilinks]]`. Derive the groupings and the
+   L1→L2 edges from the just-rebuilt files (the Phase 3 derivation table plus each L2's `Topics:`
+   footer). This is the traversal spine and must match the real link graph.
+3. **Freshness Tracking** — the `verified:` fact-block convention, `staleness_threshold:` frontmatter,
+   the `superseded:` marker, and the rule that a claim wrong in *every* clause is deleted rather than
+   annotated.
+4. **Memory page naming** — the constraints this generator must itself obey, because it is the thing
+   that creates these filenames: extensions must be lowercase `.md` (gbrain's `isMarkdownFilePath`
+   tests `path.endsWith('.md')` case-sensitively, so an uppercase `.MD` page is rejected with reason
+   `strategy` and silently never indexed, with no config surface to rescue it); and **never name a
+   curated page `index.md`, `README.md`, `log.md` or `schema.md`** — `SYNC_SKIP_FILES` is tested on
+   the basename before any include/exclude glob, so such a page is silently never indexed while
+   `gbrain sync` still exits 0. Also restate the rule against introducing a wikilink to a deleted
+   doc; name it in a code-span instead.
+
+**Explicitly NOT this skill's business — never emit, never touch:** the `src/` / `github/` /
+`outputs/` layout and every source-specific trap; gbrain server, jobs-worker or reindex configuration;
+the reindex runbook; External Tools and CLI inventories; skill routing; skill-editing conventions;
+agent-dispatch rules; and any open-decisions register. All of that is the brain's, and it sits outside
+the markers. **If something in that list is currently inside the block, move it out rather than
+regenerating it** — and say so in the digest.
 
 ### 3.5b. Symlinks for other assistants
 
