@@ -35,12 +35,21 @@ Run concurrently in the background, then collect:
 
 ## Step 2 — Vendored-skill drift (run the script, never do this with a model)
 
-super's canonical `skills/` (20 directories) is copied into several vendored trees, and they drift:
+super's own checkout is the source of truth for its skills, and the vendored copies drift from it.
+**Update the install first, then resync** — in that order, because a resync from a stale install
+propagates stale skills everywhere and reports success.
 
 ```bash
-github/smnbss/super/bin/resync-vendored-skills --check   # exit 1 = drift; prints which copies
-github/smnbss/super/bin/resync-vendored-skills           # fix, then re-verify
+git -C "${SUPER_HOME:-$HOME/.super}" pull --rebase --autostash   # the super install itself
+"${SUPER_HOME:-$HOME/.super}/bin/resync-vendored-skills" --check # exit 1 = drift; names the copies
+"${SUPER_HOME:-$HOME/.super}/bin/resync-vendored-skills"         # fix, then re-verify
 ```
+
+⚠️ **The resync syncs `skills/` and nothing else**, so it cannot update the install's own `bin/`,
+`lib/` or `super.mjs`. That is a real split-brain worth checking: measured 2026-08-21, the installed
+skills were current while `${SUPER_HOME}` sat **17 commits behind `origin/main`** with no `bin/`
+directory at all — so the resync script itself was missing from the very place it is supposed to run
+from. **If the script is not found, the pull above is the fix, not a different path.**
 
 Why it is a script and not a model task: on 2026-08-18 applying one version bump and re-syncing one
 drifted copy cost **4.3M tokens**, and the same drift had appeared **four mornings running**. It is a
@@ -62,9 +71,8 @@ content for a full day with a clean exit status**, because the installed skill c
 canonical. **The exit status describes the exporter, not the export.** Treat a non-zero `--check` as a
 real finding, not housekeeping.
 
-⚠️ **Patch canonical first, always.** Fix bugs in `github/smnbss/super/skills/<skill>/`, then resync.
-The vendored copies are distribution artifacts; patching one of them leaves the bug in place for every
-future install and every other machine.
+The patch-upstream-first rule that governs *editing* these skills is a property of the brain, not of
+this skill — it lives in the brain's root `AGENTS.md`.
 
 ## Step 3 — gstack (Step 2 does not cover it)
 
@@ -116,7 +124,7 @@ pull with *"cannot pull with rebase: You have unstaged changes"*.
 One line, naming what actually moved:
 
 ```
-Tools: brew <N> upgraded · npm/python <status> · skills <in sync | N copies resynced> · gstack <up to date | vA→vB | skipped> · git <status>
+Tools: brew <N> upgraded · npm/python <status> · super <up to date | N commits pulled> · skills <in sync | N copies resynced> · gstack <up to date | vA→vB | skipped> · git <status>
 ```
 
 Flag errors and notable version bumps. **A run where nothing moved is a good outcome, not a
