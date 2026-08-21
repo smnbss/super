@@ -363,6 +363,14 @@ async function cmdInstall(args) {
   // `target = args[0]` isn't polluted.
   const debugMode = args.includes('--debug');
   args = args.filter(a => a !== '--debug');
+  // --skills-only runs the core phase and stops: built-in skills and the
+  // .claude/skills sync, without the configure phase. Configure rebuilds
+  // external catalog skills, plugins and MCPs, and on the way it empties
+  // ~/.claude.json's mcpServers — which takes out any user-scope MCP super
+  // does not manage (gbrain, mailtrap, …), some of which cannot be restored
+  // non-interactively. Use this when all you need is the skill sync.
+  const skillsOnly = args.includes('--skills-only');
+  args = args.filter(a => a !== '--skills-only');
   const target = args[0];
   const root = config.findRoot();
 
@@ -480,9 +488,12 @@ async function cmdInstall(args) {
   // install` so a single command brings a fresh brain fully online. Re-run
   // `super install` whenever .env.local changes — MCP settings are rebuilt
   // each time and pick up new $env:VAR values idempotently.
-  if (config.findConfig()) {
+  if (config.findConfig() && !skillsOnly) {
     catalog.installPhaseConfigure(selectedClis);
     setupContextFiles();
+    ui.spacer();
+  } else if (skillsOnly) {
+    ui.muted('  Skipping configure phase (--skills-only): external skills, plugins, MCPs and context files untouched.');
     ui.spacer();
   }
 
@@ -1224,6 +1235,7 @@ USAGE
 
 COMMANDS
   install [target]     Full install — hooks, CLIs, system prereqs, built-in + external skills, plugins, MCPs, context files (all|claude|gemini|codex|antigravity)
+    --skills-only      Core phase only: built-in skills + .claude/skills sync. Skips plugins/MCPs, so it leaves ~/.claude.json mcpServers alone.
   onboard              One-shot post-install: runs install, walks CLI + service logins, launches /super-setup
   claude|gemini|codex|antigravity  Launch CLI with session tracking (alias: agy)
   resume [session]     Resume a previous session
