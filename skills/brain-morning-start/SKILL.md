@@ -2,18 +2,18 @@
 name: brain-morning-start
 description: >
   Daily bootstrap: update tools, sync brain sources, rebuild memory and service docs,
-  harvest meeting notes since the last harvest, and prepare today's agendas for deep dives and 1:1s.
-  Use when the user says "morning start", "start my day", "daily bootstrap", "morning routine", or
-  "prepare my day".
+  and harvest meeting notes since the last harvest. Use when the user says "morning start",
+  "start my day", "daily bootstrap", or "morning routine". Does NOT prepare meeting agendas —
+  `brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one` are run separately, on demand.
 ---
 
 # Morning Start
 
-Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs, harvest every meeting since the last harvested day, prepare today's deep-dive and 1:1 agendas, then refresh the gbrain index in one pass.
+Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs, harvest every meeting since the last harvested day, then refresh the gbrain index in one pass.
 
 ## How to run this (keep the orchestrator lean)
 
-**Delegate each heavy phase to a subagent and keep only its summary.** Parts 2, 3, 4d/4e, and 5 each do bulky work (exporting thousands of files, rewriting ~46 memory files, querying Linear). Spawn an `Agent` per phase that invokes the named skill and returns a **concise summary only** (counts + errors, not file dumps). This is what keeps the morning run cheap in tokens — the verbose output stays in the subagent. The meeting-prep parts already use this pattern; apply it to the rest.
+**Delegate each heavy phase to a subagent and keep only its summary.** Parts 2, 3, and 4 each do bulky work (exporting thousands of files, rewriting ~46 memory files, regenerating service docs). Spawn an `Agent` per phase that invokes the named skill and returns a **concise summary only** (counts + errors, not file dumps). This is what keeps the morning run cheap in tokens — the verbose output stays in the subagent.
 
 Each sub-skill carries its own detailed instructions — do **not** restate them here; just dispatch and collect.
 
@@ -77,9 +77,8 @@ the goal, not a sign the routine misfired.
    | 2b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` either has a doc with today's mtime or is gated SKIP |
    | 3 meeting harvest | `src/gmeet/` quiet AND a per-day `index.md` exists for every day since the last harvest |
    | 4 `brain-rebuild-memory` | **`memory/` AND `AGENTS.md` AND `DEVELOPER.md`** quiet — the generator writes all three. `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null | head -1)" ]` |
-   | 4d/4e agendas | one file per dispatched meeting under `outputs/agents/my-{deep-dives,one-on-one}/` |
 
-   **Before Part 5's commit, run `git status --porcelain` and read it.** It is the only
+   **Before Part 4's commit, run `git status --porcelain` and read it.** It is the only
    check that cannot miss a file by construction, and it costs one request. An unexpected
    *absence* there — a phase that wrote nothing — is as informative as a presence.
 
@@ -150,7 +149,7 @@ Run the independent updaters **concurrently in the background**, then collect:
 
 Note: `brew upgrade` may fail on casks that need interactive sudo (e.g. `windows-app`) — non-fatal in a scheduled run; report and move on.
 
-There is **no gbrain step here.** The reindex happens once at the very end (Part 5), after all new content has been written — running it now would index nothing new.
+There is **no gbrain step here.** The reindex happens once at the very end (Part 4), after all new content has been written — running it now would index nothing new.
 
 Report what was updated; flag errors or notable version bumps.
 
@@ -195,7 +194,7 @@ Dispatch each as a subagent invoking the named skill; collect a short summary.
   peaking at 684 in one day) because nothing ever told it which repos to look at, so it
   re-derived that itself every morning across 136 clones.
 - **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its `run <path>` directives in order. *After 2b, before 2c.*
-- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. It only **writes markdown**; the gbrain index (chunks, embeddings, wikilink edges, timeline) is refreshed by the single `gbrain sync` in Part 5. **No gbrain step inside 2c.** *After 2b.5.*
+- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. It only **writes markdown**; the gbrain index (chunks, embeddings, wikilink edges, timeline) is refreshed by the single `gbrain sync` in Part 4. **No gbrain step inside 2c.** *After 2b.5.*
 
 ## Part 3 — Harvest meetings since last harvest (parallel with Part 2a)
 
@@ -219,32 +218,22 @@ bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"   # from skills/brain-pull
 
 **3b — Generate digests (LLM synthesis).** For each harvested day, generate the daily digest, then roll up the weekly / monthly / YTD digests, following the [Meeting digest generation](#meeting-digest-generation) appendix. Weekly rollups target the **ISO week each harvested day actually belongs to** (a Monday opens a new `WNN` folder — don't assume the span stays in `LAST_HARVESTED`'s week). These are the LLM rollups `gmeet_to_md` deliberately does not produce.
 
-## Part 4 — Prepare today's meetings
+## Meeting prep is NOT part of this routine
 
-**4a.** Fetch today's calendar (Europe/Rome day bounds → UTC):
+`brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one` are **invoked separately, on
+demand** — they are not dispatched here and this routine does not read the day's calendar to find
+them. Do not re-add them: an agenda is only useful immediately before its meeting, and generating
+every one of them at 07:00 re-measures Linear hours early, which is how a status cell goes stale
+between the build and the meeting.
 
-```bash
-gws calendar events list --params '{"calendarId":"primary","timeMin":"<TODAY_START_UTC>","timeMax":"<TODAY_END_UTC>","singleEvents":true,"orderBy":"startTime"}'
-```
+Consequently this routine writes **no** files under `outputs/agents/my-deep-dives/` or
+`outputs/agents/my-one-on-one/`, and a morning run that reports none is correct, not truncated.
 
-`gws` prints a `Using keyring backend: …` line before the JSON — strip it (`grep -v '^Using keyring'`) before piping to a JSON parser.
+## Part 4 — commit, THEN gbrain reindex (`gbrain sync`, LIVE, runs LAST)
 
-**4b. Classify** (skip `status:"cancelled"`):
+Every file is now written — src exports, gmeet, service docs, memory.
 
-| Type | Match rule |
-|------|-----------|
-| Deep Dive | `summary` contains "Deep Dive" (case-insensitive) |
-| 1:1 | `summary` contains "1:1" (case-insensitive), excluding "Prepare for 1:1s" |
-
-**4c.** Print the day's schedule. If none match, report "No deep dives or 1:1s today" and skip to Part 5.
-
-**4d/4e.** Spawn one `Agent` per meeting, **all in parallel**, each invoking `brain-prepare-my-deep-dives` (→ `outputs/agents/my-deep-dives/<team>.md`) or `brain-prepare-my-one-on-one` (→ `outputs/agents/my-one-on-one/<person>.md`) with `LOOKAHEAD_DAYS: 1`. The skills carry their own logic; just pass the meeting and collect the output path.
-
-## Part 5 — commit, THEN gbrain reindex (`gbrain sync`, LIVE, runs LAST)
-
-Every file is now written — src exports, gmeet, service docs, memory, today's agendas.
-
-**Commit first — this ordering is mandatory.** `gbrain sync` is **commit-based**: it git-diffs the repo against its last bookmark and imports only *committed* changes. Everything Parts 2–4 wrote is still in the working tree, so if you sync before committing it indexes **nothing new**. Run `brain-git-sync` (stage + commit + push) *before* the sync command, never after.
+**Commit first — this ordering is mandatory.** `gbrain sync` is **commit-based**: it git-diffs the repo against its last bookmark and imports only *committed* changes. Everything Parts 2–3 wrote is still in the working tree, so if you sync before committing it indexes **nothing new**. Run `brain-git-sync` (stage + commit + push) *before* the sync command, never after.
 
 Then refresh the index with **one incremental `gbrain sync`**: it git-diffs the repo, imports only changed files, embeds them, and extracts links/timeline — all in a single command. It runs live alongside the always-on server and the `io.weroad.gbrain.jobs` worker. The repo is the system of record (`gbrain.yml` at the root); pages are repo-relative-slugged (`memory/l1/hub`).
 
@@ -304,7 +293,7 @@ psql "$(gbrain config show 2>/dev/null | sed -n 's/^ *database_url: *//p')" -tAc
 
 Missing should be ~0 (a couple dozen permanently-unembeddable oversized/403 chunks are normal). Also sanity-check that a freshly-rewritten page has outgoing links (`gbrain backlinks memory/l1/hub` non-empty).
 
-## Part 6 — Final report
+## Part 5 — Final report
 
 ```
 Morning start complete:
@@ -316,9 +305,6 @@ Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
 Services: <N> docs refreshed, <M> repos skipped (HEAD unchanged)
 Memory:   L2 <N> files, L1 <N> MOCs · gbrain graph: <N> edges, <N> timeline
 Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet/
-Prep:
-  ✓ Deep Dive SAITAMA → outputs/agents/my-deep-dives/saitama.md
-  ✓ 1:1 Alex          → outputs/agents/my-one-on-one/alex.md
 gbrain reindex: <N> chunks embedded
 ```
 
@@ -336,14 +322,12 @@ Part 1 tools (parallel) ─┐
                          ↓
 Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (writes markdown only)
 Part 3 harvest ────────┘  (3 runs parallel to 2a)                        ↓
-                                                          Part 4 prep agents (parallel)
+                                       Part 4 commit (brain-git-sync) → gbrain reindex — single `gbrain sync`
                                                                          ↓
-                                       Part 5 commit (brain-git-sync) → gbrain reindex — single `gbrain sync`
-                                                                         ↓
-                                                                  Part 6 report
+                                                                  Part 5 report
 ```
 
-The reindex is intentionally **last**: it depends on every prior write (including the agendas). Because `gbrain sync` only indexes *committed* files, the commit (`brain-git-sync`) must run immediately **before** it — commit-then-reindex, never the reverse. On Postgres the sync runs concurrently with the always-on server, so it never blocks — and the Part 4 agents' `mcp__gbrain__query` calls keep working throughout.
+The reindex is intentionally **last**: it depends on every prior write. Because `gbrain sync` only indexes *committed* files, the commit (`brain-git-sync`) must run immediately **before** it — commit-then-reindex, never the reverse. On Postgres the sync runs concurrently with the always-on server, so it never blocks.
 
 ## Skill References
 
@@ -353,12 +337,10 @@ The reindex is intentionally **last**: it depends on every prior write (includin
 | `brain-rebuild-services` | `outputs/services/` |
 | `brain-rebuild-memory` | `memory/L1/`, `memory/L2/` |
 | `gmeet_to_md` (in `brain-pull-sources`) + [digest appendix](#meeting-digest-generation) | `src/gmeet/` |
-| `brain-prepare-my-deep-dives` | `outputs/agents/my-deep-dives/` |
-| `brain-prepare-my-one-on-one` | `outputs/agents/my-one-on-one/` |
 
 ## When to Use
 
-Run at the start of each working day to fully bootstrap the brain and prepare all meeting agendas at once.
+Run at the start of each working day to fully bootstrap the brain. Meeting agendas are prepared separately, on demand, immediately before the meetings that need them.
 
 ---
 
