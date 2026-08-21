@@ -74,6 +74,35 @@ nothing unique, and refuses to touch one that has diverged — those need a huma
 what matters, and delete the shadow to restore the symlink. Report the count; don't try to auto-resolve
 them.
 
+### Cross-agent parity — this brain is used from BOTH Claude Code and Codex
+
+They read different paths for the same skills: **Claude reads `.claude/skills`, Codex reads
+`.agents/skills` directly** (super deliberately leaves `.codex/skills` absent so skills aren't seen
+twice). `.agents/skills` is the one real store and `.claude/skills` should be symlinks into it, so both
+agents see one thing. Two ways that breaks, and install only catches the first:
+
+```bash
+# 1. shadowing real dirs — install reports these as DIVERGED (see above)
+# 2. Claude-only skills — install iterates .agents, so it NEVER notices these:
+comm -23 <(ls .claude/skills | sort) <(ls .agents/skills | sort)   # in .claude, invisible to Codex
+comm -13 <(ls .claude/skills | sort) <(ls .agents/skills | sort)   # in .agents, unprojected for Claude
+```
+
+**Both commands must print nothing.** Anything in the first list is a skill Codex cannot use; anything
+in the second is one Claude cannot use. Fix by moving the real content into `.agents/skills/<name>` and
+leaving a `../../.agents/skills/<name>` symlink behind in `.claude/skills`.
+
+⚠️ **A shadowed skill is a silent version split between your two agents, not a tidiness issue.**
+Measured 2026-08-21: all 56 gstack skills were real dirs in `.claude/skills` at **1.68.2.0** while
+`.agents/skills` held a 2026-08-05 snapshot at **1.60.1.0** — so Codex was running gstack 8 releases
+behind Claude, with 217 files missing and 1088 stale, and nothing reported it. Resolved by refreshing
+`.agents` from the current content and symlinking; the durable property is that one store means a future
+gstack upgrade reaches Codex automatically.
+
+⚠️ **`.agents/` and `.claude/` are both gitignored**, so a skill that exists only there is
+**unversioned and unbacked-up** — and does not reach your other machines. A local-only skill (one absent
+from `${SUPER_HOME}/skills`) should be upstreamed to super, not left in the store.
+
 ⚠️ **The resync syncs `skills/` and nothing else**, so it cannot update the install's own `bin/`,
 `lib/` or `super.mjs`. That is a real split-brain worth checking: measured 2026-08-21, the installed
 skills were current while `${SUPER_HOME}` sat **17 commits behind `origin/main`** with no `bin/`
