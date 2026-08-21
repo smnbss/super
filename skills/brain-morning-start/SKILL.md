@@ -9,163 +9,124 @@ description: >
 
 # Morning Start
 
-Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs, harvest every meeting since the last harvested day, then refresh the gbrain index in one pass.
+Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs, harvest every
+meeting since the last harvested day, then refresh the gbrain index in one pass.
 
 ## How to run this (keep the orchestrator lean)
 
-**Delegate each heavy phase to a subagent and keep only its summary.** Parts 2, 3, and 4 each do bulky work (exporting thousands of files, rewriting ~46 memory files, regenerating service docs). Spawn an `Agent` per phase that invokes the named skill and returns a **concise summary only** (counts + errors, not file dumps). This is what keeps the morning run cheap in tokens — the verbose output stays in the subagent.
+**Delegate each heavy phase to a subagent and keep only its summary.** Parts 2, 3 and 4 each do
+bulky work. Spawn an `Agent` per phase that invokes the named skill and returns **counts and errors,
+not file dumps** — the verbose output stays in the subagent. Each sub-skill carries its own
+instructions; dispatch and collect, do not restate them here.
 
-Each sub-skill carries its own detailed instructions — do **not** restate them here; just dispatch and collect.
+**Gate every phase on a deterministic signal before spending a model on it.** `brain-pull-sources`
+moves 82 declared sources for ~7 model requests because it is a script; `brain-rebuild-services` was
+**55% of the entire routine** until it was gated on `.github-changed-repos.tsv`, because nothing told
+it which repos to look at so it re-derived that across 137 clones every morning. A phase that reports
+"nothing to do" for zero cost is the goal, not a misfire.
 
-**Cost discipline: gate every phase on a deterministic signal before spending a model on it.**
-Measured over 2026-07-06→08-05 the routine averaged **464 model requests per morning** and
-peaked at 1,034, and the split says exactly where it goes:
+**Never trust a subagent's "done" — verify by filesystem state.** Sub-skills spawn their own
+workers, and wrapper subagents return before those workers finish (observed 3× on 2026-07-14:
+pull_sources still exporting, memory "Wave 1 dispatched" with 0 files written).
 
-| Phase | 30d requests | Share |
-|---|---:|---:|
-| `brain-rebuild-services` | 6,881 | 55% |
-| this orchestrator | 2,335 | 19% |
-| `gstack-upgrade` — **REMOVED from this routine** | 1,589 | 13% |
-| `brain-rebuild-memory` | 1,327 | 11% |
-| `brain-git-sync` | 309 | 2% |
-| **`brain-pull-sources`** | **7** | **~0%** |
-
-`brain-pull-sources` moves thousands of files across 113 sources for ~zero requests, because
-it is a deterministic script. Everything expensive is an LLM re-deriving what a `git rev-parse`
-or a `wc -l` answers for free. Before any heavy phase, run the cheap check and skip on a
-negative — `.github-changed-repos.tsv` for services (Part 2b). A phase that reports "nothing to
-do" for zero cost is the goal, not a sign the routine misfired.
-
-⚠️ **The table is the 2026-07-06→08-05 profile and is kept as measured, not rewritten.** Two of
-its phases have since left the routine: `gstack-upgrade` was removed outright (that 13% is
-structurally gone, not optimised), and meeting-agenda prep moved out to be run on demand. Read the
-shares as history, and re-measure before quoting a current cost.
-
-**Never trust a subagent's "done" — verify by filesystem state.** The sub-skills (`brain-pull-sources`, `brain-rebuild-services`, `brain-rebuild-memory`) spawn their own worker processes, and wrapper subagents routinely return *before* those workers finish (observed 3× on 2026-07-14: pull_sources still exporting, service regen mid-batch, memory "Wave 1 dispatched" with 0 files written). Rules:
-
-1. Tell every phase subagent explicitly: *do the work inline/sequentially in your own context; do NOT dispatch detached background workers and return — orphaned workers write nothing.* If it must spawn helpers, it must block on them and verify their file writes before returning.
-2. On any ambiguous/early return, check ground truth before re-dispatching: output-file **mtimes** (`find <outdir> -newermt 'today 00:00' | wc -l`) and live worker processes. Match workers by **command + start time**, never by generic name — long-`etime` `claude` processes are unrelated pre-existing sessions.
-3. ⚠️⚠️ **ONE BLOCKING WAIT PER PHASE. NEVER POLL.** This is the single largest
-   self-inflicted cost in the routine, and it is the orchestrator's own doing.
-   Measured 2026-08-18: **219 orchestrator requests, of which ~40 were substantive** —
-   the rest were wait-loops and wake-ups, each one re-sending the **full ~198K-token
-   orchestrator context**. Cutting ~100 avoidable requests is worth **~20M tokens, ~15%
-   of the morning.**
-
-   A wait must happen **inside one shell call**, where blocking is free, not by
-   re-invoking the model to look again. One `Bash` call costs one request whether it
-   returns in 1 second or 20 minutes:
+1. Tell every phase subagent: *do the work inline in your own context; do NOT dispatch detached
+   background workers and return* — orphaned workers write nothing. If it spawns helpers it must
+   block on them and verify their writes before returning.
+2. On an ambiguous or early return, check output-file **mtimes** and live processes. Match workers by
+   **command + start time**, never by name — long-`etime` `claude` processes are unrelated sessions.
+3. ⚠️⚠️ **ONE BLOCKING WAIT PER PHASE. NEVER POLL.** A wait belongs **inside one shell call**, where
+   blocking is free. One `Bash` call costs one request whether it returns in 1 second or 20 minutes;
+   re-invoking the model to look again re-sends the whole orchestrator context each time (measured
+   2026-08-18: 219 orchestrator requests, ~40 substantive — the rest were wake-ups).
 
    ```bash
-   # ONE request. Blocks until the phase is genuinely done, then exits.
-   until <completion-predicate>; do sleep 20; done; echo PHASE-DONE
+   until <completion-predicate>; do sleep 20; done; echo PHASE-DONE      # ONE request
    ```
 
-   Use `run_in_background: true` only when you have other *substantive* work to do
-   meanwhile — never as a way to check back repeatedly. **Do not** write a `sleep N`
-   then re-check as a separate call; that is the anti-pattern this rule exists to kill.
-   If a phase can hang, put a deadline in the same call
-   (`timeout 3000 bash -c 'until …; do sleep 20; done'`) so one request still bounds it.
+   Bound a phase that can hang in the *same* call: `timeout 3000 bash -c 'until …; do sleep 20; done'`.
+   Use `run_in_background: true` only when you have other substantive work meanwhile — never to
+   check back repeatedly.
+4. ⚠️ **Use the phase's OWN predicate — a narrower one silently truncates it.** "Expected outputs
+   exist" is not safe: waiting on `memory/**/*.md` does not match `AGENTS.md` at the repo root, so on
+   2026-08-18 the memory phase was declared done early and `AGENTS.md` **missed the commit entirely**.
+   Watch the whole tree a phase writes.
 
-4. ⚠️ **Use the phase's OWN completion predicate — a narrower one silently truncates the
-   phase.** "Expected outputs exist" is not specific enough to be safe. On 2026-08-18 the
-   memory phase was waited on with `memory/**/*.md`, which **does not match `AGENTS.md`
-   at the repo root** — the phase was declared complete before the generator had rewritten
-   it, and `AGENTS.md` **missed the commit entirely** and had to be regenerated and
-   committed in a follow-up run. Watch the **whole tree** a phase writes, not the
-   directory you happen to be thinking about:
-
-   | Phase | Completion predicate (the whole set it writes) |
+   | Phase | Completion predicate |
    |---|---|
-   | 2a `brain-pull-sources` | `src/` **and** `github/` quiet — `[ -z "$(find src github -newermt '-90 seconds' -type f 2>/dev/null | head -1)" ]` |
-   | 2b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` either has a doc with today's mtime or is gated SKIP |
+   | 2a `brain-pull-sources` | `[ -z "$(find src github -newermt '-90 seconds' -type f 2>/dev/null \| head -1)" ]` |
+   | 2b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` has a doc with today's mtime or is gated SKIP |
    | 3 meeting harvest | `src/gmeet/` quiet AND a per-day `index.md` exists for every day since the last harvest |
-   | 4 `brain-rebuild-memory` | **`memory/` AND `AGENTS.md` AND `DEVELOPER.md`** quiet — the generator writes all three. `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null | head -1)" ]` |
+   | 2c `brain-rebuild-memory` | `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null \| head -1)" ]` — the generator writes all three |
 
-   **Before Part 4's commit, run `git status --porcelain` and read it.** It is the only
-   check that cannot miss a file by construction, and it costs one request. An unexpected
-   *absence* there — a phase that wrote nothing — is as informative as a presence.
-
+   **Before Part 4's commit, run `git status --porcelain` and read it.** It is the only check that
+   cannot miss a file by construction. An unexpected *absence* is as informative as a presence.
 5. Never launch a duplicate export/rebuild while the previous one is still running.
 6. ⚠️⚠️ **EVERY `Agent` DISPATCH — INCLUDING ONES A SUB-SKILL SPAWNS INTERNALLY — MUST PASS
-   `subagent_type: "general-purpose"` EXPLICITLY. Never omit it and never let it default.** The
-   `wr-agents` plugin ships a `PreToolUse` hook (`enforce-subagents.sh`) that forces an
-   interactive confirmation whenever an `Agent` call **without** `subagent_type` (defaults to
-   `"claude"`) carries a prompt/description mentioning a known jungle service/repo name
-   (`coordinators`, `cashew`, `terraform`, …) — which service-doc and team-L2 dispatches routinely
-   do. That "ask" overrides bypass-permissions **by design**, so on an unattended run it stalls
-   forever with nobody to answer it. Confirmed 2026-08-20: a `brain-rebuild-memory` worker for
-   `team-stomp.md` was dispatched without `subagent_type`, tripped this hook on its "coordinators"
-   mention, and blocked the whole run until a human intervened hours later. `general-purpose` is
-   on the hook's allow-list and is also the correct type here regardless (these workers read/write
-   files and call MCP tools, never a stack-specialist persona) — set it on every dispatch you make
-   directly, and tell every sub-skill you invoke (`brain-rebuild-memory` above all, since it fans
-   out its own workers) to do the same.
+   `subagent_type: "general-purpose"` EXPLICITLY.** The `wr-agents` plugin ships a `PreToolUse` hook
+   (`enforce-subagents.sh`) that forces an interactive confirmation whenever an `Agent` call **without**
+   `subagent_type` (which defaults to `"claude"`) mentions a known jungle service or repo name
+   (`coordinators`, `cashew`, `terraform`, …) — which service-doc and team-L2 dispatches do routinely.
+   That ask **overrides bypass-permissions by design**, so on an unattended run it stalls forever with
+   nobody to answer it (confirmed 2026-08-20: a `team-stomp.md` worker blocked a run for hours on its
+   own "coordinators" mention). `general-purpose` is allow-listed and is the correct type regardless —
+   these workers synthesize markdown and call MCP tools, never a stack-specialist persona. Tell every
+   sub-skill you invoke to do the same, `brain-rebuild-memory` above all since it fans out its own workers.
 
 ## Part 0 — First-run bootstrap
 
-Check whether `agents/morning-start-additional/SKILL.md` exists (relative to the brain repo root). If it does, continue. If not, copy `resources/morning-start-additional.template.md` (relative to this skill's directory) to that path first — a one-time seed for extra per-morning agent runs.
+If `agents/morning-start-additional/SKILL.md` (relative to the brain root) does not exist, seed it
+once from `resources/morning-start-additional.template.md` (relative to this skill).
 
 ## Part 1 — Update tools (parallel) & pull
 
-Run the independent updaters **concurrently in the background**, then collect:
+Run concurrently in the background, then collect:
 
-- `brew update && brew upgrade` (background)
-- `npm update -g` (background)
-- `uv sync --upgrade` (background)
-- **Vendored-skill drift — run the script, do not do this with a model.** super's canonical
-  `skills/` is copied into several vendored trees, and they drift. On 2026-08-18 fixing one
-  version bump plus one drifted copy cost **4.3M tokens**, and the same drift had appeared
-  **four mornings running**. It is a diff and a copy:
+- `brew update && brew upgrade` — may fail on casks needing interactive sudo (e.g. `windows-app`);
+  non-fatal in a scheduled run, report and move on
+- `npm update -g`
+- `uv sync --upgrade`
+- **Vendored-skill drift — run the script, never do this with a model.** super's canonical `skills/`
+  (19 dirs) is copied into several vendored trees and they drift:
 
   ```bash
   github/smnbss/super/bin/resync-vendored-skills --check   # exit 1 = drift; prints which copies
   github/smnbss/super/bin/resync-vendored-skills           # fix, then re-verify
   ```
 
-  It syncs **per skill directory and never deletes**, because two of the copies are combined
-  trees holding other people's skills (the Drive `.agents/skills` had 196 against super's 19) —
-  a tree-level `rsync --delete` or a symlink would destroy them. It also **skips any tree that
-  does not already contain super's skills** (`~/.claude/skills`, `~/.agents/skills` and
-  `~/.codex/skills` all exist and hold *other* skills; syncing into them would be a new global
-  install, not a resync), and it **refuses to overwrite a copy whose file is newer** than
-  canonical rather than silently clobbering a local edit.
+  It syncs **per skill directory and never deletes** — two copies are combined trees holding other
+  people's skills (the Drive `.agents/skills` has 196 against super's 19), so a tree-level
+  `rsync --delete` or a symlink would destroy them. It **skips any tree that does not already carry
+  super's skills** (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills` all exist and hold
+  *other* skills; syncing into them would be a new global install), and it **refuses to overwrite a
+  copy whose file is newer** than canonical.
 
-  ⚠️ Drift is not cosmetic — it silently corrupts data. On 2026-08-14 Outline exported **stale
-  content for a full day with a clean exit status** because the installed copy had drifted.
-  Treat a non-zero `--check` as a real finding, not housekeeping.
-- `git pull --rebase --autostash` — `--autostash` is required: leftover working-tree WIP from prior sessions otherwise aborts the pull ("cannot pull with rebase: You have unstaged changes")
+  ⚠️ Drift silently corrupts data: on 2026-08-14 Outline exported **stale content for a full day
+  with a clean exit status** because the installed copy had drifted. A non-zero `--check` is a real
+  finding, not housekeeping.
+- `git pull --rebase --autostash` — `--autostash` is required, or leftover WIP aborts the pull
 
-Note: `brew upgrade` may fail on casks that need interactive sudo (e.g. `windows-app`) — non-fatal in a scheduled run; report and move on.
-
-There is **no gbrain step here.** The reindex happens once at the very end (Part 4), after all new content has been written — running it now would index nothing new.
-
-Report what was updated; flag errors or notable version bumps.
+**No gbrain step here.** The reindex runs once at the very end (Part 4); running it now would index
+nothing new.
 
 ## Part 2 — Brain sync & rebuild (sequential chain, subagent per phase)
 
-Dispatch each as a subagent invoking the named skill; collect a short summary.
+- **2a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 3 in parallel
+  with this.**
+- **2b `brain-rebuild-services`** — regenerate `.agent.md` docs → `outputs/services/`. *After 2a.*
 
-- **2a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 3 in parallel with this.**
-- **2b `brain-rebuild-services`** — regenerate `.agent.md` service docs → `outputs/services/`. *After 2a.*
-  **Read the work-list before dispatching anything:**
+  **Read the work-list before dispatching anything.** `.github-changed-repos.tsv` is written by 2a,
+  one line per repo whose HEAD moved.
 
   ```bash
-  wc -l < .github-changed-repos.tsv   # written by 2a; one line per repo whose HEAD moved
+  wc -l < .github-changed-repos.tsv
   cut -f1 .github-changed-repos.tsv
   ```
 
-  **Zero lines → skip the phase entirely.** Report `Services: 0 docs (no repos moved)` and go
-  straight to 2b.5. Do not dispatch a subagent "just to check" — that check is what the ledger
-  already is. Otherwise dispatch with the explicit repo list; the skill's own Step 0 gate
-  re-confirms each one's recorded `head:` before reading source.
+  **Zero lines → skip the phase entirely.** Report `Services: 0 docs (no repos moved)` and go to
+  2b.5. Do not dispatch a subagent "just to check" — that check *is* the ledger.
 
-  ⚠️ **Pass the CHANGED FILE LIST, not just the repo name — this is the same lever as the
-  repo-level gate, one level down.** The repo gate above took the phase from 55% of the
-  morning to near-free on a quiet day; on a busy day the remaining cost is workers reading
-  whole working trees for repos that legitimately moved (2026-08-18: 18 repos, ~24M tokens).
-  A repo name invites a full read; a file list does not. Compute it here — it is one
-  `git -C` per repo, zero model requests — and put it in each dispatch prompt:
+  ⚠️ **Pass the CHANGED FILE LIST, not just the repo name.** A repo name invites a full working-tree
+  read; a file list does not. It is one `git -C` per repo and zero model requests:
 
   ```bash
   while IFS=$'\t' read -r repo path; do
@@ -175,112 +136,103 @@ Dispatch each as a subagent invoking the named skill; collect a short summary.
   done < .github-changed-repos.tsv
   ```
 
-  A repo whose list comes back **empty** is inert — do not dispatch it at all. The worker
-  is instructed to stop rather than fall back to a full read if the list is missing, so
-  omitting it does not fail safe: it fails expensive.
-
-  This phase was **55% of the entire morning routine** (6,881 model requests over 30 days,
-  peaking at 684 in one day) because nothing ever told it which repos to look at, so it
-  re-derived that itself every morning across 136 clones.
-- **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its `run <path>` directives in order. *After 2b, before 2c.*
-- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`. It only **writes markdown**; the gbrain index (chunks, embeddings, wikilink edges, timeline) is refreshed by the single `gbrain sync` in Part 4. **No gbrain step inside 2c.** *After 2b.5.*
+  A repo whose list comes back **empty is inert — do not dispatch it at all.** The worker is
+  instructed to stop rather than fall back to a full read if the list is missing, so omitting the
+  list does not fail safe: it fails expensive.
+- **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its
+  `run <path>` directives in order. *After 2b, before 2c.*
+- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/` (46 files: 19 L1 + 27 L2), plus
+  `AGENTS.md` and `DEVELOPER.md`. It only **writes markdown** — the gbrain index is refreshed by the
+  single `gbrain sync` in Part 4. **No gbrain step inside 2c.** *After 2b.5.*
 
 ## Part 3 — Harvest meetings since last harvest (parallel with Part 2a)
 
-Two stages, dispatched to one subagent (collect a short summary): a **deterministic harvest** (the `gmeet_to_md` extractor) followed by **LLM digest generation** (the [Meeting digest generation](#meeting-digest-generation) appendix below). Backfills every day since the last harvested day through yesterday (weekends/holidays/travel). Reads GWS/Calendar — independent of brain memory.
-
-**Detect `LAST_HARVESTED`** — the most recent `MM-DD` folder with a daily digest:
-
-```bash
-ls -1d src/gmeet/*/W*/??-?? 2>/dev/null \
-  | while read d; do [ -f "$d/$(basename "$d")-digest.md" ] && echo "$d"; done \
-  | sort | tail -1
-```
-
-Reconstruct `YYYY-MM-DD` from the `YYYY/WNN/MM-DD` path. If none found, use yesterday and note it's a first run.
-
-**3a — Harvest raw artifacts (deterministic, no LLM).** Run the `gmeet_to_md` extractor (it lives in the `brain-pull-sources` skill's `bin/`) for the authenticated gws user. It walks Calendar, discovers Drive artifacts (Gemini notes, agendas, recordings, attachments, transcripts), and writes per-meeting folders + a static per-day `index.md` under `src/gmeet/YYYY/WNN/MM-DD/`. It is idempotent and re-runs the last day safely — the full-span re-harvest self-heals gaps and **preserves existing `*-digest.md` and `transcript.md`** files:
+**3a — Harvest raw artifacts (deterministic, no LLM).** Run the `gmeet_to_md` extractor from
+`skills/brain-pull-sources/bin/`. It walks Calendar, discovers Drive artifacts (Gemini notes,
+agendas, recordings, attachments, transcripts) and writes per-meeting folders plus a static per-day
+`index.md` under `src/gmeet/YYYY/WNN/MM-DD/`. Idempotent — it re-runs the last day safely, the
+full-span re-harvest self-heals gaps, and it **preserves existing `*-digest.md` and `transcript.md`**:
 
 ```bash
-bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"   # from skills/brain-pull-sources/
+bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"
 ```
 
-**3b — Generate digests (LLM synthesis).** For each harvested day, generate the daily digest, then roll up the weekly / monthly / YTD digests, following the [Meeting digest generation](#meeting-digest-generation) appendix. Weekly rollups target the **ISO week each harvested day actually belongs to** (a Monday opens a new `WNN` folder — don't assume the span stays in `LAST_HARVESTED`'s week). These are the LLM rollups `gmeet_to_md` deliberately does not produce.
+**3b — Generate digests (LLM synthesis).** For each harvested day generate the daily digest, then
+roll up weekly / monthly / YTD per the [digest appendix](#meeting-digest-generation). These are the
+rollups `gmeet_to_md` deliberately does not produce. ⚠️ Weekly rollups target the **ISO week each
+harvested day actually belongs to** — a Monday opens a new `WNN` folder, so don't assume the span
+stays in `LAST_HARVESTED`'s week.
 
 ## Meeting prep is NOT part of this routine
 
-`brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one` are **invoked separately, on
-demand** — they are not dispatched here and this routine does not read the day's calendar to find
-them. Do not re-add them: an agenda is only useful immediately before its meeting, and generating
-every one of them at 07:00 re-measures Linear hours early, which is how a status cell goes stale
-between the build and the meeting.
+`brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one` are **invoked separately, on demand**
+— they are not dispatched here and this routine does not read the day's calendar to find them. Do not
+re-add them: an agenda is only useful immediately before its meeting, and building every one at 07:00
+measures Linear hours early, which is how a row goes stale before the room reads it.
 
 Consequently this routine writes **no** files under `outputs/agents/my-deep-dives/` or
-`outputs/agents/my-one-on-one/`, and a morning run that reports none is correct, not truncated.
+`outputs/agents/my-one-on-one/`, and a run reporting none is correct, not truncated.
 
-## Part 4 — commit, THEN gbrain reindex (`gbrain sync`, LIVE, runs LAST)
+## Part 4 — commit, THEN gbrain reindex (runs LAST)
 
 Every file is now written — src exports, gmeet, service docs, memory.
 
-**Commit first — this ordering is mandatory.** `gbrain sync` is **commit-based**: it git-diffs the repo against its last bookmark and imports only *committed* changes. Everything Parts 2–3 wrote is still in the working tree, so if you sync before committing it indexes **nothing new**. Run `brain-git-sync` (stage + commit + push) *before* the sync command, never after.
-
-Then refresh the index with **one incremental `gbrain sync`**: it git-diffs the repo, imports only changed files, embeds them, and extracts links/timeline — all in a single command. It runs live alongside the always-on server and the `io.weroad.gbrain.jobs` worker. The repo is the system of record (`gbrain.yml` at the root); pages are repo-relative-slugged (`memory/l1/hub`).
+**Commit first — this ordering is mandatory.** `gbrain sync` is **commit-based**: it git-diffs the
+repo against its last bookmark and imports only *committed* changes. Everything Parts 2–3 wrote is
+still in the working tree, so syncing before committing indexes **nothing new**.
 
 Delegate to a subagent (returns the sync delta):
 
 ```bash
-cd <brain-root> && set -a && source .env.local && set +a            # OPENAI_API_KEY + OPENAI_BASE_URL
-# 1) COMMIT FIRST — gbrain sync only indexes committed files (prefer brain-git-sync, or inline:)
+cd <brain-root> && set -a && source .env.local && set +a      # OPENAI_API_KEY + OPENAI_BASE_URL
+# 1) COMMIT FIRST (prefer brain-git-sync, or inline:)
 git add -A && git commit -m "chore(brain): morning-start sync $(date +%F)" && git push
-# 2) Then reindex the just-committed changes
-gbrain sync --repo "$(pwd)" --skip-failed --no-pull --yes           # incremental: import changed + embed + extract
-# Scope the link graph to curated pages: raw src/ exports are basename-resolved
-# into a huge hairball by global_basename, so drop links ORIGINATING from non-
-# curated pages (keep memory/ + outputs/). Idempotent; safe to run every sync.
+# 2) Then reindex the just-committed changes — import + embed + extract in one pass
+gbrain sync --repo "$(pwd)" --skip-failed --no-pull --yes
+# 3) Scope the link graph to curated pages. Idempotent; safe every sync.
 psql "$(gbrain config show 2>/dev/null | sed -n 's/^ *database_url: *//p')" -c \
   "DELETE FROM links WHERE from_page_id NOT IN (SELECT id FROM pages WHERE slug LIKE 'memory/%' OR slug LIKE 'outputs/%');"
 ```
 
-Notes:
-- `--skip-failed` keeps a handful of oversized/binary `src/` exports (≈18 files: >5 MB markdown, null-byte PDF conversions) from blocking the sync; they auto-skip after 3 runs.
-- A daily run is **incremental** — only files changed since the last sync are re-imported/embedded/extracted, so it's fast (the full re-embed only happens on a `--full` rebuild).
-- `link_resolution.global_basename` must stay `true` (bare `[[hub]]`/`[[teams]]` wikilinks in the L1/L2 MOCs resolve by basename). That's also what inflates the src link graph — hence the cleanup above.
+- **The `DELETE` is mandatory.** `link_resolution.global_basename` must stay `true` so bare
+  `[[hub]]`/`[[teams]]` wikilinks resolve in the L1/L2 MOCs — and that same flag basename-resolves
+  the raw `src/` exports' local navigation links into a multi-million-edge hairball. Dropping edges
+  that *originate* outside `memory/`+`outputs/` keeps the curated graph clean.
+- `--skip-failed` is required: ~18 oversized (>5 MB) / null-byte `src/` exports cannot parse and
+  would otherwise block the sync. A couple of chunks stay unembedded (403-filtered); sync exits 0.
+- A daily run is **incremental** — only git-changed files are re-imported. A full re-embed happens
+  only on `--full`.
+- Don't pipe `sync`/`embed` through `| tail` — it hides progress and can spin retrying 403 chunks.
 
-One chunk fails embedding with `Forbidden` (a permanently 403-filtered page) — that's expected; `embed --stale` still exits 0. Don't pipe it through `| tail`. The server stays up throughout.
-
-**Large-sync deferral — read the sync output.** When the day's diff is big (hundreds of files), `gbrain sync` **defers embed and extract** and says so ("Large sync: deferring link/timeline extraction… Run 'gbrain embed --stale'"). In that case you must run both explicitly, in this order (extract before the link-scoping `DELETE`, since extract is what creates the edges):
+**Large-sync deferral — read the sync output.** On a big diff `gbrain sync` **defers embed and
+extract** and says so. Then run both explicitly, extract first (it creates the edges the `DELETE`
+then scopes):
 
 ```bash
-gbrain extract links --source fs --repo "$(pwd)"     # full sweep — see why below
-gbrain embed --stale                      # foreground — see caveat below
+gbrain extract links --source fs --repo "$(pwd)"
+gbrain embed --stale
 # then the link-scoping DELETE from above
 ```
 
-⚠️ **Two extract forms are wrong here and one is right. Use `--source fs`.**
+⚠️ **Use `--source fs`. The two other forms fail silently:**
 
-| form | what it does | verdict |
-|---|---|---|
-| `extract --stale` | stamps `links_extracted_at` while creating **zero** `wikilink_basename` edges (`extractStaleFromDB` passes `nullResolver` and no `globalBasename` opt, so bare `[[name]]` refs are dropped twice over). Pages look done. | **never** |
-| `extract links --source db --since <today>` | creates real edges, but only for pages whose row it can date. On 2026-08-18 it **silently under-covered a large diff** — exactly the case the deferral path exists for. | **no** |
-| `extract links --source fs --repo "$(pwd)"` | re-reads the working tree, so coverage does not depend on a DB timestamp being right. | **yes** |
+- `extract --stale` stamps `links_extracted_at` while creating **zero** `wikilink_basename` edges
+  (it passes a null resolver and no globalBasename opt, so bare `[[name]]` refs are dropped twice
+  over). Pages look done. **Never use it.**
+- `extract links --source db --since <date>` creates real edges but only for pages whose row it can
+  date. It is a date filter on a mutable column, and a large sync is exactly when those timestamps
+  are least trustworthy — it **silently under-covered a large diff on 2026-08-18**.
+- `--source fs` re-reads the working tree, so coverage does not depend on a DB timestamp being right.
 
-The `--since` form was recommended here until 2026-08-18 on the strength of one good
-measurement (153 edges over 314 pages on 08-05). It is a **date filter on a mutable column**,
-and a large sync is precisely when those timestamps are least trustworthy — the failure is
-silent and looks identical to success. The `fs` sweep costs more wall clock and is the only
-form whose coverage is self-evident. Always follow it with the link-scoping `DELETE`, which is
-what keeps the extra `src/` edges out of the curated graph.
-
-⚠️ `gbrain embed --stale --background` returned a job id but the jobs worker **did not drain it** (2026-07-14: queue showed empty, chunks stayed unembedded). Until that's fixed, run the embed in the **foreground**.
-
-**Verify, don't assume.** After embed, confirm coverage before writing the final report:
+**Verify, don't assume.** Before writing the final report:
 
 ```bash
 psql "$(gbrain config show 2>/dev/null | sed -n 's/^ *database_url: *//p')" -tAc \
   "SELECT count(*), count(embedding), count(*)-count(embedding) FROM content_chunks;"
 ```
 
-Missing should be ~0 (a couple dozen permanently-unembeddable oversized/403 chunks are normal). Also sanity-check that a freshly-rewritten page has outgoing links (`gbrain backlinks memory/l1/hub` non-empty).
+Missing should be ~0 (a couple dozen permanently-unembeddable oversized/403 chunks are normal). Also
+check that a freshly-rewritten page has outgoing links: `gbrain backlinks memory/l1/hub` non-empty.
 
 ## Part 5 — Final report
 
@@ -297,26 +249,36 @@ Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet
 gbrain reindex: <N> chunks embedded
 ```
 
-**The `Clones:` and `Changed:` lines come from two files written by `github_clone` during Part 2a** (repo root), both truncated at the start of each run: `.github-clone-report.md` (anything that wasn't a clean mirror update) and `.github-changed-repos.tsv` (one line per repo whose HEAD moved). Read them directly rather than relying on the subagent's stdout — `pull_sources` sends the jungle loop's output to `/dev/null`, so the files are the only reliable record.
+**`Clones:` and `Changed:` come from two files `github_clone` writes during Part 2a** (repo root),
+both truncated at the start of each run: `.github-clone-report.md` (anything that wasn't a clean
+mirror update) and `.github-changed-repos.tsv` (one line per repo whose HEAD moved). **Read the
+files, not the subagent's stdout** — `pull_sources` sends the jungle loop's output to `/dev/null`, so
+they are the only reliable record.
 
-- File absent or empty → `all clean mirrors`.
-- Otherwise list each repo and what happened, and **call out any line containing `merge conflict` explicitly** — that clone is stuck on a branch that could not take the remote's changes, and it stays stale until someone merges by hand.
+- Absent or empty → `all clean mirrors`.
+- Otherwise list each repo and what happened, and **call out any `merge conflict` line explicitly** —
+  that clone is stuck on a branch that could not take the remote's changes and stays stale until
+  someone merges by hand.
 
-This exists because a hard reset used to discard local commits in these clones silently. It no longer does, but a clone carrying local work is by definition **not** a faithful mirror of the remote, so anything reading it (service docs, `technologies.md`, freshness checks) may be describing your branch rather than `main`. That is worth one line a day.
+A clone carrying local work is by definition **not** a faithful mirror, so anything reading it
+(service docs, `technologies.md`, freshness checks) may be describing your branch rather than `main`.
+Worth one line a day.
 
 ## Dependency chain
 
 ```
 Part 1 tools (parallel) ─┐
                          ↓
-Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (writes markdown only)
+Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (markdown only)
 Part 3 harvest ────────┘  (3 runs parallel to 2a)                        ↓
-                                       Part 4 commit (brain-git-sync) → gbrain reindex — single `gbrain sync`
+                                       Part 4 commit (brain-git-sync) → gbrain reindex
                                                                          ↓
                                                                   Part 5 report
 ```
 
-The reindex is intentionally **last**: it depends on every prior write. Because `gbrain sync` only indexes *committed* files, the commit (`brain-git-sync`) must run immediately **before** it — commit-then-reindex, never the reverse. On Postgres the sync runs concurrently with the always-on server, so it never blocks.
+The reindex is intentionally **last**: it depends on every prior write. Because `gbrain sync` only
+indexes *committed* files, the commit must run immediately **before** it — commit-then-reindex, never
+the reverse. On Postgres the sync runs concurrently with the always-on server, so it never blocks.
 
 ## Skill References
 
@@ -324,60 +286,52 @@ The reindex is intentionally **last**: it depends on every prior write. Because 
 |-------|--------|
 | `brain-pull-sources` | `src/<source>/` |
 | `brain-rebuild-services` | `outputs/services/` |
-| `brain-rebuild-memory` | `memory/L1/`, `memory/L2/` |
+| `brain-rebuild-memory` | `memory/L1/`, `memory/L2/`, `AGENTS.md`, `DEVELOPER.md` |
 | `gmeet_to_md` (in `brain-pull-sources`) + [digest appendix](#meeting-digest-generation) | `src/gmeet/` |
 
 ## When to Use
 
-Run at the start of each working day to fully bootstrap the brain. Meeting agendas are prepared separately, on demand, immediately before the meetings that need them.
+Run at the start of each working day to bootstrap the brain. Meeting agendas are prepared separately,
+on demand, immediately before the meetings that need them.
 
 ---
 
 ## Meeting digest generation
 
-Used by **Part 3b**. The raw per-meeting artifacts and the static per-day `index.md` are produced deterministically by `gmeet_to_md` (Part 3a) — these steps are the **LLM synthesis** on top of them: a daily digest per harvested day, then weekly → monthly → YTD rollups. (Formerly Steps 6–9 of the retired `brain-pull-my-meeting-notes` skill.)
+Used by **Part 3b**. The raw per-meeting artifacts and the per-day `index.md` are produced
+deterministically by `gmeet_to_md` (Part 3a); these steps are the **LLM synthesis** on top: a daily
+digest per harvested day, then weekly → monthly → YTD rollups at each boundary as it completes.
 
-Process each harvested day, then roll up at week / month / year boundaries as they complete.
+### Daily digest — two passes
 
-### Daily digest (LLM synthesis, per-meeting then rollup)
+**Pass 1 — per-meeting summary.** For each meeting with notes or a transcript, produce **key
+decisions**, **action items** with an @owner, and **3–5 key points**. A meeting with only metadata is
+still listed, as "No Gemini notes or transcript available."
 
-A two-pass synthesis. The agent reads the artifacts in each day's meeting folders and produces the digest.
-
-**Pass 1 — per-meeting summary.** For each meeting that has notes or a transcript, read the artifact and produce a structured summary:
-- **Key decisions** made in the meeting
-- **Action items** with owner (@ mention)
-- **Key points** (3–5 bullets of what was discussed)
-
-If a meeting has no artifacts (just metadata), include it with: "No Gemini notes or transcript available."
-
-> **VERIFY THE NOTE BELONGS TO THE MEETING before summarising it.** This is the step where a
-> misfiled artifact becomes a wrong *fact* — it flows into the daily digest, the weekly/monthly/YTD
-> rollups, and the `L2/` memory those feed, with a `verified:`/`source:` trail that looks perfectly
-> healthy. A 2026-08-06 audit found **128 of 758 `notes.md` (16.9%)** holding another meeting's
-> notes, including 3 one-to-one leaks.
+> ⚠️ **VERIFY THE NOTE BELONGS TO THE MEETING BEFORE SUMMARISING IT.** This is where a misfiled
+> artifact becomes a wrong *fact*: it flows into the daily digest, the rollups, and the `L2/` memory
+> those feed, carrying a `verified:`/`source:` trail that looks perfectly healthy. A 2026-08-06 audit
+> found **128 of 758 `notes.md` (16.9%)** holding another meeting's notes, including 3 one-to-one leaks.
 >
-> The folder name, date and `# H1` come from Calendar and are **always** right, so they prove
-> nothing. Read the line just under the `📝` marker — that is the title Gemini wrote *inside* the
-> doc. If it names a different meeting (e.g. folder `ged-deep-dive`, body `SAIAN DeepDive`),
-> **discard the artifact and treat the meeting as having no notes.** Do not try to salvage it, and
-> do not attribute its decisions to either meeting.
+> The folder name, date and `# H1` come from Calendar and are **always** right, so they prove nothing.
+> **Read the line just under the `📝` marker** — the title Gemini wrote *inside* the doc. If it names a
+> different meeting (folder `ged-deep-dive`, body `SAIAN DeepDive`), **discard the artifact and treat
+> the meeting as having no notes.** Do not salvage it; do not attribute its decisions to either meeting.
 >
-> Two things that are NOT misfiles: a body title that is merely a longer or reworded form of the
-> event name, and an organiser's alternate name for the same recurring series (`FE Alignment`
-> bodies titled `GED Design Sharing/Alignment`). Only a *mutual* contradiction — each side naming
-> something the other never mentions — is disqualifying.
+> **Not misfiles:** a body title that is a longer or reworded form of the event name, and an
+> organiser's alternate name for a recurring series (`FE Alignment` bodies titled `GED Design
+> Sharing/Alignment`). Only a *mutual* contradiction — each side naming something the other never
+> mentions — disqualifies.
 >
-> A folder may also carry `metadata.json` → `dataQuality.notesTitleSuspect`, written by the
-> extractor when it kept a disagreeing note deliberately. Treat that as "usable but state the
-> uncertainty", not as grounds to drop it.
+> `metadata.json` → `dataQuality.notesTitleSuspect` means the extractor kept a disagreeing note
+> deliberately: usable, but state the uncertainty.
 >
-> `gmeet_to_md` now discards the provable cases itself, so this should be rare — but the extractor
-> only sees one day's calendar, and this bug has been fixed three times, so check rather than
-> assume. Prefer live systems of record (Linear, Personio, Slack) over meeting notes for anything
-> load-bearing, and never repeat a note's content to the people who were in the room without this
-> check.
+> `gmeet_to_md` discards the provable cases itself, so this should be rare — but it only sees one
+> day's calendar and this bug has been fixed three times, so check rather than assume. Prefer live
+> systems of record (Linear, Personio, Slack) over meeting notes for anything load-bearing, and never
+> repeat a note's content to the people who were in the room without this check.
 
-**Pass 2 — daily rollup.** Aggregate all per-meeting summaries into the daily digest:
+**Pass 2 — daily rollup.** Save as `src/gmeet/YYYY/WNN/MM-DD/MM-DD-digest.md`.
 
 ```markdown
 # Meeting Digest: YYYY-MM-DD
@@ -392,53 +346,45 @@ If a meeting has no artifacts (just metadata), include it with: "No Gemini notes
 **Attendees:** names
 **Key decisions:**
 - Decision 1
-- Decision 2
 
 **Action items:**
 - [ ] @person: action description
 
 **Key points:**
 - Point 1
-- Point 2
 
 [Full notes](meeting-slug/notes.md)
 
-### 2. Next Meeting (HH:MM–HH:MM)
-...
-
 ## Cross-Meeting Action Items
 - [ ] @simone: action from meeting 1
-- [ ] @cass: action from meeting 3
 
 ## Brain Updates
 - L2/teams.md: UPDATE <team changes discussed today>
 ```
 
-**Brain Updates rules:**
-- Only include updates when a meeting produced a clear, actionable decision that changes the state of the world.
-- Format: `- L2/<file>.md: <ACTION> <description>` where `<ACTION>` is `ADD` (new fact), `UPDATE` (refresh existing), or `REMOVE` (mark superseded).
-- Map decisions to the right L2 file by topic (releases, teams, data, product areas, etc.).
-- If no meetings produced L2-worthy decisions, omit the Brain Updates section entirely.
+**Brain Updates rules.** Only when a meeting produced a clear, actionable decision that changes the
+state of the world. Format `- L2/<file>.md: <ACTION> <description>`, where `<ACTION>` is `ADD` (new
+fact), `UPDATE` (refresh existing) or `REMOVE` (mark superseded). Map each decision to the right L2
+file by topic. **If no meeting produced an L2-worthy decision, omit the section entirely.**
 
-**Linear project links:** if notes/transcripts mention specific Linear projects, resolve each project's URL via `get_project` / `list_projects` and format the name as a markdown link `[Project Name](url)` in summaries, Brain Updates, and action items.
-
-Save as `src/gmeet/YYYY/WNN/MM-DD/MM-DD-digest.md`.
+**Linear project links.** When notes or transcripts name a Linear project, resolve its URL via
+`get_project` / `list_projects` and link it — `[Project Name](url)` — in summaries, Brain Updates and
+action items.
 
 ### Weekly digest
 
-After all days in a week are processed, read all daily digests for the week and produce a rollup:
+After every day in the week is processed, roll the daily digests up. Save as
+`src/gmeet/YYYY/WNN/WNN-weekly-digest.md`. **Aggregate and deduplicate Brain Updates** — if several
+days touch one L2 file, combine into a single update carrying the latest state.
 
 ```markdown
 # Weekly Meeting Digest: YYYY WNN
 
 ## Week Summary
-- N meetings across M days
-- Xh Ym total meeting time
-- N had notes, M had recordings
+- N meetings across M days · Xh Ym total · N had notes, M had recordings
 
 ## Major Decisions This Week
 - [Mon] Decision from meeting X
-- [Tue] Decision from meeting Y
 
 ## Key Action Items
 - [ ] @person: action (from Meeting Name, Day)
@@ -449,66 +395,58 @@ After all days in a week are processed, read all daily digests for the week and 
 - Meeting 1: key point
 [Full digest](MM-DD/MM-DD-digest.md)
 
-### Tuesday MM-DD
-...
-
 ## Brain Updates
 - L2/file.md: ACTION description (aggregated from daily digests)
 ```
 
-Save as `src/gmeet/YYYY/WNN/WNN-weekly-digest.md`. Aggregate and deduplicate Brain Updates from the daily digests — if multiple days update the same L2 file, combine into one update with the latest state.
-
 ### Monthly digest
 
-After all weeks in a month are processed, read all weekly digests and produce a year-level rollup:
+After every week in the month is processed, roll the weekly digests up. Save as
+`src/gmeet/YYYY/MM-monthly-digest.md`. This is the executive summary — readable in 2 minutes,
+carrying what someone who missed the whole month needs to know.
 
 ```markdown
 # Monthly Meeting Digest: YYYY-MM (Month Name)
 
 ## Month at a Glance
-- N meetings across M days
-- Xh total meeting time
-- N had notes, M had recordings
+- N meetings across M days · Xh total · N had notes, M had recordings
 
 ## Strategic Decisions
-Highlight the 5–10 most important decisions made this month — ones that change direction, launch initiatives, or commit resources. Group by theme, not by date.
+The 5–10 decisions that changed direction, launched initiatives or committed resources.
+Group by theme, not by date.
 
 ### Theme 1: [e.g., US Launch Preparation]
 - Decision A (Week WNN)
-- Decision B (Week WNN)
-
-### Theme 2: [e.g., AI/ML Initiatives]
-- Decision C (Week WNN)
 
 ## Key Action Items (Still Open)
-Only strategic or cross-team items; skip small/tactical ones.
+Strategic or cross-team only; skip the tactical.
 - [ ] @person: action (from WNN)
 
 ## Week-by-Week Summary
 
 ### WNN (MM-DD to MM-DD)
-2–3 sentence summary of the week's focus.
+2–3 sentences on the week's focus.
 [Full weekly digest](WNN/WNN-weekly-digest.md)
 
 ## Themes & Patterns
-What recurring topics dominated meetings this month? What shifted from last month? 2–3 paragraphs of high-level synthesis.
+Which topics dominated, and what shifted from last month. 2–3 paragraphs.
 
 ## Brain Updates
 - L2/file.md: ACTION description (aggregated from weekly digests, deduplicated)
 ```
 
-Save as `src/gmeet/YYYY/MM-monthly-digest.md`. This is the executive summary — readable in 2 minutes, capturing what someone who missed the whole month needs to know.
-
 ### Year-to-date digest
 
-After monthly digests are complete, update the YTD digest — a living document tracking the full year's trajectory. Read all monthly digests and the previous YTD digest (if it exists):
+A living document, updated after the monthly digests. Read all monthly digests **and the previous YTD
+digest**. Save as `src/gmeet/YYYY/YYYY-ytd-digest.md`. **Cumulative:** each run preserves and updates
+the prior trackers — marking items resolved when later meetings show completion, and superseded when
+direction changed.
 
 ```markdown
 # Year-to-Date Meeting Digest: YYYY
 
 ## YTD Stats
-- N meetings across M months
-- N had notes, M had recordings
+- N meetings across M months · N had notes, M had recordings
 
 ## Decision Tracker
 
@@ -525,12 +463,11 @@ After monthly digests are complete, update the YTD digest — a living document 
 ### Superseded / Changed
 | Original Decision | Made | Changed | New Direction |
 |-------------------|------|---------|---------------|
-| (decisions that were reversed or modified) |
 
 ## Action Item Tracker
 
 ### Open (still pending)
-- [ ] @person: action (from Month/Week) — status update if known
+- [ ] @person: action (from Month/Week) — status if known
 
 ### Completed
 - [x] @person: action (from Month/Week) — completed Month/Week
@@ -539,10 +476,8 @@ After monthly digests are complete, update the YTD digest — a living document 
 - [~] @person: action (from Month/Week) — reason
 
 ## Monthly Arc
-One paragraph per month describing the narrative arc: focus, what shifted, what carried forward.
+One paragraph per month: focus, what shifted, what carried forward.
 
 ## Emerging Themes
-Threads that span multiple months. What's accelerating? What stalled?
+Threads spanning multiple months. What's accelerating? What stalled?
 ```
-
-Save as `src/gmeet/YYYY/YYYY-ytd-digest.md`. Cumulative: each run preserves and updates the decision/action trackers from prior runs — marking items resolved when later meetings show completion, and superseded when direction changed.
