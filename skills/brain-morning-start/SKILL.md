@@ -1,20 +1,21 @@
 ---
 name: brain-morning-start
 description: >
-  Daily bootstrap: update tools, sync brain sources, rebuild memory and service docs,
-  and harvest meeting notes since the last harvest. Use when the user says "morning start",
-  "start my day", "daily bootstrap", or "morning routine". Does NOT prepare meeting agendas —
-  `brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one` are run separately, on demand.
+  Daily bootstrap: sync brain sources, rebuild memory and service docs, and harvest meeting
+  notes since the last harvest. Use when the user says "morning start", "start my day", "daily
+  bootstrap", or "morning routine". Does NOT update tools and does NOT prepare meeting agendas —
+  `brain-upgrade`, `brain-prepare-my-deep-dives` and `brain-prepare-my-one-on-one` are all run
+  separately, on demand.
 ---
 
 # Morning Start
 
-Daily bootstrap: update tools, sync brain sources, rebuild memory + service docs, harvest every
-meeting since the last harvested day, then refresh the gbrain index in one pass.
+Daily bootstrap: sync brain sources, rebuild memory + service docs, harvest every meeting since the
+last harvested day, then refresh the gbrain index in one pass.
 
 ## How to run this (keep the orchestrator lean)
 
-**Delegate each heavy phase to a subagent and keep only its summary.** Parts 2, 3 and 4 each do
+**Delegate each heavy phase to a subagent and keep only its summary.** Parts 1, 2 and 3 each do
 bulky work. Spawn an `Agent` per phase that invokes the named skill and returns **counts and errors,
 not file dumps** — the verbose output stays in the subagent. Each sub-skill carries its own
 instructions; dispatch and collect, do not restate them here.
@@ -53,12 +54,12 @@ pull_sources still exporting, memory "Wave 1 dispatched" with 0 files written).
 
    | Phase | Completion predicate |
    |---|---|
-   | 2a `brain-pull-sources` | `[ -z "$(find src github -newermt '-90 seconds' -type f 2>/dev/null \| head -1)" ]` |
-   | 2b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` has a doc with today's mtime or is gated SKIP |
-   | 3 meeting harvest | `src/gmeet/` quiet AND a per-day `index.md` exists for every day since the last harvest |
-   | 2c `brain-rebuild-memory` | `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null \| head -1)" ]` — the generator writes all three |
+   | 1a `brain-pull-sources` | `[ -z "$(find src github -newermt '-90 seconds' -type f 2>/dev/null \| head -1)" ]` |
+   | 1b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` has a doc with today's mtime or is gated SKIP |
+   | 2 meeting harvest | `src/gmeet/` quiet AND a per-day `index.md` exists for every day since the last harvest |
+   | 1c `brain-rebuild-memory` | `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null \| head -1)" ]` — the generator writes all three |
 
-   **Before Part 4's commit, run `git status --porcelain` and read it.** It is the only check that
+   **Before Part 3's commit, run `git status --porcelain` and read it.** It is the only check that
    cannot miss a file by construction. An unexpected *absence* is as informative as a presence.
 5. Never launch a duplicate export/rebuild while the previous one is still running.
 6. ⚠️⚠️ **EVERY `Agent` DISPATCH — INCLUDING ONES A SUB-SKILL SPAWNS INTERNALLY — MUST PASS
@@ -77,27 +78,13 @@ pull_sources still exporting, memory "Wave 1 dispatched" with 0 files written).
 If `agents/morning-start-additional/SKILL.md` (relative to the brain root) does not exist, seed it
 once from `resources/morning-start-additional.template.md` (relative to this skill).
 
-## Part 1 — Update tools & pull
+## Part 1 — Brain sync & rebuild (sequential chain, subagent per phase)
 
-Dispatch **`brain-upgrade`** and collect its one-line report. It runs brew / npm / uv in parallel,
-resyncs the vendored copies of super's skills via `bin/resync-vendored-skills`, and pulls the brain
-repo with `--rebase --autostash`.
-
-Nothing in that phase needs a model to decide anything, so it is cheap — but ⚠️ **do not skip the
-skill-resync half.** A drifted skill copy exports **stale content with a clean exit status** (Outline,
-a full day, 2026-08-14), and that failure is invisible downstream: every later phase in this routine
-reads what the exporters wrote.
-
-**No gbrain step here.** The reindex runs once at the very end (Part 4); running it now would index
-nothing new.
-
-## Part 2 — Brain sync & rebuild (sequential chain, subagent per phase)
-
-- **2a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 3 in parallel
+- **1a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 2 in parallel
   with this.**
-- **2b `brain-rebuild-services`** — regenerate `.agent.md` docs → `outputs/services/`. *After 2a.*
+- **1b `brain-rebuild-services`** — regenerate `.agent.md` docs → `outputs/services/`. *After 1a.*
 
-  **Read the work-list before dispatching anything.** `.github-changed-repos.tsv` is written by 2a,
+  **Read the work-list before dispatching anything.** `.github-changed-repos.tsv` is written by 1a,
   one line per repo whose HEAD moved.
 
   ```bash
@@ -106,7 +93,7 @@ nothing new.
   ```
 
   **Zero lines → skip the phase entirely.** Report `Services: 0 docs (no repos moved)` and go to
-  2b.5. Do not dispatch a subagent "just to check" — that check *is* the ledger.
+  1b.5. Do not dispatch a subagent "just to check" — that check *is* the ledger.
 
   ⚠️ **Pass the CHANGED FILE LIST, not just the repo name.** A repo name invites a full working-tree
   read; a file list does not. It is one `git -C` per repo and zero model requests:
@@ -122,15 +109,15 @@ nothing new.
   A repo whose list comes back **empty is inert — do not dispatch it at all.** The worker is
   instructed to stop rather than fall back to a full read if the list is missing, so omitting the
   list does not fail safe: it fails expensive.
-- **2b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its
-  `run <path>` directives in order. *After 2b, before 2c.*
-- **2c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/` (46 files: 19 L1 + 27 L2), plus
+- **1b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its
+  `run <path>` directives in order. *After 1b, before 1c.*
+- **1c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/` (46 files: 19 L1 + 27 L2), plus
   `AGENTS.md` and `DEVELOPER.md`. It only **writes markdown** — the gbrain index is refreshed by the
-  single `gbrain sync` in Part 4. **No gbrain step inside 2c.** *After 2b.5.*
+  single `gbrain sync` in Part 3. **No gbrain step inside 1c.** *After 1b.5.*
 
-## Part 3 — Harvest meetings since last harvest (parallel with Part 2a)
+## Part 2 — Harvest meetings since last harvest (parallel with Part 1a)
 
-**3a — Harvest raw artifacts (deterministic, no LLM).** Run the `gmeet_to_md` extractor from
+**2a — Harvest raw artifacts (deterministic, no LLM).** Run the `gmeet_to_md` extractor from
 `skills/brain-pull-sources/bin/`. It walks Calendar, discovers Drive artifacts (Gemini notes,
 agendas, recordings, attachments, transcripts) and writes per-meeting folders plus a static per-day
 `index.md` under `src/gmeet/YYYY/WNN/MM-DD/`. Idempotent — it re-runs the last day safely, the
@@ -140,11 +127,22 @@ full-span re-harvest self-heals gaps, and it **preserves existing `*-digest.md` 
 bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"
 ```
 
-**3b — Generate digests (LLM synthesis).** For each harvested day generate the daily digest, then
+**2b — Generate digests (LLM synthesis).** For each harvested day generate the daily digest, then
 roll up weekly / monthly / YTD per the [digest appendix](#meeting-digest-generation). These are the
 rollups `gmeet_to_md` deliberately does not produce. ⚠️ Weekly rollups target the **ISO week each
 harvested day actually belongs to** — a Monday opens a new `WNN` folder, so don't assume the span
 stays in `LAST_HARVESTED`'s week.
+
+## Tool updates are NOT part of this routine
+
+`brain-upgrade` — brew / npm / uv, the vendored-skill resync, gstack, the rebase pull — is **invoked
+separately, on demand.** Nothing about a tool upgrade has to happen before the day's first meeting,
+and the gstack gate alone was 13% of this routine's cost when it lived here.
+
+⚠️ **One consequence to know:** this routine no longer resyncs the vendored copies of super's skills,
+and **a drifted skill copy exports stale content with a clean exit status** — Outline did exactly that
+for a full day on 2026-08-14. Every phase below reads what the exporters wrote, so when source data
+looks wrong, run `brain-upgrade` and check for drift before believing the export.
 
 ## Meeting prep is NOT part of this routine
 
@@ -156,12 +154,12 @@ measures Linear hours early, which is how a row goes stale before the room reads
 Consequently this routine writes **no** files under `outputs/agents/my-deep-dives/` or
 `outputs/agents/my-one-on-one/`, and a run reporting none is correct, not truncated.
 
-## Part 4 — commit, THEN gbrain reindex (runs LAST)
+## Part 3 — commit, THEN gbrain reindex (runs LAST)
 
 Every file is now written — src exports, gmeet, service docs, memory.
 
 **Commit first — this ordering is mandatory.** `gbrain sync` is **commit-based**: it git-diffs the
-repo against its last bookmark and imports only *committed* changes. Everything Parts 2–3 wrote is
+repo against its last bookmark and imports only *committed* changes. Everything Parts 1–2 wrote is
 still in the working tree, so syncing before committing indexes **nothing new**.
 
 Delegate to a subagent (returns the sync delta):
@@ -217,12 +215,11 @@ psql "$(gbrain config show 2>/dev/null | sed -n 's/^ *database_url: *//p')" -tAc
 Missing should be ~0 (a couple dozen permanently-unembeddable oversized/403 chunks are normal). Also
 check that a freshly-rewritten page has outgoing links: `gbrain backlinks memory/l1/hub` non-empty.
 
-## Part 5 — Final report
+## Part 4 — Final report
 
 ```
 Morning start complete:
 
-Tools:    brew <N> upgraded · npm/python <status> · skills <in sync | N resynced> · git <status>
 Sources:  <N> exported (X ok, Y failed)
 Clones:   <N> repos with local work — <merged | skipped | CONFLICT> (else "all clean mirrors")
 Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
@@ -232,7 +229,7 @@ Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet
 gbrain reindex: <N> chunks embedded
 ```
 
-**`Clones:` and `Changed:` come from two files `github_clone` writes during Part 2a** (repo root),
+**`Clones:` and `Changed:` come from two files `github_clone` writes during Part 1a** (repo root),
 both truncated at the start of each run: `.github-clone-report.md` (anything that wasn't a clean
 mirror update) and `.github-changed-repos.tsv` (one line per repo whose HEAD moved). **Read the
 files, not the subagent's stdout** — `pull_sources` sends the jungle loop's output to `/dev/null`, so
@@ -250,13 +247,11 @@ Worth one line a day.
 ## Dependency chain
 
 ```
-Part 1 brain-upgrade ────┐
-                         ↓
-Part 2a pull-sources ──┬──→ 2b services ──→ 2b.5 additional ──→ 2c memory (markdown only)
-Part 3 harvest ────────┘  (3 runs parallel to 2a)                        ↓
-                                       Part 4 commit (brain-git-sync) → gbrain reindex
+Part 1a pull-sources ──┬──→ 1b services ──→ 1b.5 additional ──→ 1c memory (markdown only)
+Part 2  harvest ───────┘  (2 runs parallel to 1a)                        ↓
+                                       Part 3 commit (brain-git-sync) → gbrain reindex
                                                                          ↓
-                                                                  Part 5 report
+                                                                  Part 4 report
 ```
 
 The reindex is intentionally **last**: it depends on every prior write. Because `gbrain sync` only
@@ -267,7 +262,6 @@ the reverse. On Postgres the sync runs concurrently with the always-on server, s
 
 | Skill | Output |
 |-------|--------|
-| `brain-upgrade` | local tooling + vendored `skills/` copies (no repo content) |
 | `brain-pull-sources` | `src/<source>/` |
 | `brain-rebuild-services` | `outputs/services/` |
 | `brain-rebuild-memory` | `memory/L1/`, `memory/L2/`, `AGENTS.md`, `DEVELOPER.md` |
@@ -282,8 +276,8 @@ on demand, immediately before the meetings that need them.
 
 ## Meeting digest generation
 
-Used by **Part 3b**. The raw per-meeting artifacts and the per-day `index.md` are produced
-deterministically by `gmeet_to_md` (Part 3a); these steps are the **LLM synthesis** on top: a daily
+Used by **Part 2b**. The raw per-meeting artifacts and the per-day `index.md` are produced
+deterministically by `gmeet_to_md` (Part 2a); these steps are the **LLM synthesis** on top: a daily
 digest per harvested day, then weekly → monthly → YTD rollups at each boundary as it completes.
 
 ### Daily digest — two passes

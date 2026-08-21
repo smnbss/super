@@ -2,9 +2,10 @@
 name: brain-upgrade
 description: >
   Update local tooling and sync the brain repo: brew, npm globals, uv, the vendored copies of
-  super's skills, and a rebase pull. Use when the user says "brain upgrade", "upgrade tools",
-  "update tools", "update my tooling", "sync my skills", or asks whether the local setup is
-  current. Also invoked as Part 1 of `brain-morning-start`.
+  super's skills, gstack, and a rebase pull. Use when the user says "brain upgrade", "upgrade
+  tools", "update tools", "update my tooling", "sync my skills", "upgrade gstack", or asks whether
+  the local setup is current. Run it on demand — `brain-morning-start` deliberately does NOT
+  invoke it.
 ---
 
 # Brain — Upgrade
@@ -17,6 +18,11 @@ what moved.
 `gbrain sync` — the index is refreshed after content is written, not after tools are updated. Run
 `brain-pull-sources` / `brain-rebuild-memory` for content, or `brain-morning-start` for the whole
 routine.
+
+**Run it on demand.** `brain-morning-start` does **not** invoke this skill — updating tools is not
+something that has to happen before the day's first meeting, and the gstack gate in Step 3 was 13% of
+that routine's entire cost when it did. A bare invocation runs every step; honour a caller that says
+"skip gstack" or "tools only".
 
 ## Step 1 — Package managers (parallel)
 
@@ -60,7 +66,43 @@ real finding, not housekeeping.
 The vendored copies are distribution artifacts; patching one of them leaves the bug in place for every
 future install and every other machine.
 
-## Step 3 — Pull the brain repo
+## Step 3 — gstack (Step 2 does not cover it)
+
+**`resync-vendored-skills` never touches gstack**, and this is structural, not an oversight: gstack
+is not one of super's skills, and `~/.claude/skills` is skipped as a tree that carries no super
+skills. So gstack needs its own check — a clean Step 2 says nothing about it.
+
+**Gate on the purpose-built check. Empty output means up to date, and the step is then done at zero
+model cost:**
+
+```bash
+~/.claude/skills/gstack/bin/gstack-update-check   # UPGRADE_AVAILABLE <old> <new> | JUST_UPGRADED | nothing
+```
+
+Invoke `/gstack-upgrade` **only** on `UPGRADE_AVAILABLE`, or on `JUST_UPGRADED` (which wants the
+post-upgrade migration steps).
+
+⚠️ **Never invoke it unconditionally.** It re-runs install-type detection and an interactive
+`AskUserQuestion` every time, almost always to conclude nothing needed doing: measured over
+2026-07-06→08-05 that was **1,589 model requests**, ~72 per run with spikes of 217 and 420. This is
+why the step is a gate and not a call. `auto_upgrade` is already `true` (`gstack-config get
+auto_upgrade`), so a genuine upgrade does not stop to ask.
+
+⚠️ **If you check versions by hand, compare `VERSION` against the UPSTREAM CLONE** — never two
+installed copies against each other. On 2026-08-19 the vendored and global copies both read the same
+`VERSION` while upstream was already a release ahead: two matching copies prove only that they match,
+not that either is current.
+
+```bash
+cat ~/.claude/skills/gstack/VERSION
+cat github/garrytan/gstack/VERSION      # the only reference that can say "current"
+```
+
+**Do not use `dist/.version` for this.** It stamps the *enclosing* repo, so inside a vendored copy it
+holds a brain commit and reads false-current — and on this machine both installed copies have it
+empty, so it cannot answer the question at all.
+
+## Step 4 — Pull the brain repo
 
 ```bash
 git pull --rebase --autostash
@@ -69,12 +111,12 @@ git pull --rebase --autostash
 `--autostash` is **required**: leftover working-tree WIP from a prior session otherwise aborts the
 pull with *"cannot pull with rebase: You have unstaged changes"*.
 
-## Step 4 — Report
+## Step 5 — Report
 
 One line, naming what actually moved:
 
 ```
-Tools: brew <N> upgraded · npm/python <status> · skills <in sync | N copies resynced> · git <status>
+Tools: brew <N> upgraded · npm/python <status> · skills <in sync | N copies resynced> · gstack <up to date | vA→vB | skipped> · git <status>
 ```
 
 Flag errors and notable version bumps. **A run where nothing moved is a good outcome, not a
