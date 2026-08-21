@@ -48,7 +48,7 @@ the seam explicit up front saves the model from re-deriving it mid-task.
 Each name may match:
 - A repo under `github/<org>/<name>` (exact match preferred, then substring)
 - A service doc at `outputs/services/<name>.agent.md` or `*<name>*.agent.md`
-- A project workspace at `outputs/projects/<name>/`
+- A session workspace at `outputs/projects-work-on/<repo>/<session>/` (see Step 4)
 
 If no name is provided, stop and ask:
 > "Which project(s) should I set up context for? Example: `/brain-work-on ask-weroad` or `/brain-work-on catalog api-catalog`"
@@ -139,14 +139,72 @@ are built and what conventions to follow.
 
 ## Step 4 — Find prior project notes
 
-Look in `outputs/projects/<name>/` — this is the ad-hoc workspace layer where
-prior brainstorming, spikes, and scratch work live.
+⚠️ **`outputs/projects/<name>/` is the WRONG place to look first, and for
+code-editing work it is the wrong place to write.** Workspaces were reorganised
+into `outputs/projects-<family>/` families; bare `outputs/projects/` is now only the
+residual long-tail bucket. A pre-migration path can still resolve for a while and
+then vanish — `outputs/projects/super/` existed at the start of one run and was gone
+by the end of it, moved to `outputs/projects-work-on/super/super/` by a concurrent
+session. **Never conclude "no prior workspace" from `outputs/projects/<name>/`
+alone.**
 
-- If `outputs/projects/<name>/` exists → list its contents and read any top-level
-  `.md` files. These capture decisions, rejected approaches, and open questions
-  from earlier sessions.
-- If it does not exist → note it. You may create it later when work begins, but
-  do not create it in this skill.
+### 4a — Always check `projects-work-on` first
+
+This skill exists to start code-editing sessions, so its home family is
+`outputs/projects-work-on/`, laid out as **`<repo>/<session>/`** — one dir per
+repo, one dir per work stream inside it:
+
+```bash
+# existing sessions for this repo
+find outputs/projects-work-on/<repo> -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+# then every other family, in case the work landed elsewhere
+find outputs -mindepth 2 -maxdepth 2 -type d -name '<name>*' 2>/dev/null | grep '/projects'
+```
+
+⚠️ Use `find`, not a `ls -d …/*/` glob. In zsh an unmatched glob is a **hard error
+raised before redirection**, so `2>/dev/null` does not suppress it and the command
+fails — making a legitimately fresh workspace look like a broken lookup. Both `find`
+forms above exit 1 silently on no match, which is the behaviour you want.
+
+A repo carries **several independent sessions** — `super/` holds both `gmeet-to-md`
+and `super/`. So identify which session this work belongs to; do not assume one
+workspace per repo.
+
+Read the session's top-level `.md` files, plus any `plans/` and `specs/` contents.
+They carry decisions, rejected approaches and open questions.
+
+⚠️ **Read a prior plan before trusting its filename.** A plan sitting in a repo's
+workspace is often for a *different* work stream in that repo.
+
+### 4b — The layout a NEW session must follow
+
+Match the newest established pattern (`idp/idp-qa-tab`, 2026-08-19), not the older
+bare-`plans/` variant (`partner/ai-creation`, 2026-08-07):
+
+```
+outputs/projects-work-on/<repo>/<session>/
+├── <session>-notes.md                 primary doc — NOT README.md, see below
+├── HANDOFF.md                         state to carry into the next session
+├── .linear.json                       tracking pointer (Step 7d)
+├── superpowers-artifacts/
+│   ├── plans/<YYYY-MM-DD>-<session>.md
+│   └── specs/<YYYY-MM-DD>-<session>-design.md
+└── prototypes/                        scratch code, throwaway scripts
+```
+
+Rules:
+- **kebab-case** for `<repo>`, `<session>` and every filename; lowercase `.md`.
+- `<repo>` is the repo name, `<session>` names the work stream — not the date.
+- Dates belong in plan/spec **filenames**, not directory names.
+- Create only the parts you use; `prototypes/` and `specs/` are optional.
+
+⚠️ **Never name the primary doc `README.md`.** gbrain's `SYNC_SKIP_FILES` drops
+`README.md`, `index.md`, `log.md` and `schema.md` by basename, silently, exit 0 — so
+the doc is invisible to every search. **Five session docs under
+`outputs/projects-work-on/` are already invisible this way** (`idp/idp-qa-tab`,
+`idp/idp-cli`, `weroad-os/weroad-os`, `partner/ai-creation`, `super/super/core`).
+Give it a descriptive name instead. Don't rename the existing five as a side effect
+of this skill.
 
 ## Step 5 — Pull cross-source mentions (optional, run if Steps 2–4 were thin)
 
@@ -183,9 +241,10 @@ add the cross-project synthesis section if more than one name was given.
 - ...
 (or: "none")
 
-**Prior workspace** (outputs/projects/<name>):
+**Prior workspace** (outputs/projects-work-on/<repo>/):
+- [session] <session-name> — <what it covers> <(this session's stream | other stream)>
 - <file or note>
-(or: "none — fresh workspace")
+(or: "none — fresh workspace, will create outputs/projects-work-on/<repo>/<session>/")
 
 **Cross-source mentions** (if Step 5 ran):
 - <source>: <one-line>
@@ -342,19 +401,23 @@ reads code shouldn't open a ticket. Also accept a target given up front
 
 ### 7d — Reattach, never duplicate
 
-Before creating anything, read the pointer file:
+Before creating anything, read the pointer file. It lives in the **session** dir,
+never the repo dir — one repo carries several concurrently-tracked sessions, so a
+repo-level pointer would bind them all to one issue and reattach to the wrong work:
 
 ```
-outputs/projects/<name>/.linear.json
+outputs/projects-work-on/<repo>/<session>/.linear.json
 ```
 
 ```json
 {
+  "repo": "cashew",
+  "session": "cost-approval-checklist",
   "team": "STM",
   "linearProject": "Cashew Cost Approval",
   "issue": "STM-412",
   "issueUrl": "https://linear.app/weroad/issue/STM-412",
-  "planFile": "outputs/projects/cashew/plan-2026-08-20.md",
+  "planFile": "outputs/projects-work-on/cashew/cost-approval-checklist/superpowers-artifacts/plans/2026-08-21-cost-approval-checklist.md",
   "logThreadId": "<comment id>"
 }
 ```
@@ -366,8 +429,18 @@ the issue exists, before any sub-issue, so an interrupted run is resumable.
 ## Step 8 — Brainstorm, then write the plan
 
 Hand off to `superpowers:brainstorming` to settle intent and scope, then
-`superpowers:writing-plans` to write the plan to
-`outputs/projects/<name>/plan-<YYYY-MM-DD>.md`.
+`superpowers:writing-plans` to write the plan into the session dir from Step 4b:
+
+```
+outputs/projects-work-on/<repo>/<session>/superpowers-artifacts/plans/<YYYY-MM-DD>-<session>.md
+```
+
+Any design doc produced alongside it goes to `superpowers-artifacts/specs/<YYYY-MM-DD>-<session>-design.md`.
+
+⚠️ **Do not write `plan-<YYYY-MM-DD>.md` at the workspace root.** Keying a plan on
+date alone collides the moment two work streams touch one repo the same day, and it
+gives no clue which stream it belongs to. The `<session>` segment is what
+disambiguates.
 
 **The plan file is authoritative. Linear is a projection of it.** Sync one
 direction only: plan → Linear. Never read state back out of Linear and into the
@@ -457,6 +530,11 @@ second source of truth for what the plan says.
 | Creating a label to tag the work | Labels are per-team board config. Only use one that exists. |
 | Reading state back from Linear into the plan | Two sources of truth diverge. Plan → Linear, one direction. |
 | Creating a second issue on re-run | Read `.linear.json` first and reattach. |
+| Looking in `outputs/projects/<name>/` for prior work | Migrated to `projects-<family>/`. Check `projects-work-on/<repo>/*/` first. |
+| Writing code-session files to bare `outputs/projects/` | That's the long-tail bucket. Code work goes to `projects-work-on/<repo>/<session>/`. |
+| One workspace per repo | A repo has many sessions — `super/` holds `gmeet-to-md` **and** `super/`. |
+| `.linear.json` in the repo dir | Binds every session on that repo to one issue. It goes in the session dir. |
+| Naming the primary doc `README.md` | gbrain skips that basename silently. Five session docs are already invisible. |
 | Emitting `Idea:`/`Task:` titles | Those belong to other skills' conventions. Plain titles here. |
 
 Starting a session without context is the single biggest source of wasted tokens
