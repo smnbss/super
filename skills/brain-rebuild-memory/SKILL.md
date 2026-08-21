@@ -588,8 +588,9 @@ generator can reproduce. This skill owns **one demarcated block** and nothing el
   already between the markers, do not rewrite the file at all.
 
 **Dirty when** `hub.md` is dirty, when the L1/L2/archive inventory changed, or in full-rebuild mode.
-⚠️ Note what is NOT a trigger any more: a change under `src/`, `github/` or `outputs/`. Those live
-outside the block, so they cannot make it dirty.
+A change under `src/`, `github/` or `outputs/` does **not** make *this* block dirty — it makes the
+**repository-layout** block dirty instead (3.5a-2), which is a different block with a different
+contract.
 
 **Block content — four items, all about `memory/` and nothing else:**
 
@@ -616,12 +617,69 @@ outside the block, so they cannot make it dirty.
    `gbrain sync` still exits 0. Also restate the rule against introducing a wikilink to a deleted
    doc; name it in a code-span instead.
 
-**Explicitly NOT this skill's business — never emit, never touch:** the `src/` / `github/` /
-`outputs/` layout and every source-specific trap; gbrain server, jobs-worker or reindex configuration;
-the reindex runbook; External Tools and CLI inventories; skill routing; skill-editing conventions;
-agent-dispatch rules; and any open-decisions register. All of that is the brain's, and it sits outside
-the markers. **If something in that list is currently inside the block, move it out rather than
-regenerating it** — and say so in the digest.
+⚠️⚠️ **CARRY-THROUGH RULE — a regeneration must not silently drop a caveat.** This block is
+regenerated rather than merged, which makes it the one place where a hard-won warning can vanish
+without trace. So: **every trap, caveat or correction already inside the block survives the rewrite
+unless you can show it is false.** Refresh the counts and the link graph around them; do not quietly
+drop a `⚠️` line because it is not in the four-item spec above. In particular the block must always
+carry, because nothing else states them:
+
+- the **archive-rotation caveats** — rotation is cap-driven, not age-driven, so a rotated section is
+  not old or superseded; an archive's period label is the *rotation* period, not the content period,
+  so never infer a date from a page name; and **never read a count out of an archived section**,
+  because an archived figure was right only on its own date.
+- the **deleted-doc wikilink guard, both halves** — never introduce a `[[link]]` to a deleted
+  `.agent.md` *or* `.db.agent.md`; name it in a code-span. Confirm a `.db` doc exists on disk before
+  linking it, since its absence is now the common case.
+
+If you believe a caveat is obsolete, **say so in the digest with the evidence** and let a human drop
+it. Deleting it silently is the failure this rule exists to prevent.
+
+**Explicitly NOT this block's business — never emit here, never touch:** gbrain server, jobs-worker
+or reindex configuration; the reindex runbook; External Tools and CLI inventories; skill routing;
+skill-editing conventions; agent-dispatch rules; and any open-decisions register. All of that is the
+brain's, hand-maintained outside every marker. **If something in that list is currently inside this
+block, move it out rather than regenerating it** — and say so in the digest.
+
+The `src/` / `github/` / `outputs/` layout is **not** in this block either, but it is not off-limits
+to the skill: it has its own block and its own merge contract in **3.5a-2** below. Counts there are
+refreshed; **annotations there are never rewritten.**
+
+### 3.5a-2. Update the Repository Layout block — MERGE, never regenerate
+
+The brain's `## Repository Layout` section is a **second, separately marked block**, and it obeys a
+**different contract from 3.5a**:
+
+```markdown
+<!-- BEGIN GENERATED: brain-rebuild-memory:repository-layout -->
+<!-- END GENERATED: brain-rebuild-memory:repository-layout -->
+```
+
+The same marker rules apply (both present → work inside them · neither → insert before the existing
+`## Repository Layout` heading and report · exactly one, or either twice → **ABORT, change nothing**).
+What differs is what you may do inside.
+
+⚠️⚠️ **THIS BLOCK IS A MIX OF DERIVED AND HAND-WRITTEN CONTENT, AND YOU CAN ONLY TOUCH ONE OF THEM.**
+The tree structure and the file counts are derivable from disk. **Every annotation line is not** — the
+⚠️ traps, the corrections, the "never read a count out of an archived section" warnings are knowledge
+a human or a prior run paid for, and no generator can reproduce them. A regeneration of this block
+destroys them silently and the loss is invisible until someone acts on a trap that is no longer
+written down.
+
+**So merge, line by line:**
+
+| Case | Action |
+|---|---|
+| Source already listed | Update **only** its count/figure text. Copy every other line of its entry through **verbatim**. |
+| Source on disk (or in `sources.md` / `sources.github.md`) but **absent** from the block | Add a minimal entry — name, path, counts — and **flag it in the Phase 5 digest as needing annotation.** Never invent a trap note. |
+| Entry present but its tree is **gone** | Remove the entry, and **name in the digest every annotation line you dropped with it**, so a real caveat can be re-homed rather than lost. |
+| Anything you cannot classify | Leave it exactly as it is and report it. |
+
+- **Re-measure every count from disk this run.** Never read a figure back out of the block you are
+  about to rewrite — that is precisely how a stale count survives many rebuilds.
+- Counts to refresh include the per-source file totals, the tracked-clone count for a monorepo
+  container (from its registry, not a subdirectory count), and the `outputs/` doc totals.
+- **`memory/` is NOT described here.** It lives in the 3.5a block. Keep the two disjoint.
 
 ### 3.5b. Symlinks for other assistants
 
@@ -651,8 +709,9 @@ Record final symlink status (`created` / `already-correct` / `skipped: gemini no
 3. **Frontmatter on rewritten files**: `updated:` = today. Skipped files keep their prior `updated:`.
 4. **Orphans**: memory files with no corresponding source → flag (don't delete). `memory/L2/archive/` pages are exempt — their source is the `archive_of:` parent.
 5. **Symlink health**: `<brain_root>/CLAUDE.md` resolves to `AGENTS.md`; `GEMINI.md` resolves to `AGENTS.md` if gemini is installed.
-6. **Size caps**: every file rewritten this run is ≤ 40 KB; additionally flag any `memory/` file > 50 KB (gbrain's warn threshold) in the digest. If an over-cap file is an accretive target, rotate it before finishing (see "Size Caps & Archive Rotation").
-7. **Archive integrity**: closed-period archives were not touched this run (mtimes unchanged); every archive page has a `Topics:` footer linking its parent; every rotated parent has an `## Archive` section with one `[[wikilink]]` bullet per archive page.
+6. **Compaction**: for every rewritten file, `bytes before → after` is recorded, and any file that GREW has a stated reason (see "Compaction — facts over history").
+7. **Size caps**: every file rewritten this run is ≤ 40 KB; additionally flag any `memory/` file > 50 KB (gbrain's warn threshold) in the digest. If an over-cap file is an accretive target, rotate it before finishing (see "Size Caps & Archive Rotation").
+8. **Archive integrity**: closed-period archives were not touched this run (mtimes unchanged); every archive page has a `Topics:` footer linking its parent; every rotated parent has an `## Archive` section with one `[[wikilink]]` bullet per archive page.
 
 ---
 
@@ -684,6 +743,7 @@ Write `outputs/agents/brain-sync/YYYY-MM-DD-rebuild.md` with:
 - Memory stats (files before/after per layer, created/updated/skipped/flagged)
 - **Incremental summary**: count of L2 skipped vs rebuilt, count of L1 skipped vs rebuilt, wall-clock savings vs full rebuild estimate
 - **Rotation summary**: archives created / appended-to, sections moved per live file, live-file sizes before → after, any file still over the 40 KB cap (with reason)
+- **Compaction summary**: per rewritten file, `bytes before → after` and one line on what was compacted away (see "Compaction — facts over history"). **Name any file that GREW, with the reason** — growth is the exception and needs justifying, not the default.
 - Top-level nav: `AGENTS.md` regenerated y/n; symlink status for `CLAUDE.md` and `GEMINI.md`
 - Changes summary (what was added, updated, removed)
 - Broken links found
@@ -706,9 +766,58 @@ The whole point of L1/L2 is a navigable graph: gbrain materializes every `[[wiki
 
 After Phase 4's broken-link check, the graph should be strictly denser than the prior run with **zero** broken links and zero empty `[[]]`/`-  —` bullets.
 
+## Compaction — facts over history
+
+**Every rewrite is a chance to make the page shorter and truer. Take it.** These files are read by an
+agent under a token budget, so a page that says the same thing in half the bytes is strictly better —
+and the usual reason they grow is not new knowledge, it is narrative accumulating around knowledge
+that was already there.
+
+**Write the current state, not the sequence that produced it.**
+
+- `84 IDP services` beats `was 149, then 136, then 104, then 102, then 100, now 84` — unless the
+  *trajectory itself* is the fact you need, in which case say so in one clause.
+- **One dated citation per rule, not a paragraph.** Keep the rule and the evidence that makes it
+  credible — the date and the measured figure — and drop the story around it. *"`list_projects` caps
+  at 50 and truncates silently (a prior agenda dropped 2 of 4 overdue items)"* carries everything the
+  reader needs to act; the retelling of how it was discovered does not.
+- **A fact is not more durable for having been measured once.** If a figure describes a state that no
+  longer exists, it is not history worth keeping — it is a wrong number waiting to be quoted. Delete it.
+- **Re-measure; never carry a count forward.** Any number you did not measure this run is a liability,
+  and copying one out of the page you are rewriting is how a stale figure survives many rebuilds.
+
+**What you may delete outright:**
+
+- Narrative about how a rule was found, once the rule and its dated citation are stated.
+- Superseded *prose* — the account of a state that has been replaced. (This is not the same as a
+  `superseded:` marker; see below.)
+- A resolved decision, once its outcome is recorded as a plain fact. A resolution does not need the
+  argument that preceded it.
+- Repetition. The same trap restated in three sections is one trap and two liabilities: they drift,
+  and then the reader cannot tell which copy is current.
+
+**What you must NOT delete, however old:**
+
+- **`<!-- superseded: YYYY-MM-DD -->` markers on facts that stopped being true.** They stop a reader
+  re-asserting something that was retired, which is a live function, not history.
+- **Traps, caveats and corrections** — a warning that a source lies, a count is not what it looks
+  like, or a predicate returns a false zero. These are facts about the present and the most expensive
+  content in the brain to rediscover.
+- **A correction of a specific earlier error**, where the error is plausible enough to be made again.
+  Compact it to one line; do not drop it.
+- Anything a `verified:` block still vouches for against a source that has not changed.
+
+**Order of operations when a page is over budget: compact, then rotate, then flag.** Rotating history
+that should have been deleted just moves the problem into an archive page and grows the archive count —
+which is exactly how this brain reached 67 archive pages with six of them over the warn threshold.
+**Rotate what is still needed and dated; delete what is merely old.**
+
+**Report it.** The Phase 5 digest must give, per rewritten file, `bytes before → after` and one line on
+what was compacted away. A page that grew needs a reason.
+
 ## Size Caps & Archive Rotation (retrieval optimization)
 
-gbrain warns above ~50 KB per page; oversized pages chunk poorly and dilute retrieval (observed 2026-07-14: `meetings.md` 129 KB, `hub.md` 107 KB, `workflowy.md` 80 KB, `technologies.md` 68 KB, `team-tium.md` 63 KB, `releases.md` 62 KB, `exco.md` 53 KB, `x-content.md` 48 KB). The cause is accretion: dated update sections prepended on every harvest/rebuild and never rolled out. The fix is **rotation into archive pages** — content moves verbatim; it is never summarized away or deleted.
+gbrain warns above ~50 KB per page; oversized pages chunk poorly and dilute retrieval (observed 2026-07-14: `meetings.md` 129 KB, `hub.md` 107 KB, `workflowy.md` 80 KB, `technologies.md` 68 KB, `team-tium.md` 63 KB, `releases.md` 62 KB, `exco.md` 53 KB, `x-content.md` 48 KB). The cause is accretion: dated update sections prepended on every harvest/rebuild and never rolled out. There are two fixes and they apply **in this order: compact first (see "Compaction — facts over history"), rotate second.** Rotation moves content verbatim into an archive page; it is the right answer for dated content still in use, and the wrong answer for history that has stopped earning its bytes. ⚠️ **Rotation is not free and it is not neutral** — measured 2026-08-21 the brain holds **67 archive pages, six of them over gbrain's own 51,200 B warn threshold**, because for a long time every accretion was rotated and nothing was ever compacted. An archive is a place to keep what you still need, not a graveyard that makes a live page look tidy.
 
 **Hard cap: every live file under `memory/` must land ≤ 40 KB after a rewrite.** Two mechanisms enforce it, in order:
 
