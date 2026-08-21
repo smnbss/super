@@ -25,17 +25,21 @@ peaked at 1,034, and the split says exactly where it goes:
 |---|---:|---:|
 | `brain-rebuild-services` | 6,881 | 55% |
 | this orchestrator | 2,335 | 19% |
-| `gstack-upgrade` | 1,589 | 13% |
+| `gstack-upgrade` — **REMOVED from this routine** | 1,589 | 13% |
 | `brain-rebuild-memory` | 1,327 | 11% |
 | `brain-git-sync` | 309 | 2% |
 | **`brain-pull-sources`** | **7** | **~0%** |
 
 `brain-pull-sources` moves thousands of files across 113 sources for ~zero requests, because
-it is a deterministic script. Everything expensive is an LLM re-deriving what a `git rev-parse`,
-a `wc -l` or a cached version check answers for free. Before any heavy phase, run the cheap
-check and skip on a negative: `.github-changed-repos.tsv` for services (Part 2b),
-`gstack-update-check` for tools (Part 1). A phase that reports "nothing to do" for zero cost is
-the goal, not a sign the routine misfired.
+it is a deterministic script. Everything expensive is an LLM re-deriving what a `git rev-parse`
+or a `wc -l` answers for free. Before any heavy phase, run the cheap check and skip on a
+negative — `.github-changed-repos.tsv` for services (Part 2b). A phase that reports "nothing to
+do" for zero cost is the goal, not a sign the routine misfired.
+
+⚠️ **The table is the 2026-07-06→08-05 profile and is kept as measured, not rewritten.** Two of
+its phases have since left the routine: `gstack-upgrade` was removed outright (that 13% is
+structurally gone, not optimised), and meeting-agenda prep moved out to be run on demand. Read the
+shares as history, and re-measure before quoting a current cost.
 
 **Never trust a subagent's "done" — verify by filesystem state.** The sub-skills (`brain-pull-sources`, `brain-rebuild-services`, `brain-rebuild-memory`) spawn their own worker processes, and wrapper subagents routinely return *before* those workers finish (observed 3× on 2026-07-14: pull_sources still exporting, service regen mid-batch, memory "Wave 1 dispatched" with 0 files written). Rules:
 
@@ -109,21 +113,6 @@ Run the independent updaters **concurrently in the background**, then collect:
 - `brew update && brew upgrade` (background)
 - `npm update -g` (background)
 - `uv sync --upgrade` (background)
-- **gstack — check first, invoke the skill only if there's something to install.** Run the
-  purpose-built version check; **empty output means up to date, and then this phase is
-  done at zero model cost:**
-
-  ```bash
-  ~/.claude/skills/gstack/bin/gstack-update-check   # prints UPGRADE_AVAILABLE <old> <new>, or nothing
-  ```
-
-  Only on `UPGRADE_AVAILABLE` (or `JUST_UPGRADED`, which wants the migration steps) invoke
-  `/gstack-upgrade`. Do **not** invoke it unconditionally: measured over 2026-07-06→08-05 it
-  cost **1,589 model requests (13% of the whole morning routine)** — ~72 per run with spikes
-  of 217 and 420 — because the skill re-runs install-type detection and an interactive
-  `AskUserQuestion` every single morning, almost always to conclude nothing needed doing.
-  Consider `gstack-config set auto_upgrade true` so the real upgrades don't stop to ask.
-
 - **Vendored-skill drift — run the script, do not do this with a model.** super's canonical
   `skills/` is copied into several vendored trees, and they drift. On 2026-08-18 fixing one
   version bump plus one drifted copy cost **4.3M tokens**, and the same drift had appeared
@@ -298,7 +287,7 @@ Missing should be ~0 (a couple dozen permanently-unembeddable oversized/403 chun
 ```
 Morning start complete:
 
-Tools:    brew <N> upgraded · npm/python <status> · gstack <up to date | vA→vB> · git <status>
+Tools:    brew <N> upgraded · npm/python <status> · git <status>
 Sources:  <N> exported (X ok, Y failed)
 Clones:   <N> repos with local work — <merged | skipped | CONFLICT> (else "all clean mirrors")
 Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
