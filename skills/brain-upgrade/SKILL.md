@@ -57,9 +57,12 @@ diff and a copy.
 
 What the script guarantees, so you don't have to reason about it:
 
-- **Syncs per skill directory and never deletes.** Two of the copies are combined trees holding other
-  people's skills (the Drive `.agents/skills` has 196 against super's 20), so a tree-level
+- **Syncs per skill directory and never deletes.** A vendored copy can be a combined tree holding
+  other people's skills, outnumbering super's by an order of magnitude, so a tree-level
   `rsync --delete` or a symlink would destroy them.
+- **Targets local install roots only.** It never syncs into a cloud-synced or removable path
+  (Drive/Dropbox/iCloud, external volumes) — writing a skill there uploads it, and these skills carry
+  internal detail that must not leave the machine on a personal account.
 - **Skips any tree that does not already carry super's skills.** `~/.claude/skills`,
   `~/.agents/skills` and `~/.codex/skills` all exist and hold *other* skills; syncing into them would
   be a new global install of 20 skills nobody asked for, not a resync.

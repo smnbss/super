@@ -5,10 +5,10 @@
 # morning -- 4.3M tokens on 2026-08-18 to apply one version bump and rsync a drifted
 # copy, and the same drift appeared four mornings running. It is a diff and a copy.
 #
-# WHY IT IS NOT A SYMLINK: two of the three copies are COMBINED trees that hold other
-# people's skills alongside super's (the Drive `.agents/skills` had 196 skills against
-# super's 19). Symlinking or `rsync --delete` at the tree level would destroy them, so
-# this syncs PER SKILL DIRECTORY and never deletes.
+# WHY IT IS NOT A SYMLINK: a vendored copy can be a COMBINED tree that holds other
+# people's skills alongside super's, outnumbering them by an order of magnitude.
+# Symlinking or `rsync --delete` at the tree level would destroy them, so this syncs
+# PER SKILL DIRECTORY and never deletes.
 #
 # Usage:
 #   resync-vendored-skills            # report drift and fix it
@@ -26,7 +26,12 @@ CHECK_ONLY=0
 [[ -d "$CANON" ]] || { echo "resync: no canonical skills/ at $CANON" >&2; exit 1; }
 
 # Known vendored copies. A missing one is skipped, not an error -- not every machine
-# has the Drive mount or a brain checkout.
+# has a brain checkout.
+#
+# DELIBERATELY LOCAL-ONLY: never add a cloud-synced or removable path here (a Drive /
+# Dropbox / iCloud mount, an external volume). Writing a skill into a synced folder
+# UPLOADS it, and these skills carry internal detail that must not leave the machine
+# on someone's personal account. Enumerate real local install roots only.
 CANDIDATES=(
   "$HOME/.super/skills"
   "$HOME/.claude/skills"
@@ -34,10 +39,6 @@ CANDIDATES=(
   "$HOME/.codex/skills"
   "$HOME/.gemini/skills"
 )
-# Drive path contains a space and a parenthesised account name; glob for it.
-for d in "$HOME"/My\ Drive*/.agents/skills; do
-  [[ -d "$d" ]] && CANDIDATES+=("$d")
-done
 # A brain checkout keeps its own copy; find it via the caller's cwd if present.
 [[ -d "$PWD/.claude/skills" ]] && CANDIDATES+=("$PWD/.claude/skills")
 
