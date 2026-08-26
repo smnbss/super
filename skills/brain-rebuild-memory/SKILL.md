@@ -681,7 +681,66 @@ written down.
   container (from its registry, not a subdirectory count), and the `outputs/` doc totals.
 - **`memory/` is NOT described here.** It lives in the 3.5a block. Keep the two disjoint.
 
-### 3.5b. Symlinks for other assistants
+### 3.5b. Top-level DEVELOPER.md (developer onboarding guide) — NEW 2026-08-26, Simone's call
+
+`DEVELOPER.md` is a hand-curated developer guide (setup steps, `bin/` script commands, env-var
+conventions, troubleshooting recipes). **Most of it never changes and this phase must never touch
+it.** Two parts of it do go stale on their own, silently, because the numbers and claims they carry
+are already computed correctly elsewhere in this same skill run (or in `brain-rebuild-services`) and
+nothing currently pushes that back into this file. That drift is real, not hypothetical: the file's
+own cap-breach line said "22 files... exceed the 40,960-byte cap" on 2026-08-26, the same day that
+cap was raised to 65,536 B and the true count dropped to 4 — the file was already wrong the moment
+the decision landed, because nothing told it.
+
+**Anchor:** same `<brain_root>` as the rest of this skill.
+
+#### 3.5b-1. Regenerate ONLY the "Key Resources counts" block — same marker contract as 3.5a
+
+```markdown
+<!-- BEGIN GENERATED: brain-rebuild-memory:developer-counts -->
+<!-- END GENERATED: brain-rebuild-memory:developer-counts -->
+```
+
+Same marker rules as 3.5a (both present → replace between them · neither → insert directly after the
+existing `## Key Resources` heading and report · exactly one, or either twice → **ABORT, change
+nothing**). Same content-hash short-circuit: if the regenerated block matches what's already there,
+don't rewrite the file.
+
+**Block content — every count/cap claim currently scattered through `## Key Resources`, re-measured
+from disk this run, never copied from the file already on disk:**
+- `outputs/services/` file counts (`*.agent.md`, `*.db.agent.md`, total) and its byte cap — **the cap
+  value itself is hand-set policy** (currently 65,536 B, see `brain-rebuild-services/SKILL.md`
+  "Changelog & size discipline" — read it from there, never hardcode a remembered number), but the
+  *count of files over it* is derived and must be re-measured every run.
+- `src/idp/` scale (services, total files) and its "declared but unserved" doc-gap breakdown, read
+  from `src/idp/catalog.md`'s own table, never carried forward.
+- `src/outline/` scale (file count, collection count via `find -mindepth 1 -maxdepth 1 -type d`, not
+  a bare `-maxdepth 1` which double-counts the root).
+- The service→team map's "all N services" figure in `## Service → Team Map`, matching `src/idp/catalog.md`.
+
+**Dirty when** `outputs/services/`, `src/idp/`, or `src/outline/` changed this run, when the
+`outputs/services/` cap value itself changed, or in full-rebuild mode.
+
+#### 3.5b-2. Merge-review the "Developer Traps" section — NEVER regenerate wholesale
+
+Same principle as 3.5a-2's Repository Layout block: **each trap bullet is a hand-won caveat a
+generator cannot reproduce, and a wholesale rewrite destroys it silently.** This section is merged,
+never regenerated:
+
+| Case | Action |
+|---|---|
+| A trap's underlying fact changed this run (surfaced by 2b service-doc regen, 2c IDP catalog re-measurement, 2a GitHub HEAD-move detection, or a meeting-harvest Brain Update) | Update that bullet in place with the new fact. **Never delete a trap silently** — if it's fully resolved, prefix it `✅ RESOLVED <date>:` and keep one line of what changed, matching the house convention used everywhere else in this brain. |
+| A new fact from this run is genuinely trap-shaped — a developer will trip over it locally, not just "interesting to know" — and isn't already covered | Add a new bullet, sourced, at the end of the list. **Only when it's squarely developer-facing** (breaks local dev, a removed dependency, an auth/env change, a footgun in a script) — not every service-doc finding belongs here; most belong in `outputs/services/**/<repo>.agent.md` instead, which already exists for that. |
+| Nothing relevant changed this run | Leave the section untouched. |
+| Uncertain whether a bullet is still current | Leave it as-is and flag it in the Phase 5 digest rather than guessing. |
+
+**Never touch anything outside `## Developer Traps` and the marked counts block** — Prerequisites,
+First-Time Setup, Running Services, Database Operations, Repo Management, Per-Repo Local Dev
+Commands, Troubleshooting and Environment Variables Convention are all hand-maintained and out of
+scope for this phase, however tempting a stale-looking line in them might be. If one of those looks
+wrong, flag it in the digest for a human — do not edit it.
+
+### 3.5c. Symlinks for other assistants
 
 Run from `<brain_root>`:
 
@@ -709,6 +768,7 @@ Record final symlink status (`created` / `already-correct` / `skipped: gemini no
 3. **Frontmatter on rewritten files**: `updated:` = today. Skipped files keep their prior `updated:`.
 4. **Orphans**: memory files with no corresponding source → flag (don't delete). `memory/L2/archive/` pages are exempt — their source is the `archive_of:` parent.
 5. **Symlink health**: `<brain_root>/CLAUDE.md` resolves to `AGENTS.md`; `GEMINI.md` resolves to `AGENTS.md` if gemini is installed.
+5b. **DEVELOPER.md marker integrity**: `<!-- BEGIN/END GENERATED: brain-rebuild-memory:developer-counts -->` each appear exactly once (or the phase aborted and reported it, per 3.5b-1); everything outside the block and outside `## Developer Traps` is byte-for-byte unchanged from before this run's edits.
 6. **Compaction**: for every rewritten file, `bytes before → after` is recorded, and any file that GREW has a stated reason (see "Compaction — facts over history").
 7. **Size caps**: every file rewritten this run is ≤ 40 KB; additionally flag any `memory/` file > 50 KB (gbrain's warn threshold) in the digest. If an over-cap file is an accretive target, rotate it before finishing (see "Size Caps & Archive Rotation").
 8. **Archive integrity**: closed-period archives were not touched this run (mtimes unchanged); every archive page has a `Topics:` footer linking its parent; every rotated parent has an `## Archive` section with one `[[wikilink]]` bullet per archive page.

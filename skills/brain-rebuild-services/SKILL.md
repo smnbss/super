@@ -1008,10 +1008,14 @@ had deliberately dropped.
   most recent released version. Older per-release narrative is already in
   `src/linear/` (441 release-note exports) and in the repo's own CHANGELOG — drop it
   rather than carrying it forward.
-- **40 KB hard cap** per doc, matching the `memory/` cap and for the same reason:
-  oversized pages chunk badly in gbrain and dilute retrieval. If a doc is over cap
-  after dropping history, compress tables before dropping facts — and if the excess
-  is steady-state architecture rather than changelog, **say so in the run report
+- **64 KB (65,536 B) hard cap** per doc — raised from the `memory/` cap (40 KB)
+  2026-08-26 (Simone's call): service docs run bigger than L1/L2 pages by nature
+  (full schemas, full endpoint catalogs) and kept blowing the 40 KB cap, so
+  `outputs/services/` now has its own, higher ceiling instead of matching
+  `memory/`'s. The reason for having a cap at all is unchanged: oversized pages
+  chunk badly in gbrain and dilute retrieval. If a doc is over cap after dropping
+  history, compress tables before dropping facts — and if the excess is
+  steady-state architecture rather than changelog, **say so in the run report
   instead of cutting current facts to hit the number.**
 - **Never write a forward reference to content you are deleting.** A line like "full
   listing verbatim in [[<repo>-2026-08]]" is only true while the target exists; once
