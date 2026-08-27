@@ -179,6 +179,33 @@ inject_credentials() {
   run vm_scp "$name" "$CRED_COMPOSER" "~/.composer/auth.json"
   run vm_ssh "$name" "printf '%s\\n' '{ \"credHelpers\": { \"europe-docker.pkg.dev\": \"gcloudadc\", \"pkg.dev\": \"gcloudadc\" } }' > ~/.docker/config.json"
   run vm_ssh "$name" "chmod 600 ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json"
+  inject_github_auth "$name"
+}
+
+# jungle/bin/repos.sh lists all 72 repos as git@github.com: SSH URLs, and the VM
+# has no GitHub SSH key. Rewrite those URLs to token HTTPS instead.
+#
+# The token is written to a local file and copied. It never appears in a command
+# line, so it reaches neither the dry-run transcript nor the remote process list.
+github_token() {
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then printf '%s' "$GITHUB_TOKEN"; return 0; fi
+  grep -oE '_authToken=.*' "$CRED_NPMRC" 2>/dev/null \
+    | head -1 | cut -d= -f2- | tr -d '"'"'"' \r' || return 1
+}
+
+inject_github_auth() {
+  local name="$1" token tmp
+  token="$(github_token)"
+  if [[ -z "$token" ]]; then
+    log "WARNING: no GitHub token found. repo.init.sh will fail on private repos."
+    return 0
+  fi
+  tmp="$(mktemp)"
+  chmod 600 "$tmp"
+  printf 'https://x-access-token:%s@github.com\n' "$token" > "$tmp"
+  run vm_scp "$name" "$tmp" "~/.git-credentials"
+  rm -f "$tmp"
+  run vm_ssh "$name" "chmod 600 ~/.git-credentials && git config --global credential.helper store && git config --global url.'https://github.com/'.insteadOf 'git@github.com:'"
 }
 
 # ⚠️ Deletes files only. NEVER call `gcloud auth application-default revoke` here.
@@ -187,7 +214,7 @@ inject_credentials() {
 #    tests/test_jungle_up_gcp.mjs fails the build if that call ever appears.
 scrub_credentials() {
   local name="$1"
-  run vm_ssh "$name" "rm -f ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json ~/.docker/config.json"
+  run vm_ssh "$name" "rm -f ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json ~/.docker/config.json ~/.git-credentials ~/.gitconfig"
 }
 
 JUNGLE_REMOTE_DIR="${JUNGLE_REMOTE_DIR:-\$HOME/jungle}"

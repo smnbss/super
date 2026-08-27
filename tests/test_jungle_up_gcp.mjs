@@ -389,6 +389,27 @@ test('chrome_command isolates the profile and maps the wildcard host', () => {
   assert.match(r.stdout, /--no-first-run/);
 });
 
+// ── Task 8b: GitHub auth on the VM (repos.sh uses git@github.com SSH URLs) ──
+test('inject_credentials rewrites git@github.com to token HTTPS', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z SKIP_CRED_CHECK=1 GITHUB_TOKEN=ghp_test ' +
+                   'inject_credentials jungle-x');
+  assert.match(r.stdout, /insteadOf/, 'the VM has no GitHub SSH key; repos.sh uses git@ URLs');
+  assert.match(r.stdout, /git-credentials/);
+});
+
+test('the GitHub token never appears in a dry-run transcript', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z SKIP_CRED_CHECK=1 GITHUB_TOKEN=ghp_SECRET123 ' +
+                   'inject_credentials jungle-x');
+  assert.ok(!r.stdout.includes('ghp_SECRET123'), 'a token must never be echoed');
+  assert.ok(!r.stderr.includes('ghp_SECRET123'), 'a token must never be echoed');
+});
+
+test('scrub removes the git credential files too', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z scrub_credentials jungle-x');
+  assert.match(r.stdout, /git-credentials/, 'the token lands in ~/.git-credentials');
+  assert.match(r.stdout, /gitconfig/, 'the insteadOf rewrite lands in ~/.gitconfig');
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
