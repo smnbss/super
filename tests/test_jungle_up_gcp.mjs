@@ -120,7 +120,7 @@ test('ensure_firewall_rule creates the rule when describe fails', () => {
   const r = callFn('PROJECT_ID=p ensure_firewall_rule 203.0.113.7/32', { binDir: fake.dir });
   const create = fake.calls().find(c => c.includes('firewall-rules create'));
   assert.ok(create, `expected a create call, got: ${fake.calls().join(' | ')}`);
-  assert.match(create, /--allow=tcp:22,80,443/);
+  assert.match(create, /--allow=tcp:22,tcp:80,tcp:443/);
   assert.match(create, /--source-ranges=203\.0\.113\.7\/32/);
   assert.match(create, /--target-tags=jungle-session/);
 });
@@ -205,10 +205,18 @@ test('vm-bootstrap installs exactly the measured dependency set', () => {
 
 test('vm-bootstrap installs none of the tooling this design dropped', () => {
   const s = readFileSync(BOOTSTRAP, 'utf8').toLowerCase();
-  for (const banned of ['ollama', 'chromium', '@anthropic-ai/claude-code', '@openai/codex',
-                        '@google/gemini-cli', 'ubuntu-desktop', 'xrdp']) {
+  // claude-code and tmux are NOT in this list. Work must continue while the
+  // operator's laptop is closed, so the agent runs on the VM under tmux.
+  for (const banned of ['ollama', 'chromium', '@openai/codex',
+                        '@google/gemini-cli', 'ubuntu-desktop', 'xrdp', 'super install']) {
     assert.ok(!s.includes(banned.toLowerCase()), `must not install ${banned}`);
   }
+});
+
+test('vm-bootstrap installs the detached-agent tooling', () => {
+  const s = readFileSync(BOOTSTRAP, 'utf8');
+  assert.match(s, /@anthropic-ai\/claude-code/, 'the agent runs on the VM');
+  assert.match(s, /tmux/, 'the agent must survive the SSH connection closing');
 });
 
 test('vm-bootstrap enables docker under systemd rather than backgrounding dockerd', () => {
@@ -408,6 +416,51 @@ test('scrub removes the git credential files too', () => {
   const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z scrub_credentials jungle-x');
   assert.match(r.stdout, /git-credentials/, 'the token lands in ~/.git-credentials');
   assert.match(r.stdout, /gitconfig/, 'the insteadOf rewrite lands in ~/.gitconfig');
+});
+
+// ── Task 9: stack derivation, bring-up, render check ────────────────────────
+test('derive_services asks compose and never hardcodes a service list', () => {
+  const src = readFileSync(CLI, 'utf8');
+  assert.match(src, /compose\.yaml config --services/);
+  assert.ok(!src.includes('laravel.api-partner.weroad.wr'),
+    'service names must be derived, not hardcoded');
+});
+
+test('stack_up starts the reverse proxy, then infra, then the services', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z stack_up jungle-x api-partner ' +
+                   '"api-partner.weroad.wr laravel.api-partner.weroad.wr"');
+  const at = (re) => r.stdout.search(re);
+  assert.ok(at(/jungle\.up\.sh reverseproxy\.wr/) >= 0, `got:\n${r.stdout}`);
+  assert.ok(at(/postgresql\.weroad\.wr/) > at(/jungle\.up\.sh reverseproxy\.wr/));
+  assert.ok(at(/laravel\.api-partner\.weroad\.wr/) > at(/postgresql\.weroad\.wr/));
+});
+
+test('stack_up passes --no-deps so sibling APIs are not started', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z stack_up jungle-x api-partner "api-partner.weroad.wr"');
+  assert.match(r.stdout, /--no-deps/);
+});
+
+test('the IPv4 php-fpm pool is mounted only when the VM lacks IPv6', () => {
+  const src = readFileSync(CLI, 'utf8');
+  assert.match(src, /proc\/net\/if_inet6/, 'must probe rather than assume');
+  const conf = join(SKILL, 'files/zz-apko.conf');
+  assert.ok(existsSync(conf));
+  assert.match(readFileSync(conf, 'utf8'), /listen = 0\.0\.0\.0:9000/);
+});
+
+test('verify_render rejects a 200 with an empty body', () => {
+  const fake = fakeBin(['gcloud'], { stdout: '200 12' });
+  const r = callFn('PROJECT_ID=p ZONE=z verify_render jungle-x partner.weroad.wr',
+    { binDir: fake.dir });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /empty shell/i);
+});
+
+test('verify_render accepts a real body', () => {
+  const fake = fakeBin(['gcloud'], { stdout: '200 45210' });
+  const r = callFn('PROJECT_ID=p ZONE=z verify_render jungle-x partner.weroad.wr',
+    { binDir: fake.dir });
+  assert.equal(r.status, 0);
 });
 
 console.log('═'.repeat(50));

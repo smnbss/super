@@ -7,7 +7,7 @@
 #    See SKILL.md, "Why this duplicates setup_gcp.sh".
 set -uo pipefail
 
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 DEFAULT_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
@@ -86,7 +86,7 @@ ensure_firewall_rule() {
   else
     log "Creating firewall rule '$FIREWALL_RULE' (tcp:22,80,443 from $cidr)"
     run gcloud --project="$PROJECT_ID" compute firewall-rules create "$FIREWALL_RULE" \
-      --allow=tcp:22,80,443 \
+      --allow=tcp:22,tcp:80,tcp:443 \
       --source-ranges="$cidr" \
       --target-tags="$NETWORK_TAG" \
       --description="jungle session VMs: SSH and HTTP from one operator IP" >/dev/null \
@@ -410,6 +410,132 @@ chrome_command() {
   ip="$(state_read "$session" ip)" || die "no session '$session'"
   printf 'open -na "Google Chrome" --args --user-data-dir=/tmp/chrome-%s --no-first-run --no-default-browser-check --host-resolver-rules="MAP *.weroad.wr %s" "http://partner.weroad.wr/"\n' \
     "$session" "$ip"
+}
+
+# One logical service is often several compose entries. A Laravel API is BOTH
+# api-x.weroad.wr (nginx) and its php-fpm sibling. nginx alone returns 502.
+# Derive the set from compose. Never guess it.
+derive_services() {
+  local vm="$1" repo="$2"
+  vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml config --services | grep -- '$repo'"
+}
+
+# GCE is expected to carry IPv6, so DVO-419 probably does not apply here. Probe.
+needs_ipv4_fpm() {
+  local vm="$1"
+  vm_ssh "$vm" "test -e /proc/net/if_inet6" >/dev/null 2>&1 && return 1
+  return 0
+}
+
+stack_up() {
+  local vm="$1" repo="$2" services="$3"
+  local override=""
+
+  if [[ -z "$DRY_RUN" ]] && needs_ipv4_fpm "$vm"; then
+    log "No IPv6 on this VM. Mounting the IPv4 php-fpm pool (DVO-419)."
+    run vm_scp "$vm" "$SKILL_DIR/files/zz-apko.conf" "/tmp/zz-apko.conf"
+    override="-f /tmp/override.yaml"
+    run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && printf 'services:\\n' > /tmp/override.yaml && for s in \$(docker compose -f compose.yaml config --services | grep '^laravel\\.'); do printf '  \"%s\":\\n    volumes:\\n      - \"/tmp/zz-apko.conf:/etc/php/php-fpm.d/zz-apko.conf:ro\"\\n' \"\$s\" >> /tmp/override.yaml; done"
+  fi
+
+  run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && ./bin/jungle.up.sh reverseproxy.wr"
+  run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --no-deps postgresql.weroad.wr redis.weroad.wr rabbitmq.weroad.wr"
+  run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --build --no-deps $services"
+}
+
+# A 200 can be an empty shell. Require a body of real size.
+verify_render() {
+  local vm="$1" host="$2" out code bytes
+  out="$(vm_ssh "$vm" "curl -s -o /tmp/render.html -w '%{http_code} %{size_download}' -H 'Host: $host' http://127.0.0.1/")"
+  code="${out%% *}"; bytes="${out##* }"
+  [[ "$code" == "200" ]] || die "$host returned HTTP $code"
+  if [[ "$bytes" =~ ^[0-9]+$ ]] && (( bytes > 2000 )); then
+    log "$host rendered ($bytes bytes)"
+    return 0
+  fi
+  die "$host returned 200 with an empty shell ($bytes bytes). The page did not render."
+}
+
+# ── The detached agent ──────────────────────────────────────────────────────
+# ⚠️ Claude runs ON the VM, inside tmux. That is the whole reason this design
+#    exists: the operator closes the laptop and the work continues. A laptop-side
+#    agent editing through a mount cannot meet that requirement, because closing
+#    the lid suspends the process and drops the mount.
+AGENT_TMUX_SESSION="claude"
+
+# Claude Code on the VM authenticates through WeRoad's LiteLLM proxy, so its calls
+# are cost-monitored like every other WeRoad LLM call. Falls back to an explicit
+# ANTHROPIC_API_KEY when the proxy variables are absent.
+inject_agent_auth() {
+  local name="$1" tmp
+  local url="${LITELLM_PROXY_URL:-}" key="${LITELLM_PROXY_API_KEY:-}"
+
+  if [[ -z "$url" || -z "$key" ]]; then
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+      tmp="$(mktemp)"; chmod 600 "$tmp"
+      printf 'export ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" > "$tmp"
+    else
+      log "WARNING: no LiteLLM proxy and no ANTHROPIC_API_KEY."
+      log "Run 'claude setup-token' on the VM once before starting the agent."
+      return 0
+    fi
+  else
+    tmp="$(mktemp)"; chmod 600 "$tmp"
+    { printf 'export ANTHROPIC_BASE_URL=%s\n' "$url"
+      printf 'export ANTHROPIC_AUTH_TOKEN=%s\n' "$key"; } > "$tmp"
+  fi
+
+  run vm_scp "$name" "$tmp" "~/.claude-env"
+  rm -f "$tmp"
+  run vm_ssh "$name" "chmod 600 ~/.claude-env && grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc"
+}
+
+# Ship the brain context the VM cannot reach. Claude runs there, and there is no
+# gbrain, no service docs and no DEVELOPER.md on that machine.
+ship_context_pack() {
+  local name="$1" repo="$2" brain_root="${BRAIN_ROOT:-$PWD}"
+  local pack; pack="$(mktemp -d)"
+  mkdir -p "$pack/services"
+
+  [[ -f "$brain_root/DEVELOPER.md" ]] && cp "$brain_root/DEVELOPER.md" "$pack/"
+  local doc
+  for doc in "$brain_root"/outputs/services/**/*"$repo"*.agent.md \
+             "$brain_root"/outputs/services/*"$repo"*.agent.md; do
+    [[ -f "$doc" ]] && cp "$doc" "$pack/services/"
+  done
+
+  run vm_ssh "$name" "mkdir -p ~/session-context"
+  run vm_scp "$name" "$pack" "~/session-context"
+  rm -rf "$pack"
+  log "Context pack shipped to ~/session-context"
+}
+
+# Start the agent detached. It survives the SSH connection closing, so the work
+# continues after the operator closes the laptop.
+cmd_agent_start() {
+  local session="$1" prompt="$2" vm repo
+  vm="$(state_read "$session" vm)"   || die "no session '$session'"
+  repo="$(state_read "$session" repo)"
+  local wd="$JUNGLE_REMOTE_DIR/$repo"
+
+  run vm_ssh "$vm" "tmux has-session -t $AGENT_TMUX_SESSION 2>/dev/null && tmux kill-session -t $AGENT_TMUX_SESSION; true"
+  run vm_ssh "$vm" "cd $wd && tmux new-session -d -s $AGENT_TMUX_SESSION \"bash -lc 'claude --dangerously-skip-permissions -p \\\"$prompt\\\" 2>&1 | tee -a ~/agent.log'\""
+  log "Agent started detached on '$vm'. Close the laptop freely."
+  log "Read progress with:  session agent log $session"
+}
+
+cmd_agent_log() {
+  local session="$1" vm
+  vm="$(state_read "$session" vm)" || die "no session '$session'"
+  vm_ssh "$vm" "tail -n ${AGENT_LOG_LINES:-80} ~/agent.log 2>/dev/null || echo '(no agent log yet)'"
+}
+
+cmd_agent_attach() {
+  local session="$1" vm zone
+  vm="$(state_read "$session" vm)" || die "no session '$session'"
+  zone="$(state_read "$session" zone)"
+  printf 'gcloud compute ssh %s --zone=%s --project=%s -- -t "tmux attach -t %s"\n' \
+    "$vm" "$zone" "$(state_read "$session" project)" "$AGENT_TMUX_SESSION"
 }
 
 parse_common_flags() {

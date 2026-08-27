@@ -3,11 +3,13 @@
 #
 # Measured 2026-08-27 from github/weroad/jungle/bin/*.sh:
 #   git 172 · docker 42 · curl 9 · node 8 · pnpm 5 · gcloud 3
+# Plus tmux and claude-code, which the jungle does not need but the detached
+# agent does.
 # The "op" match in that grep is the word "no-op" in a comment. There is no
 # 1Password dependency. Nothing else belongs here.
 #
-# Claude runs on the operator's laptop, so this VM needs no agent tooling, no
-# super bootstrap and no brain files.
+# Claude runs ON this VM under tmux. It does NOT need the super bootstrap or the
+# brain repo — a context pack is shipped per session instead.
 set -euo pipefail
 
 JUNGLE_DIR="${JUNGLE_DIR:-$HOME/jungle}"
@@ -49,6 +51,14 @@ install_base() {
   for b in gcloud gsutil bq; do
     [ -x "/opt/google-cloud-sdk/bin/$b" ] && sudo ln -sfn "/opt/google-cloud-sdk/bin/$b" "/usr/local/bin/$b"
   done
+
+  echo "==> tmux and claude-code"
+  # ⚠️ Claude runs ON this VM, detached under tmux, so work continues while the
+  #    operator's laptop is closed. That requirement is why the agent tooling is
+  #    here at all — an earlier revision stripped it out on the assumption that
+  #    Claude ran on the laptop.
+  sudo apt-get install -y -qq tmux
+  sudo npm install -g @anthropic-ai/claude-code
 
   echo "==> Artifact Registry credential helper"
   sudo install -m 0755 /tmp/docker-credential-gcloudadc /usr/local/bin/docker-credential-gcloudadc
