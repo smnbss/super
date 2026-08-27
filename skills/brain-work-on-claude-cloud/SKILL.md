@@ -59,6 +59,11 @@ It checks three things, and any one of them failing is fatal:
    script and exists nowhere else. It is what separates a wr-cloud container from
    a laptop jungle checkout.
 
+If the skill is missing from a container altogether — `/brain-work-on-claude-cloud`
+answers `Unknown command` — that container was built from setup **v7 or earlier**.
+Step 9 of v8 installs it. An environment-config edit only reaches containers created
+after the edit, so start a fresh session rather than repairing the running one.
+
 **Exit 1 means STOP.** Print what the gate reported, name the wrong starting
 position, and run nothing else. Do not adapt the steps to the current host. Do not
 substitute a local jungle. Do not continue on the preset alone. The correct reply
@@ -80,6 +85,7 @@ Steps 1, 4 and 6 repair them.
 | `jungle-ca-inject` on PATH | installed |
 | `dockerd` | started, **not supervised** |
 | The two compose `extends:` stubs (`dbt/`, `dlt-pipelines/`) | written, gitignored |
+| This skill, in `~/.claude/skills/` | installed by setup **v8** and later |
 
 Private images, npm and composer need no further authentication. There is no
 `docker login` step and no `gcloud auth` step.
