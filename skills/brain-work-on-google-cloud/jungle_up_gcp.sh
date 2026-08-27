@@ -262,6 +262,70 @@ cmd_golden_build() {
   log "Golden image ready: $image"
 }
 
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-$PWD/outputs/projects-work-on}"
+
+state_path() { printf '%s/%s/.jungle-vm.json' "$WORKSPACE_ROOT" "$1"; }
+
+state_write() {
+  local session="$1"; shift
+  local f; f="$(state_path "$session")"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf '{\n'
+    local first=1 kv
+    for kv in "$@"; do
+      [[ $first -eq 1 ]] || printf ',\n'
+      printf '  "%s": "%s"' "${kv%%=*}" "${kv#*=}"
+      first=0
+    done
+    printf '\n}\n'
+  } > "$f"
+}
+
+state_read() {
+  local f; f="$(state_path "$1")"
+  [[ -f "$f" ]] || return 1
+  node -e "const s=require('$f');process.stdout.write(String(s['$2']||''))" 2>/dev/null
+}
+
+golden_image_age_days() {
+  local stamp="${1#"$GOLDEN_IMAGE_PREFIX"}"
+  local when now
+  when="$(date -j -f %Y%m%d "$stamp" +%s 2>/dev/null)" || return 1
+  now="$(date +%s)"
+  printf '%s' $(( (now - when) / 86400 ))
+}
+
+cmd_session_create() {
+  local repo="$1" session="$2"
+  local image name ip age
+  image="${GOLDEN_IMAGE_OVERRIDE:-$(latest_golden_image || true)}"
+  [[ -n "$image" ]] || die "no golden image found. Run: jungle_up_gcp.sh golden build"
+
+  age="$(golden_image_age_days "$image" 2>/dev/null || echo 0)"
+  if [[ "$age" =~ ^[0-9]+$ ]] && (( age > 7 )); then
+    log "WARNING: golden image '$image' is older than 7 days ($age days)."
+    log "Images and database dumps are stale. Repo code is pulled per session."
+  fi
+
+  name="$(instance_name "$repo" "$session")"
+  log "Creating '$name' from '$image'"
+  vm_create "$name" --from-image "$image"
+  run vm_wait_ssh "$name"
+  inject_credentials "$name"
+
+  log "Preparing the branch"
+  run vm_ssh "$name" "cd $JUNGLE_REMOTE_DIR/$repo && git pull --ff-only"
+  run vm_ssh "$name" "cd $JUNGLE_REMOTE_DIR/$repo && git switch -c $session"
+
+  ip="$(vm_ip "$name" 2>/dev/null || echo '')"
+  state_write "$session" \
+    "vm=$name" "zone=$ZONE" "project=$PROJECT_ID" "ip=$ip" \
+    "image=$image" "repo=$repo" "session=$session" "branch=$session" \
+    "mount=$HOME/vm/$session"
+  log "Session state written to $(state_path "$session")"
+}
+
 parse_common_flags() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -307,7 +371,17 @@ main() {
         *)     die "usage: golden build [--refresh]" 2 ;;
       esac
       ;;
-    session)           die "verb 'session' is not implemented yet" 3 ;;
+    session)
+      shift
+      local sub="${1:-}"; shift || true
+      case "$sub" in
+        create)
+          local repo="${1:-}" sess="${2:-}"
+          [[ -n "$repo" && -n "$sess" ]] || die "usage: session create <repo> <session>" 2
+          shift 2; parse_common_flags "$@"; cmd_session_create "$repo" "$sess" ;;
+        *) die "unknown session verb: ${sub:-<none>}" 2 ;;
+      esac
+      ;;
     *)                 printf 'error: unknown verb: %s\n' "$verb" >&2; usage >&2; exit 2 ;;
   esac
 }

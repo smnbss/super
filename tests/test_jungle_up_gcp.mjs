@@ -302,6 +302,54 @@ test('parse_common_flags rejects an unknown option instead of ignoring it', () =
   assert.match(r.stderr, /unknown option/);
 });
 
+// ── Task 7: session state and session create ────────────────────────────────
+test('state_write then state_read round-trips a value', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  const r = callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a ip=203.0.113.5; ` +
+                   `WORKSPACE_ROOT=${ws} state_read s1 ip`);
+  assert.equal(r.stdout.trim(), '203.0.113.5');
+});
+
+test('state file lands in the session workspace', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a`);
+  assert.ok(existsSync(join(ws, 's1/.jungle-vm.json')), 'expected <ws>/<session>/.jungle-vm.json');
+});
+
+test('session create refuses when no golden image exists', () => {
+  const fake = fakeBin(['gcloud'], { stdout: '' });
+  const r = runCli(['session', 'create', 'api-partner', 'cost-approval', '--project', 'p'],
+    { binDir: fake.dir, env: { SOURCE_IP: '203.0.113.7/32' } });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /golden build/, 'the error must name the fix');
+});
+
+test('session create derives the instance name from repo and session', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  const r = runCli(['session', 'create', 'api-partner', 'cost-approval', '--dry-run', '--project', 'p'],
+    { env: { GOLDEN_IMAGE_OVERRIDE: 'jungle-golden-20260827', SOURCE_IP: '203.0.113.7/32',
+             SKIP_CRED_CHECK: '1', WORKSPACE_ROOT: ws } });
+  assert.match(r.stdout, /instances create jungle-api-partner-cost-approval/);
+  assert.match(r.stdout, /--source-machine-image=jungle-golden-20260827/);
+});
+
+test('session create pulls before branching', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  const r = runCli(['session', 'create', 'api-partner', 'cost-approval', '--dry-run', '--project', 'p'],
+    { env: { GOLDEN_IMAGE_OVERRIDE: 'jungle-golden-20260827', SOURCE_IP: '203.0.113.7/32',
+             SKIP_CRED_CHECK: '1', WORKSPACE_ROOT: ws } });
+  assert.ok(r.stdout.search(/git pull/) < r.stdout.search(/git switch -c cost-approval/),
+    'pull must precede the branch');
+});
+
+test('session create warns when the golden image is older than 7 days', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  const r = runCli(['session', 'create', 'api-partner', 'x', '--dry-run', '--project', 'p'],
+    { env: { GOLDEN_IMAGE_OVERRIDE: 'jungle-golden-20200101', SOURCE_IP: '203.0.113.7/32',
+             SKIP_CRED_CHECK: '1', WORKSPACE_ROOT: ws } });
+  assert.match(r.stderr, /older than 7 days/i);
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
