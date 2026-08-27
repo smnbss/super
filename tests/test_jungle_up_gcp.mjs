@@ -20,7 +20,7 @@ function fakeBin(names, { exitCode = 0, stdout = '' } = {}) {
   const log = join(dir, 'calls.log');
   for (const n of names) {
     const p = join(dir, n);
-    writeFileSync(p, `#!/usr/bin/env bash\nprintf '%s' "${n}" >> "${log}"\nfor a in "$@"; do printf ' %s' "$a" >> "${log}"; done\nprintf '\\n' >> "${log}"\nprintf '%s' ${JSON.stringify(stdout)}\nexit ${exitCode}\n`);
+    writeFileSync(p, `#!/usr/bin/env bash\nprintf '%s' "${n}" >> "${log}"\nfor a in "$@"; do printf ' %s' "$a" >> "${log}"; done\nprintf '\\n' >> "${log}"\nprintf '%b' ${JSON.stringify(stdout)}\nexit ${exitCode}\n`);
     chmodSync(p, 0o755);
   }
   writeFileSync(log, '');
@@ -439,8 +439,8 @@ test('stack_up starts the reverse proxy, then infra, then the services', () => {
   const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z stack_up jungle-x api-partner ' +
                    '"api-partner.weroad.wr laravel.api-partner.weroad.wr"');
   const at = (re) => r.stdout.search(re);
-  assert.ok(at(/jungle\.up\.sh reverseproxy\.wr/) >= 0, `got:\n${r.stdout}`);
-  assert.ok(at(/postgresql\.weroad\.wr/) > at(/jungle\.up\.sh reverseproxy\.wr/));
+  assert.ok(at(/reverseproxy-expose\.yaml/) >= 0, `got:\n${r.stdout}`);
+  assert.ok(at(/postgresql\.weroad\.wr/) > at(/reverseproxy-expose\.yaml/));
   assert.ok(at(/laravel\.api-partner\.weroad\.wr/) > at(/postgresql\.weroad\.wr/));
 });
 
@@ -449,6 +449,9 @@ test('stack_up passes --no-deps so sibling APIs are not started', () => {
   assert.match(r.stdout, /--no-deps/);
 });
 
+// Measured on a real GCE Ubuntu 24.04 VM, 2026-08-27: /proc/net/if_inet6 IS
+// present, php-fpm bound without the override, and the stack served 200. DVO-419
+// does not apply here. The probe stays so an IPv6-less host still works.
 test('the IPv4 php-fpm pool is mounted only when the VM lacks IPv6', () => {
   const src = readFileSync(CLI, 'utf8');
   assert.match(src, /proc\/net\/if_inet6/, 'must probe rather than assume');
@@ -470,6 +473,41 @@ test('verify_render accepts a real body', () => {
   const r = callFn('PROJECT_ID=p ZONE=z verify_render jungle-x partner.weroad.wr',
     { binDir: fake.dir });
   assert.equal(r.status, 0);
+});
+
+// ── Task 10: list, stop, rm and the two gates ───────────────────────────────
+test('session rm REFUSES to delete when the branch is unpushed', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a repo=api-partner branch=s1 mount=/tmp/m-x`);
+  const fake = fakeBin(['gcloud'], { exitCode: 1 });
+  const r = callFn(`WORKSPACE_ROOT=${ws} PROJECT_ID=p ZONE=z cmd_session_rm s1`, { binDir: fake.dir });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /not pushed/i);
+  assert.ok(!fake.calls().some(c => c.includes('instances delete')), 'must not delete the VM');
+});
+
+test('session rm unmounts and scrubs before it deletes', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a repo=api-partner branch=s1 mount=/tmp/m-x`);
+  const r = callFn(`WORKSPACE_ROOT=${ws} DRY_RUN=1 PROJECT_ID=p ZONE=z BRANCH_PUSHED=1 cmd_session_rm s1`);
+  const at = (re) => r.stdout.search(re);
+  assert.ok(at(/rm -f .*application_default_credentials/) < at(/instances delete/),
+    'scrub must precede delete');
+  assert.ok(at(/instances delete/) >= 0);
+});
+
+test('session list surfaces cost, because forgotten VMs are the real risk', () => {
+  const fake = fakeBin(['gcloud'], { stdout: 'jungle-a RUNNING 2026-08-27T08:00:00Z\n' });
+  const r = callFn('PROJECT_ID=p ZONE=z cmd_session_list', { binDir: fake.dir });
+  assert.match(r.stdout, /EUR/);
+});
+
+test('the agent starts detached under tmux, so it survives a closed laptop', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a repo=api-partner branch=s1`);
+  const r = callFn(`WORKSPACE_ROOT=${ws} DRY_RUN=1 PROJECT_ID=p ZONE=z cmd_agent_start s1 "fix the thing"`);
+  assert.match(r.stdout, /tmux new-session -d/, 'must be detached');
+  assert.match(r.stdout, /claude /);
 });
 
 console.log('═'.repeat(50));

@@ -1,0 +1,13 @@
+# Override for jungle's reverse proxy on a REMOTE VM.
+#
+# compose.jungle.yaml binds "127.0.0.1:80:80" because jungle is built for a laptop
+# where the browser is on the same machine. On a GCP VM that makes the stack
+# unreachable from outside no matter what the firewall allows — the port is bound
+# to loopback, so packets never arrive.
+#
+# Exposure is still narrow: the jungle-session-access firewall rule allows tcp:80
+# from ONE address, the operator's current public IP.
+services:
+  reverseproxy.wr:
+    ports: !override
+      - "0.0.0.0:80:80"

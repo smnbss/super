@@ -443,7 +443,11 @@ stack_up() {
     run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && printf 'services:\\n' > /tmp/override.yaml && for s in \$(docker compose -f compose.yaml config --services | grep '^laravel\\.'); do printf '  \"%s\":\\n    volumes:\\n      - \"/tmp/zz-apko.conf:/etc/php/php-fpm.d/zz-apko.conf:ro\"\\n' \"\$s\" >> /tmp/override.yaml; done"
   fi
 
-  run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && ./bin/jungle.up.sh reverseproxy.wr"
+  # ⚠️ jungle binds the reverse proxy to 127.0.0.1:80 (compose.jungle.yaml). On a
+  #    remote VM that makes the stack unreachable whatever the firewall says.
+  #    Re-publish it on all interfaces. The firewall still limits it to one IP.
+  run vm_scp "$vm" "$SKILL_DIR/files/reverseproxy-expose.yaml" "/tmp/reverseproxy-expose.yaml"
+  run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.jungle.yaml -f /tmp/reverseproxy-expose.yaml up -d --force-recreate reverseproxy.wr"
   run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --no-deps postgresql.weroad.wr redis.weroad.wr rabbitmq.weroad.wr"
   run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --build --no-deps $services"
 }
@@ -554,6 +558,61 @@ cmd_agent_attach() {
     "$vm" "$zone" "$(state_read "$session" project)" "$AGENT_TMUX_SESSION"
 }
 
+# The firewall is scoped to ONE address. A laptop that changes network — hotspot,
+# office, cafe — loses SSH and HTTP at once, and every command times out with no
+# hint that the cause is the firewall. Observed live on 2026-08-27.
+cmd_session_refresh_ip() {
+  local cidr
+  cidr="$(resolve_source_cidr)"
+  ensure_firewall_rule "$cidr"
+  log "Firewall now allows $cidr"
+}
+
+branch_is_pushed() {
+  [[ -n "${BRANCH_PUSHED:-}" ]] && return 0
+  local vm="$1" repo="$2" branch="$3"
+  vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR/$repo && git rev-parse --verify --quiet origin/$branch" >/dev/null 2>&1
+}
+
+cmd_session_list() {
+  printf '%-40s %-10s %-26s %s\n' SESSION STATUS CREATED COST
+  gcloud --project="$PROJECT_ID" compute instances list \
+    --filter="name~^jungle- AND -name:$GOLDEN_INSTANCE" \
+    --format='value(name,status,creationTimestamp)' 2>/dev/null \
+  | while read -r name status created; do
+      printf '%-40s %-10s %-26s %s\n' "$name" "$status" "$created" \
+        "~EUR 0.25/h running, ~EUR 18/mo disk"
+    done
+  printf '\nDelete a finished session with: session rm <session>\n'
+}
+
+cmd_session_stop() {
+  local session="$1" vm
+  vm="$(state_read "$session" vm)" || die "no session '$session'"
+  cmd_session_unmount "$session" 2>/dev/null || true
+  run gcloud --project="$PROJECT_ID" compute instances stop "$vm" --zone="$ZONE"
+  log "Stopped '$vm'. The disk still costs about EUR 18 each month."
+}
+
+# ⚠️ Code exists ONLY on the VM. This gate is the only thing between an unpushed
+#    branch and permanent loss.
+cmd_session_rm() {
+  local session="$1" vm repo branch
+  vm="$(state_read "$session" vm)" || die "no session '$session'"
+  repo="$(state_read "$session" repo)"
+  branch="$(state_read "$session" branch)"
+
+  if ! branch_is_pushed "$vm" "$repo" "$branch"; then
+    die "branch '$branch' is not pushed to origin. Refusing to delete '$vm'. Push it first:
+  gcloud compute ssh $vm --zone=$ZONE --command 'cd ~/jungle/$repo && git push -u origin $branch'"
+  fi
+
+  cmd_session_unmount "$session" 2>/dev/null || true
+  scrub_credentials "$vm"
+  run gcloud --project="$PROJECT_ID" compute instances delete "$vm" --zone="$ZONE" --quiet
+  log "Deleted '$vm'. Notes, plans and specs remain in the laptop workspace."
+}
+
 parse_common_flags() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -613,6 +672,24 @@ main() {
         unmount)
           local u="${1:-}"; [[ -n "$u" ]] || die "usage: session unmount <session>" 2
           shift; parse_common_flags "$@"; cmd_session_unmount "$u" ;;
+        list)    parse_common_flags "$@"; cmd_session_list ;;
+        stop)
+          local st="${1:-}"; [[ -n "$st" ]] || die "usage: session stop <session>" 2
+          shift; parse_common_flags "$@"; cmd_session_stop "$st" ;;
+        rm)
+          local rmn="${1:-}"; [[ -n "$rmn" ]] || die "usage: session rm <session>" 2
+          shift; parse_common_flags "$@"; cmd_session_rm "$rmn" ;;
+        agent)
+          local av="${1:-}"; shift 2>/dev/null || true
+          case "$av" in
+            start)  local as="${1:-}" ap="${2:-}"; shift 2 2>/dev/null || true
+                    parse_common_flags "$@"; cmd_agent_start "$as" "$ap" ;;
+            log)    local al="${1:-}"; shift; parse_common_flags "$@"; cmd_agent_log "$al" ;;
+            attach) local aa="${1:-}"; shift; parse_common_flags "$@"; cmd_agent_attach "$aa" ;;
+            *) die "usage: session agent start|log|attach <session>" 2 ;;
+          esac ;;
+        refresh-ip)
+          parse_common_flags "$@"; cmd_session_refresh_ip ;;
         *) die "unknown session verb: ${sub:-<none>}" 2 ;;
       esac
       ;;
