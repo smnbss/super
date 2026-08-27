@@ -413,13 +413,18 @@ cmd_session_unmount() {
 }
 
 # One Chrome instance per session. --user-data-dir is mandatory: without it, `open`
-# hands the URL to the running Chrome and you reach the wrong stack. Verified
-# 2026-08-27 against two servers on two IP addresses.
+# hands the URL to the running Chrome and you reach the wrong stack.
+#
+# ⚠️ AND THE PROFILE MUST BE CLOSED FIRST. --host-resolver-rules is read once, at
+#    process start. A Chrome already running on this profile keeps its OLD mapping,
+#    so `open -na` silently sends you to the previous session's VM and everything
+#    looks fine. Seen live 2026-08-27: a request meant for a session VM landed on
+#    the golden VM, and only the nginx access log revealed it.
 chrome_command() {
   local session="$1" ip
   ip="$(state_read "$session" ip)" || die "no session '$session'"
-  printf 'open -na "Google Chrome" --args --user-data-dir=/tmp/chrome-%s --no-first-run --no-default-browser-check --host-resolver-rules="MAP *.weroad.wr %s" "http://partner.weroad.wr/"\n' \
-    "$session" "$ip"
+  printf 'pkill -f "user-data-dir=/tmp/chrome-%s" 2>/dev/null; sleep 1; open -na "Google Chrome" --args --user-data-dir=/tmp/chrome-%s --no-first-run --no-default-browser-check --host-resolver-rules="MAP *.weroad.wr %s" "http://api-partner.weroad.wr/"\n' \
+    "$session" "$session" "$ip"
 }
 
 # One logical service is often several compose entries. A Laravel API is BOTH
@@ -480,6 +485,26 @@ stack_up() {
   restart_nginx_siblings "$vm" "$services"
 }
 
+# ⚠️ A laravel.* container reports "Up" long before php-fpm accepts connections —
+#    it runs composer install and migrations first, which takes minutes. Restarting
+#    the nginx before that finishes just rebuilds the same 502. Wait for the pool.
+wait_for_fpm() {
+  local vm="$1" svc="$2" i
+  if [[ -n "$DRY_RUN" ]]; then
+    printf 'DRY-RUN: wait for php-fpm on %s\n' "$svc"
+    return 0
+  fi
+  for (( i = 0; i < 60; i++ )); do
+    if vm_ssh "$vm" "docker logs --tail 40 jungle-${svc}-1 2>&1 | grep -q 'ready to handle connections'" >/dev/null 2>&1; then
+      log "php-fpm is ready on $svc"
+      return 0
+    fi
+    sleep 10
+  done
+  log "WARNING: $svc never reported 'ready to handle connections'"
+  return 1
+}
+
 # Restart every api-* nginx whose laravel.* sibling is in this service set.
 restart_nginx_siblings() {
   local vm="$1" services="$2" svc base
@@ -487,7 +512,8 @@ restart_nginx_siblings() {
     case "$svc" in
       laravel.*)
         base="${svc#laravel.}"
-        log "Restarting nginx for $base (it caches the php-fpm upstream at startup)"
+        wait_for_fpm "$vm" "$svc" || true
+        log "Restarting nginx for $base (it resolves the php-fpm upstream at startup)"
         run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml restart $base >/dev/null 2>&1 || true"
         ;;
     esac
@@ -514,9 +540,20 @@ verify_render() {
 #    the lid suspends the process and drops the mount.
 AGENT_TMUX_SESSION="claude"
 
-# Claude Code on the VM authenticates through WeRoad's LiteLLM proxy, so its calls
-# are cost-monitored like every other WeRoad LLM call. Falls back to an explicit
-# ANTHROPIC_API_KEY when the proxy variables are absent.
+# ⚠️ MEASURED 2026-08-27: litellm.weroad.io sits behind CLOUDFLARE ACCESS. A GCP VM
+#    gets HTTP 302 to weroad.cloudflareaccess.com, and Claude Code reports
+#    "API returned an empty or malformed response (HTTP 200)" because it follows the
+#    redirect into an HTML login page. The laptop works only because it holds an
+#    Access session.
+#
+#    To use the cost-monitored proxy from a VM you need a Cloudflare Access SERVICE
+#    TOKEN for that hostname, passed as extra headers:
+#      ANTHROPIC_CUSTOM_HEADERS="CF-Access-Client-Id: <id>
+#      CF-Access-Client-Secret: <secret>"
+#    Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET and this function wires it.
+#
+#    Without that token, use ANTHROPIC_API_KEY, or run `claude setup-token` on the
+#    VM once. Both bypass cost monitoring, so prefer the service token.
 # Read one KEY=value out of a dotenv file without sourcing it. Sourcing an
 # unknown .env can execute arbitrary shell.
 dotenv_value() {
@@ -541,10 +578,17 @@ inject_agent_auth() {
       log "Run 'claude setup-token' on the VM once before starting the agent."
       return 0
     fi
+  elif [[ -z "${CF_ACCESS_CLIENT_ID:-}" || -z "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
+    log "WARNING: LiteLLM is behind Cloudflare Access and no service token is set."
+    log "A VM cannot reach it. Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET,"
+    log "or set ANTHROPIC_API_KEY, or run 'claude setup-token' on the VM once."
+    return 0
   else
     tmp="$(mktemp)"; chmod 600 "$tmp"
     { printf 'export ANTHROPIC_BASE_URL=%s\n' "$url"
-      printf 'export ANTHROPIC_AUTH_TOKEN=%s\n' "$key"; } > "$tmp"
+      printf 'export ANTHROPIC_AUTH_TOKEN=%s\n' "$key"
+      printf 'export ANTHROPIC_CUSTOM_HEADERS="CF-Access-Client-Id: %s\nCF-Access-Client-Secret: %s"\n' \
+        "$CF_ACCESS_CLIENT_ID" "$CF_ACCESS_CLIENT_SECRET"; } > "$tmp"
   fi
 
   run vm_scp "$name" "$tmp" "~/.claude-env"

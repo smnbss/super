@@ -550,6 +550,16 @@ test('SKILL.md uses no semicolons in prose', () => {
   assert.equal(offenders.length, 0, `semicolons in prose: ${offenders.slice(0,3).join(' | ')}`);
 });
 
+// Regression: wait_for_fpm ignored DRY_RUN and looped 60 x 10s inside the
+// stack_up test, turning a unit test into a ten-minute hang.
+test('every wait loop honours DRY_RUN', () => {
+  const src = readFileSync(CLI, 'utf8');
+  for (const fn of ['wait_for_fpm', 'wait_for_databases']) {
+    const body = src.slice(src.indexOf(`${fn}()`), src.indexOf(`${fn}()`) + 600);
+    assert.match(body, /DRY_RUN/, `${fn} must short-circuit under DRY_RUN`);
+  }
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

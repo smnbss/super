@@ -118,12 +118,21 @@ Simone chose the website reading on 2026-08-27. This skill never installs Fuse-T
 silently. The preflight prints both readings and stops. mutagen (MIT) is the
 alternative.
 
-## Agent authentication
+## Agent authentication — the one open blocker
 
-Claude Code on the VM authenticates through WeRoad's LiteLLM proxy, so its calls
-stay cost-monitored. The skill reads `LITELLM_PROXY_URL` and
-`LITELLM_PROXY_API_KEY` from the brain's `.env.local`. It falls back to
-`ANTHROPIC_API_KEY`. When neither exists, run `claude setup-token` on the VM once.
+⚠️ **MEASURED 2026-08-27: `litellm.weroad.io` sits behind Cloudflare Access.** A GCP
+VM receives HTTP 302 to `weroad.cloudflareaccess.com`. Claude Code follows it into
+an HTML login page and reports "API returned an empty or malformed response
+(HTTP 200)". The laptop works only because it already holds an Access session.
+
+Three ways to authenticate the agent, best first.
+
+1. **A Cloudflare Access service token for `litellm.weroad.io`.** Keeps the calls
+   cost-monitored. Set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`, and the
+   skill writes `ANTHROPIC_CUSTOM_HEADERS` on the VM. Ask DevOps for the token.
+2. **`ANTHROPIC_API_KEY`.** Works immediately. Bypasses cost monitoring.
+3. **`claude setup-token`, run on the VM once.** Interactive, so it cannot be
+   automated, and it must not be baked into the golden image.
 
 ## Linear tracking
 
