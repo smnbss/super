@@ -231,6 +231,41 @@ test('credential helper exists and reads the ADC', () => {
   assert.match(s, /oauth2\.googleapis\.com\/token/);
 });
 
+// ── Task 5: credentials ─────────────────────────────────────────────────────
+test('inject_credentials copies all four credential paths', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z CRED_ADC=/tmp/adc CRED_NPMRC=/tmp/npmrc ' +
+                   'CRED_COMPOSER=/tmp/auth SKIP_CRED_CHECK=1 inject_credentials jungle-x');
+  for (const p2 of ['application_default_credentials\\.json', '\\.npmrc', 'auth\\.json', 'config\\.json']) {
+    assert.match(r.stdout, new RegExp(p2), `must handle ${p2}`);
+  }
+});
+
+test('inject_credentials fails with actionable guidance when the ADC is missing', () => {
+  const r = callFn('CRED_ADC=/nope/adc.json inject_credentials jungle-x');
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /application-default login/);
+});
+
+test('scrub_credentials deletes the four paths on the VM', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z scrub_credentials jungle-x');
+  assert.match(r.stdout, /rm -f/);
+  assert.match(r.stdout, /application_default_credentials\.json/);
+  assert.match(r.stdout, /\.npmrc/);
+  assert.match(r.stdout, /auth\.json/);
+});
+
+// ⚠️ This test protects the operator's laptop. Do not weaken it.
+test('the skill NEVER revokes application-default credentials', () => {
+  const files = ['jungle_up_gcp.sh', 'files/vm-bootstrap.sh', 'SKILL.md']
+    .map(f => join(SKILL, f)).filter(existsSync);
+  assert.ok(files.length > 0, 'expected at least one file to scan');
+  for (const f of files) {
+    const offending = readFileSync(f, 'utf8').split('\n').filter(l =>
+      /application-default\s+revoke/.test(l) && !/NEVER|never|not |Do not|forbid/.test(l));
+    assert.equal(offending.length, 0, `${f} contains a live revoke: ${offending.join(' | ')}`);
+  }
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

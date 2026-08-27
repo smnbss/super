@@ -155,6 +155,41 @@ vm_wait_ssh() {
   die "'$name' did not become reachable over SSH after $tries attempts"
 }
 
+# The three credentials the jungle needs on the VM. Injected per session VM, never
+# baked into the golden image: a machine image is a copyable artifact, and a refresh
+# token inside one cannot be rotated by deleting a box.
+CRED_ADC="${CRED_ADC:-$HOME/.config/gcloud/application_default_credentials.json}"
+CRED_NPMRC="${CRED_NPMRC:-$HOME/.npmrc}"
+CRED_COMPOSER="${CRED_COMPOSER:-$HOME/.composer/auth.json}"
+
+inject_credentials() {
+  local name="$1"
+  if [[ -z "${SKIP_CRED_CHECK:-}" ]]; then
+    [[ -f "$CRED_ADC" ]] \
+      || die "missing $CRED_ADC — run: gcloud auth application-default login"
+    [[ -f "$CRED_NPMRC" ]] \
+      || die "missing $CRED_NPMRC — needed for @weroad/* npm packages"
+    [[ -f "$CRED_COMPOSER" ]] \
+      || die "missing $CRED_COMPOSER — needed for private weroad/* composer packages"
+  fi
+
+  run vm_ssh "$name" "mkdir -p ~/.config/gcloud ~/.composer ~/.docker"
+  run vm_scp "$name" "$CRED_ADC"      "~/.config/gcloud/application_default_credentials.json"
+  run vm_scp "$name" "$CRED_NPMRC"    "~/.npmrc"
+  run vm_scp "$name" "$CRED_COMPOSER" "~/.composer/auth.json"
+  run vm_ssh "$name" "printf '%s\\n' '{ \"credHelpers\": { \"europe-docker.pkg.dev\": \"gcloudadc\", \"pkg.dev\": \"gcloudadc\" } }' > ~/.docker/config.json"
+  run vm_ssh "$name" "chmod 600 ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json"
+}
+
+# ⚠️ Deletes files only. NEVER call `gcloud auth application-default revoke` here.
+#    The VM ADC holds the SAME refresh token as the operator's laptop, so revoking
+#    it server-side destroys their local credentials as well. A test in
+#    tests/test_jungle_up_gcp.mjs fails the build if that call ever appears.
+scrub_credentials() {
+  local name="$1"
+  run vm_ssh "$name" "rm -f ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json ~/.docker/config.json"
+}
+
 usage() {
   cat <<'USAGE'
 jungle_up_gcp.sh — per-session GCP VMs running a WeRoad jungle stack
