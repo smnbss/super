@@ -187,6 +187,50 @@ test('vm_wait_ssh gives up after the timeout rather than looping forever', () =>
   assert.equal(fake.calls().length, 3);
 });
 
+// ── Task 4: VM bootstrap and the AR credential helper ───────────────────────
+const BOOTSTRAP = join(SKILL, 'files/vm-bootstrap.sh');
+const CREDHELPER = join(SKILL, 'files/docker-credential-gcloudadc');
+
+test('vm-bootstrap.sh is valid bash', () => {
+  assert.ok(existsSync(BOOTSTRAP), `missing ${BOOTSTRAP}`);
+  execFileSync('bash', ['-n', BOOTSTRAP]);
+});
+
+test('vm-bootstrap installs exactly the measured dependency set', () => {
+  const s = readFileSync(BOOTSTRAP, 'utf8');
+  for (const want of ['docker-ce', 'git', 'curl', 'nodejs', 'corepack', 'google-cloud-sdk']) {
+    assert.ok(s.includes(want), `bootstrap must install ${want}`);
+  }
+});
+
+test('vm-bootstrap installs none of the tooling this design dropped', () => {
+  const s = readFileSync(BOOTSTRAP, 'utf8').toLowerCase();
+  for (const banned of ['ollama', 'chromium', '@anthropic-ai/claude-code', '@openai/codex',
+                        '@google/gemini-cli', 'ubuntu-desktop', 'xrdp']) {
+    assert.ok(!s.includes(banned.toLowerCase()), `must not install ${banned}`);
+  }
+});
+
+test('vm-bootstrap enables docker under systemd rather than backgrounding dockerd', () => {
+  const s = readFileSync(BOOTSTRAP, 'utf8');
+  assert.match(s, /systemctl enable --now docker/);
+  assert.ok(!/^\s*dockerd\b.*&\s*$/m.test(s), 'must not background dockerd');
+});
+
+test('vm-bootstrap pins pnpm to the lockfile version', () => {
+  const s = readFileSync(BOOTSTRAP, 'utf8');
+  assert.match(s, /packageManager/, 'must read the pinned version from package.json');
+  assert.ok(!/corepack prepare pnpm@latest/.test(s),
+    'pnpm@latest triggers MINIMUM_RELEASE_AGE_VIOLATION');
+});
+
+test('credential helper exists and reads the ADC', () => {
+  assert.ok(existsSync(CREDHELPER), `missing ${CREDHELPER}`);
+  const s = readFileSync(CREDHELPER, 'utf8');
+  assert.match(s, /application_default_credentials\.json/);
+  assert.match(s, /oauth2\.googleapis\.com\/token/);
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
