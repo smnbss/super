@@ -326,6 +326,65 @@ cmd_session_create() {
   log "Session state written to $(state_path "$session")"
 }
 
+# Fuse-T licence position, recorded because the two sources disagree:
+#   fuse-t.org  — "Free for personal use. Commercial license available for
+#                  embedding and shipping Fuse-T in a product."
+#   License.txt — "For commercial use or/and bundling with commercial software,
+#                  the software vendor has to obtain a commercial license."
+# Simone chose the website reading on 2026-08-27. This skill never installs
+# Fuse-T silently, and always names mutagen (MIT) as the alternative.
+mount_preflight() {
+  command -v sshfs >/dev/null 2>&1 && return 0
+  cat >&2 <<'PREFLIGHT'
+error: sshfs is not installed. This skill mounts each session VM with Fuse-T.
+
+  brew install macos-fuse-t/homebrew-cask/fuse-t
+  brew install macos-fuse-t/homebrew-cask/fuse-t-sshfs
+
+Licence, before you install:
+  fuse-t.org says  "Free for personal use. Commercial license available for
+                    embedding and shipping Fuse-T in a product."
+  License.txt says "For commercial use or/and bundling with commercial software,
+                    the software vendor has to obtain a commercial license."
+  The two readings differ on whether work use needs a licence. Decide before you
+  install. mutagen (MIT, no such question) is the alternative — see SKILL.md,
+  "Swapping the mount for a sync".
+PREFLIGHT
+  return 1
+}
+
+cmd_session_mount() {
+  local session="$1" vm ip mp
+  mount_preflight || return 1
+  vm="$(state_read "$session" vm)" || die "no session '$session'. Run: session create"
+  ip="$(state_read "$session" ip)"
+  mp="$(state_read "$session" mount)"
+  mkdir -p "$mp"
+  run sshfs "${USER}@${ip}:jungle" "$mp" \
+    -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3 \
+    -o "volname=${session}" \
+    -o "IdentityFile=${HOME}/.ssh/google_compute_engine" \
+    || die "mount failed for '$session'"
+  log "Mounted '$vm' at $mp"
+}
+
+cmd_session_unmount() {
+  local session="$1" mp
+  mp="$(state_read "$session" mount)" || die "no session '$session'"
+  run umount "$mp" 2>/dev/null || run diskutil unmount force "$mp" 2>/dev/null || true
+  log "Unmounted $mp"
+}
+
+# One Chrome instance per session. --user-data-dir is mandatory: without it, `open`
+# hands the URL to the running Chrome and you reach the wrong stack. Verified
+# 2026-08-27 against two servers on two IP addresses.
+chrome_command() {
+  local session="$1" ip
+  ip="$(state_read "$session" ip)" || die "no session '$session'"
+  printf 'open -na "Google Chrome" --args --user-data-dir=/tmp/chrome-%s --no-first-run --no-default-browser-check --host-resolver-rules="MAP *.weroad.wr %s" "http://partner.weroad.wr/"\n' \
+    "$session" "$ip"
+}
+
 parse_common_flags() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -379,6 +438,12 @@ main() {
           local repo="${1:-}" sess="${2:-}"
           [[ -n "$repo" && -n "$sess" ]] || die "usage: session create <repo> <session>" 2
           shift 2; parse_common_flags "$@"; cmd_session_create "$repo" "$sess" ;;
+        mount)
+          local m="${1:-}"; [[ -n "$m" ]] || die "usage: session mount <session>" 2
+          shift; parse_common_flags "$@"; cmd_session_mount "$m" ;;
+        unmount)
+          local u="${1:-}"; [[ -n "$u" ]] || die "usage: session unmount <session>" 2
+          shift; parse_common_flags "$@"; cmd_session_unmount "$u" ;;
         *) die "unknown session verb: ${sub:-<none>}" 2 ;;
       esac
       ;;

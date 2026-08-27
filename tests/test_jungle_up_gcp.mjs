@@ -350,6 +350,45 @@ test('session create warns when the golden image is older than 7 days', () => {
   assert.match(r.stderr, /older than 7 days/i);
 });
 
+// ── Task 8: mount verbs, preflight, Chrome ──────────────────────────────────
+// PATH must still resolve bash itself, so use the system dirs. Neither carries
+// sshfs — brew installs it under /opt/homebrew/bin.
+const CLEAN_PATH = '/usr/bin:/bin';
+
+test('mount preflight fails with install guidance when sshfs is absent', () => {
+  const r = spawnSync('bash', ['-c', `JUNGLE_UP_GCP_LIB=1 source "${CLI}"; mount_preflight`],
+    { encoding: 'utf8', env: { ...process.env, PATH: CLEAN_PATH } });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /macos-fuse-t\/homebrew-cask\/fuse-t/);
+});
+
+// The skill must not install a contested-licence dependency behind the user's back.
+test('mount preflight states the licence conflict and names the fallback', () => {
+  const r = spawnSync('bash', ['-c', `JUNGLE_UP_GCP_LIB=1 source "${CLI}"; mount_preflight`],
+    { encoding: 'utf8', env: { ...process.env, PATH: CLEAN_PATH } });
+  assert.match(r.stderr, /licen[cs]e/i);
+  assert.match(r.stderr, /mutagen/i, 'must name the MIT fallback');
+});
+
+test('session mount uses the reconnect options and the GCE key', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a ip=203.0.113.5 mount=/tmp/m-s1`);
+  const fake = fakeBin(['sshfs']);
+  const r = callFn(`WORKSPACE_ROOT=${ws} DRY_RUN=1 cmd_session_mount s1`, { binDir: fake.dir });
+  assert.match(r.stdout, /reconnect/);
+  assert.match(r.stdout, /ServerAliveInterval=15/);
+  assert.match(r.stdout, /google_compute_engine/);
+});
+
+test('chrome_command isolates the profile and maps the wildcard host', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a ip=203.0.113.5`);
+  const r = callFn(`WORKSPACE_ROOT=${ws} chrome_command s1`);
+  assert.match(r.stdout, /--user-data-dir=/);
+  assert.match(r.stdout, /--host-resolver-rules="MAP \*\.weroad\.wr 203\.0\.113\.5"/);
+  assert.match(r.stdout, /--no-first-run/);
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
