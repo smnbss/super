@@ -37,9 +37,37 @@ One preset name, passed as the skill argument. Examples:
 If the caller gives no preset, or leaves `<PRESET>` as a placeholder, **stop and
 ask**. Do not guess a preset.
 
-⚠️ This skill runs **inside** the wr-cloud container, not on the laptop. Start a
-Claude Code session on the wr-cloud environment first. The jungle is at
-`/home/user/jungle`.
+## Step 0 — Preflight. Run this first, every time
+
+This skill only works from **inside a wr-cloud container whose main git repo is
+`weroad/jungle`**. Every other starting position fails: a laptop, a cloud session
+on a different repo, or a wr-cloud container where the setup script did not run.
+
+**Run the gate before anything else, including before you read a file:**
+
+```bash
+<skill-dir>/preflight.sh
+```
+
+It checks three things, and any one of them failing is fatal:
+
+1. The host is Linux. A `Darwin` host is a laptop session.
+2. A `weroad/jungle` checkout exists — `bin/jungle.up.sh`, `scripts/compose.merge.js`
+   and `compose.jungle.yaml` together, with `origin` pointing at `weroad/jungle`.
+   It looks in `$PWD`, in the enclosing git repo, then in `/home/user/jungle`.
+3. `jungle-ca-inject` is on `PATH`. That binary comes from the wr-cloud setup
+   script and exists nowhere else. It is what separates a wr-cloud container from
+   a laptop jungle checkout.
+
+**Exit 1 means STOP.** Print what the gate reported, name the wrong starting
+position, and run nothing else. Do not adapt the steps to the current host. Do not
+substitute a local jungle. Do not continue on the preset alone. The correct reply
+is: start a Claude Code session on the wr-cloud environment, then run this skill
+there.
+
+The gate also warns about four repairable conditions — missing compose stubs,
+missing `gcloud`, missing ADC, dead `dockerd`. Those are warnings, not blockers.
+Steps 1, 4 and 6 repair them.
 
 ## What the setup script already did — do not repeat it
 
@@ -305,6 +333,8 @@ Leave the stack running.
 
 ## Red flags — stop
 
+- You are about to run any step after a failed preflight.
+- You are about to adapt a step because the host is a laptop.
 - You are about to pass `--remove-orphans` because Docker suggested it.
 - You are about to write a compose slicing tool.
 - You are about to run `bin/hosts.init.sh`.
