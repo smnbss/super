@@ -278,7 +278,7 @@ test('the skill NEVER revokes application-default credentials', () => {
   assert.ok(files.length > 0, 'expected at least one file to scan');
   for (const f of files) {
     const offending = readFileSync(f, 'utf8').split('\n').filter(l =>
-      /application-default\s+revoke/.test(l) && !/NEVER|never|not |Do not|forbid/.test(l));
+      /application-default\s+revoke/.test(l) && !/never|not |do not|forbid/i.test(l));
     assert.equal(offending.length, 0, `${f} contains a live revoke: ${offending.join(' | ')}`);
   }
 });
@@ -508,6 +508,46 @@ test('the agent starts detached under tmux, so it survives a closed laptop', () 
   const r = callFn(`WORKSPACE_ROOT=${ws} DRY_RUN=1 PROJECT_ID=p ZONE=z cmd_agent_start s1 "fix the thing"`);
   assert.match(r.stdout, /tmux new-session -d/, 'must be detached');
   assert.match(r.stdout, /claude /);
+});
+
+// ── Task 11: SKILL.md ───────────────────────────────────────────────────────
+test('SKILL.md has frontmatter with name and description', () => {
+  const p2 = join(SKILL, 'SKILL.md');
+  assert.ok(existsSync(p2), `missing ${p2}`);
+  const t = readFileSync(p2, 'utf8');
+  assert.match(t, /^---\n[\s\S]*?name: brain-work-on-google-cloud\n[\s\S]*?\n---/);
+  assert.match(t, /description: /);
+});
+
+test('SKILL.md records the decisions a future reader must not re-litigate', () => {
+  const t = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  assert.match(t, /setup_gcp\.sh/, 'why it duplicates setup_gcp.sh');
+  assert.match(t, /NEVER|never/, 'the never-revoke rule');
+  assert.match(t, /licen[cs]e/i, 'the Fuse-T licence position');
+  assert.match(t, /brain-work-on/, 'the duplicated Linear conventions');
+  assert.match(t, /laptop is closed/, 'why the agent runs on the VM');
+});
+
+test('SKILL.md carries the measured findings, not predictions', () => {
+  const t = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  for (const fact of ['tcp:22,tcp:80,tcp:443', '127.0.0.1:80', 'git@github.com:',
+                      'packageManager', 'ERR_UNKNOWN_BUILTIN_MODULE',
+                      'dlt-pipelines', 'IPv6', 'caches the php-fpm upstream']) {
+    assert.ok(t.includes(fact), `SKILL.md must record: ${fact}`);
+  }
+});
+
+test('SKILL.md uses no semicolons in prose', () => {
+  const t = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  let inFence = false;
+  const offenders = [];
+  for (const line of t.split('\n')) {
+    if (line.trim().startsWith('```')) { inFence = !inFence; continue; }
+    if (!inFence && !line.includes('`') && !line.startsWith('    ') && line.includes(';')) {
+      offenders.push(line.trim());
+    }
+  }
+  assert.equal(offenders.length, 0, `semicolons in prose: ${offenders.slice(0,3).join(' | ')}`);
 });
 
 console.log('═'.repeat(50));

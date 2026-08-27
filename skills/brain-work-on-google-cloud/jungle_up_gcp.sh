@@ -173,7 +173,12 @@ inject_credentials() {
       || die "missing $CRED_COMPOSER — needed for private weroad/* composer packages"
   fi
 
-  run vm_ssh "$name" "mkdir -p ~/.config/gcloud ~/.composer ~/.docker"
+  # ⚠️ Docker creates a DIRECTORY at a bind-mount source that does not exist. Once
+  #    ~/.composer/auth.json is a directory, composer 404s on private packages and
+  #    the laravel container dies with an OCI "not a directory" mount error. An scp
+  #    into that path lands the file INSIDE the directory and looks like it worked.
+  #    Remove the paths first so each is unambiguously a file. Seen live 2026-08-27.
+  run vm_ssh "$name" "mkdir -p ~/.config/gcloud ~/.composer ~/.docker && rm -rf ~/.composer/auth.json ~/.npmrc ~/.config/gcloud/application_default_credentials.json"
   run vm_scp "$name" "$CRED_ADC"      "~/.config/gcloud/application_default_credentials.json"
   run vm_scp "$name" "$CRED_NPMRC"    "~/.npmrc"
   run vm_scp "$name" "$CRED_COMPOSER" "~/.composer/auth.json"
@@ -449,7 +454,44 @@ stack_up() {
   run vm_scp "$vm" "$SKILL_DIR/files/reverseproxy-expose.yaml" "/tmp/reverseproxy-expose.yaml"
   run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.jungle.yaml -f /tmp/reverseproxy-expose.yaml up -d --force-recreate reverseproxy.wr"
   run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --no-deps postgresql.weroad.wr redis.weroad.wr rabbitmq.weroad.wr"
-  run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --build --no-deps $services"
+  # ⚠️ ORDER MATTERS. nginx resolves its php-fpm upstream when it PARSES its
+  #    config, not on first request. Starting an api-* nginx before its laravel.*
+  #    sibling exists gives "host not found in upstream" and a crash loop that no
+  #    restart clears. Start every laravel.* first. Seen live 2026-08-27.
+  local fpm="" rest=""
+  for svc in $services; do
+    case "$svc" in
+      laravel.*) fpm="$fpm $svc" ;;
+      *)         rest="$rest $svc" ;;
+    esac
+  done
+  if [[ -n "$fpm" ]]; then
+    run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --build --no-deps $fpm"
+  fi
+  if [[ -n "$rest" ]]; then
+    run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml $override up -d --build --no-deps $rest"
+  fi
+
+  # ⚠️ nginx resolves its php-fpm upstream ONCE, at startup. When an api-* nginx
+  #    starts before its laravel.* sibling is ready, it caches a dead address and
+  #    returns 502 forever, with healthy containers on both sides. Restarting the
+  #    nginx is the fix, and it must be automatic — this trap cost two debug
+  #    cycles on 2026-08-27.
+  restart_nginx_siblings "$vm" "$services"
+}
+
+# Restart every api-* nginx whose laravel.* sibling is in this service set.
+restart_nginx_siblings() {
+  local vm="$1" services="$2" svc base
+  for svc in $services; do
+    case "$svc" in
+      laravel.*)
+        base="${svc#laravel.}"
+        log "Restarting nginx for $base (it caches the php-fpm upstream at startup)"
+        run vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml restart $base >/dev/null 2>&1 || true"
+        ;;
+    esac
+  done
 }
 
 # A 200 can be an empty shell. Require a body of real size.
