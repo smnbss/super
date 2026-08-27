@@ -51,6 +51,49 @@ instance_name() {
   printf '%s' "$n"
 }
 
+detect_public_ip() {
+  local ip svc
+  for svc in https://api.ipify.org https://ifconfig.me https://icanhazip.com; do
+    ip="$(curl -4 -fsSL --max-time 5 "$svc" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+      printf '%s' "$ip"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Resolve the caller's IP into a /32, or abort. There is no open-world fallback.
+resolve_source_cidr() {
+  if [[ -n "${SOURCE_IP:-}" ]]; then
+    printf '%s' "$SOURCE_IP"
+    return 0
+  fi
+  local ip
+  ip="$(detect_public_ip)" \
+    || die "cannot detect your public IPv4. Pass --source-ip <cidr>. Refusing to open the firewall to the world."
+  printf '%s/32' "$ip"
+}
+
+ensure_firewall_rule() {
+  local cidr="$1"
+  if gcloud --project="$PROJECT_ID" compute firewall-rules describe "$FIREWALL_RULE" \
+       --format="value(name)" >/dev/null 2>&1; then
+    log "Updating firewall rule '$FIREWALL_RULE' → $cidr"
+    run gcloud --project="$PROJECT_ID" compute firewall-rules update "$FIREWALL_RULE" \
+      --source-ranges="$cidr" >/dev/null \
+      || die "failed to update firewall rule '$FIREWALL_RULE'"
+  else
+    log "Creating firewall rule '$FIREWALL_RULE' (tcp:22,80,443 from $cidr)"
+    run gcloud --project="$PROJECT_ID" compute firewall-rules create "$FIREWALL_RULE" \
+      --allow=tcp:22,80,443 \
+      --source-ranges="$cidr" \
+      --target-tags="$NETWORK_TAG" \
+      --description="jungle session VMs: SSH and HTTP from one operator IP" >/dev/null \
+      || die "failed to create firewall rule '$FIREWALL_RULE'"
+  fi
+}
+
 usage() {
   cat <<'USAGE'
 jungle_up_gcp.sh — per-session GCP VMs running a WeRoad jungle stack

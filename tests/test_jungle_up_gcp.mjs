@@ -94,6 +94,57 @@ test('run honours DRY_RUN and prints instead of executing', () => {
   assert.equal(fake.calls().length, 0, 'gcloud must not be invoked under DRY_RUN');
 });
 
+// ── Task 2: IP detection and firewall ───────────────────────────────────────
+test('detect_public_ip returns the first valid address', () => {
+  const fake = fakeBin(['curl'], { stdout: '203.0.113.7' });
+  const r = callFn('detect_public_ip', { binDir: fake.dir });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '203.0.113.7');
+});
+
+test('detect_public_ip rejects non-address output and fails', () => {
+  const fake = fakeBin(['curl'], { stdout: '<html>captive portal</html>' });
+  const r = callFn('detect_public_ip', { binDir: fake.dir });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout.trim(), '');
+});
+
+test('detect_public_ip tries every service before failing', () => {
+  const fake = fakeBin(['curl'], { stdout: '', exitCode: 1 });
+  callFn('detect_public_ip', { binDir: fake.dir });
+  assert.equal(fake.calls().length, 3, 'expected three fallback services');
+});
+
+test('ensure_firewall_rule creates the rule when describe fails', () => {
+  const fake = fakeBin(['gcloud'], { exitCode: 1 });
+  const r = callFn('PROJECT_ID=p ensure_firewall_rule 203.0.113.7/32', { binDir: fake.dir });
+  const create = fake.calls().find(c => c.includes('firewall-rules create'));
+  assert.ok(create, `expected a create call, got: ${fake.calls().join(' | ')}`);
+  assert.match(create, /--allow=tcp:22,80,443/);
+  assert.match(create, /--source-ranges=203\.0\.113\.7\/32/);
+  assert.match(create, /--target-tags=jungle-session/);
+});
+
+test('ensure_firewall_rule updates the rule when describe succeeds', () => {
+  const fake = fakeBin(['gcloud'], { exitCode: 0 });
+  callFn('PROJECT_ID=p ensure_firewall_rule 198.51.100.9/32', { binDir: fake.dir });
+  const calls = fake.calls();
+  assert.ok(calls.some(c => c.includes('firewall-rules update')), 'expected an update call');
+  assert.ok(!calls.some(c => c.includes('firewall-rules create')), 'must not create');
+});
+
+test('resolve_source_cidr aborts rather than opening the firewall to the world', () => {
+  const fake = fakeBin(['curl'], { stdout: '', exitCode: 1 });
+  const r = callFn('resolve_source_cidr', { binDir: fake.dir });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /cannot detect/i);
+});
+
+test('no code path ever emits 0.0.0.0/0', () => {
+  const src = readFileSync(CLI, 'utf8');
+  assert.ok(!src.includes('0.0.0.0/0'), 'found an open-world CIDR in the script');
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
