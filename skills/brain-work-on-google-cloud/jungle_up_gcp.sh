@@ -190,6 +190,95 @@ scrub_credentials() {
   run vm_ssh "$name" "rm -f ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json ~/.docker/config.json"
 }
 
+JUNGLE_REMOTE_DIR="${JUNGLE_REMOTE_DIR:-\$HOME/jungle}"
+JUNGLE_GIT_URL="${JUNGLE_GIT_URL:-git@github.com:weroad/jungle.git}"
+
+latest_golden_image() {
+  gcloud --project="$PROJECT_ID" compute machine-images list \
+    --filter="name~^${GOLDEN_IMAGE_PREFIX}" --sort-by=~creationTimestamp \
+    --format='value(name)' --limit=1 2>/dev/null | grep . || return 1
+}
+
+# Postgres creates ~84 databases on first boot and restarts part-way through, so a
+# passing pg_isready proves nothing. Gate on the database count instead.
+wait_for_databases() {
+  local name="$1" i count
+  if [[ -n "$DRY_RUN" ]]; then
+    printf 'DRY-RUN: wait for postgres to report >= 80 databases on %s\n' "$name"
+    return 0
+  fi
+  for (( i = 0; i < 60; i++ )); do
+    count="$(vm_ssh "$name" "docker exec jungle-postgresql.weroad.wr-1 psql -U admin -tAc 'select count(*) from pg_database'" 2>/dev/null | tr -d '[:space:]')"
+    if [[ "$count" =~ ^[0-9]+$ ]] && (( count >= 80 )); then
+      log "Postgres reports $count databases"
+      return 0
+    fi
+    sleep 10
+  done
+  die "Postgres never reported at least 80 databases"
+}
+
+cmd_golden_build() {
+  local stamp image
+  stamp="$(date +%Y%m%d)"
+  image="${GOLDEN_IMAGE_PREFIX}${stamp}"
+
+  log "Creating the golden instance. This takes 1 to 2 hours."
+  vm_create "$GOLDEN_INSTANCE"
+  run vm_wait_ssh "$GOLDEN_INSTANCE"
+
+  log "Installing the base tooling"
+  run vm_scp "$GOLDEN_INSTANCE" "$SKILL_DIR/files/docker-credential-gcloudadc" "/tmp/docker-credential-gcloudadc"
+  run vm_scp "$GOLDEN_INSTANCE" "$SKILL_DIR/files/vm-bootstrap.sh" "/tmp/vm-bootstrap.sh"
+  run vm_ssh "$GOLDEN_INSTANCE" "bash /tmp/vm-bootstrap.sh"
+
+  log "Injecting credentials for the build only"
+  inject_credentials "$GOLDEN_INSTANCE"
+
+  log "Cloning the jungle and all 72 repos"
+  run vm_ssh "$GOLDEN_INSTANCE" "git clone $JUNGLE_GIT_URL $JUNGLE_REMOTE_DIR"
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/repo.init.sh"
+  run vm_ssh "$GOLDEN_INSTANCE" "source /tmp/vm-bootstrap.sh && pin_pnpm"
+
+  # hosts.init.sh rewrites tracked compose files. That is forbidden on the laptop
+  # and correct here, because the VM tree is disposable.
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/hosts.init.sh"
+
+  log "Pulling the staging images. This is the slow step."
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/staging-images.update.sh"
+
+  log "Restoring the databases"
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/jungle.up.sh reverseproxy.wr"
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/database.up.sh"
+  wait_for_databases "$GOLDEN_INSTANCE"
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/database.restore.sh"
+
+  log "Scrubbing credentials before the capture"
+  scrub_credentials "$GOLDEN_INSTANCE"
+
+  run gcloud --project="$PROJECT_ID" compute instances stop "$GOLDEN_INSTANCE" --zone="$ZONE"
+  run gcloud --project="$PROJECT_ID" compute machine-images create "$image" \
+    --source-instance="$GOLDEN_INSTANCE" --source-instance-zone="$ZONE"
+  log "Golden image ready: $image"
+}
+
+parse_common_flags() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)       DRY_RUN=1; shift ;;
+      --project)       PROJECT_ID="${2:-}"; shift 2 ;;
+      --zone)          ZONE="${2:-}"; shift 2 ;;
+      --machine-type)  MACHINE_TYPE="${2:-}"; shift 2 ;;
+      --disk-size-gb)  DISK_SIZE_GB="${2:-}"; shift 2 ;;
+      --source-ip)     SOURCE_IP="${2:-}"; shift 2 ;;
+      --refresh)       shift ;;
+      *)               die "unknown option: $1" 2 ;;
+    esac
+  done
+  [[ -n "$PROJECT_ID" ]] || PROJECT_ID="$(gcloud config get-value project 2>/dev/null)"
+  [[ -n "$PROJECT_ID" ]] || die "no GCP project. Pass --project <id>." 2
+}
+
 usage() {
   cat <<'USAGE'
 jungle_up_gcp.sh — per-session GCP VMs running a WeRoad jungle stack
@@ -211,7 +300,14 @@ main() {
   local verb="${1:-}"
   case "$verb" in
     ""|-h|--help|help) usage; exit 0 ;;
-    golden|session)    die "verb '$verb' is not implemented yet" 3 ;;
+    golden)
+      shift
+      case "${1:-}" in
+        build) shift; parse_common_flags "$@"; cmd_golden_build ;;
+        *)     die "usage: golden build [--refresh]" 2 ;;
+      esac
+      ;;
+    session)           die "verb 'session' is not implemented yet" 3 ;;
     *)                 printf 'error: unknown verb: %s\n' "$verb" >&2; usage >&2; exit 2 ;;
   esac
 }

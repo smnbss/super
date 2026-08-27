@@ -266,6 +266,42 @@ test('the skill NEVER revokes application-default credentials', () => {
   }
 });
 
+// ── Task 6: golden build ────────────────────────────────────────────────────
+const GOLDEN_ENV = { SOURCE_IP: '203.0.113.7/32', SKIP_CRED_CHECK: '1' };
+
+test('golden build runs its phases in the required order', () => {
+  const r = runCli(['golden', 'build', '--dry-run', '--project', 'p'], { env: GOLDEN_ENV });
+  const out = r.stdout;
+  const at = (re) => out.search(re);
+  assert.ok(at(/instances create jungle-golden/) >= 0, `creates the instance; got:\n${out}`);
+  assert.ok(at(/repo\.init\.sh/) > at(/instances create jungle-golden/), 'clones after create');
+  assert.ok(at(/staging-images\.update\.sh/) > at(/repo\.init\.sh/), 'images after clone');
+  assert.ok(at(/database\.restore\.sh/) > at(/staging-images\.update\.sh/), 'restore after images');
+  assert.ok(at(/rm -f .*application_default_credentials/) > at(/database\.restore\.sh/),
+    'scrubs after the restore');
+  assert.ok(at(/machine-images create/) > at(/rm -f .*application_default_credentials/),
+    'captures the image only after the scrub');
+});
+
+test('golden build stops the instance before capturing the image', () => {
+  const r = runCli(['golden', 'build', '--dry-run', '--project', 'p'], { env: GOLDEN_ENV });
+  assert.ok(r.stdout.search(/instances stop jungle-golden/) < r.stdout.search(/machine-images create/),
+    'stop must precede capture');
+});
+
+test('golden build runs hosts.init.sh on the VM and never locally', () => {
+  const r = runCli(['golden', 'build', '--dry-run', '--project', 'p'], { env: GOLDEN_ENV });
+  const line = r.stdout.split('\n').find(l => l.includes('hosts.init.sh'));
+  assert.ok(line, 'expected hosts.init.sh');
+  assert.match(line, /vm_ssh|compute ssh/, 'hosts.init.sh must run over SSH on the VM');
+});
+
+test('parse_common_flags rejects an unknown option instead of ignoring it', () => {
+  const r = runCli(['golden', 'build', '--wat'], { env: GOLDEN_ENV });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /unknown option/);
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
