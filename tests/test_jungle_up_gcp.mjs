@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync } from 
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const SKILL = join(process.env.HOME, '.super/skills/brain-work-on-gcp');
+const SKILL = join(process.env.HOME, '.super/skills/brain-work-on-google-cloud');
 const CLI = join(SKILL, 'jungle_up_gcp.sh');
 
 let passed = 0, failed = 0;
@@ -143,6 +143,48 @@ test('resolve_source_cidr aborts rather than opening the firewall to the world',
 test('no code path ever emits 0.0.0.0/0', () => {
   const src = readFileSync(CLI, 'utf8');
   assert.ok(!src.includes('0.0.0.0/0'), 'found an open-world CIDR in the script');
+});
+
+// ── Task 3: instance creation, SSH wait, wrappers ───────────────────────────
+// SOURCE_IP is passed so these never reach the network for IP detection.
+const OFFLINE = { SOURCE_IP: '203.0.113.7/32' };
+
+test('vm_create builds a fresh instance with the spec defaults', () => {
+  const fake = fakeBin(['gcloud']);
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p vm_create jungle-golden',
+    { binDir: fake.dir, env: OFFLINE });
+  assert.match(r.stdout, /instances create jungle-golden/);
+  assert.match(r.stdout, /--machine-type=e2-standard-8/);
+  assert.match(r.stdout, /--boot-disk-size=200GB/);
+  assert.match(r.stdout, /--image-family=ubuntu-2404-lts-amd64/);
+  assert.match(r.stdout, /--image-project=ubuntu-os-cloud/);
+  assert.match(r.stdout, /--tags=jungle-session/);
+});
+
+test('vm_create from an image uses source-machine-image and no image-family', () => {
+  const fake = fakeBin(['gcloud']);
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p vm_create jungle-x --from-image jungle-golden-20260827',
+    { binDir: fake.dir, env: OFFLINE });
+  assert.match(r.stdout, /--source-machine-image=jungle-golden-20260827/);
+  assert.doesNotMatch(r.stdout, /--image-family/);
+});
+
+test('vm_ssh routes through gcloud compute ssh', () => {
+  const fake = fakeBin(['gcloud']);
+  callFn('PROJECT_ID=p ZONE=z vm_ssh jungle-x "docker info"', { binDir: fake.dir, env: OFFLINE });
+  const call = fake.calls().find(c => c.includes('compute ssh'));
+  assert.ok(call, `expected a compute ssh call, got: ${fake.calls().join(' | ')}`);
+  assert.match(call, /jungle-x/);
+  assert.match(call, /--command docker info/);
+});
+
+test('vm_wait_ssh gives up after the timeout rather than looping forever', () => {
+  const fake = fakeBin(['gcloud'], { exitCode: 1 });
+  const r = callFn('PROJECT_ID=p ZONE=z SSH_WAIT_TRIES=3 SSH_WAIT_SLEEP=0 vm_wait_ssh jungle-x',
+    { binDir: fake.dir, env: OFFLINE });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /did not become reachable/i);
+  assert.equal(fake.calls().length, 3);
 });
 
 console.log('═'.repeat(50));

@@ -94,6 +94,67 @@ ensure_firewall_rule() {
   fi
 }
 
+vm_create() {
+  local name="$1"; shift
+  local from_image=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from-image) from_image="${2:-}"; shift 2 ;;
+      *) die "vm_create: unknown option $1" ;;
+    esac
+  done
+
+  ensure_firewall_rule "$(resolve_source_cidr)"
+
+  if [[ -n "$from_image" ]]; then
+    run gcloud --project="$PROJECT_ID" compute instances create "$name" \
+      --zone="$ZONE" \
+      --source-machine-image="$from_image" \
+      --tags="$NETWORK_TAG" \
+      || die "failed to create '$name' from image '$from_image'"
+  else
+    run gcloud --project="$PROJECT_ID" compute instances create "$name" \
+      --zone="$ZONE" \
+      --machine-type="$MACHINE_TYPE" \
+      --boot-disk-size="${DISK_SIZE_GB}GB" \
+      --boot-disk-type=pd-balanced \
+      --image-family="$DEFAULT_IMAGE_FAMILY" \
+      --image-project="$DEFAULT_IMAGE_PROJECT" \
+      --tags="$NETWORK_TAG" \
+      || die "failed to create instance '$name'"
+  fi
+}
+
+vm_ip() {
+  gcloud --project="$PROJECT_ID" compute instances describe "$1" --zone="$ZONE" \
+    --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null
+}
+
+vm_ssh() {
+  local name="$1"; shift
+  gcloud --project="$PROJECT_ID" compute ssh "$name" --zone="$ZONE" --command "$*"
+}
+
+vm_scp() {
+  local name="$1" src="$2" dst="$3"
+  gcloud --project="$PROJECT_ID" compute scp --zone="$ZONE" "$src" "${name}:${dst}"
+}
+
+vm_wait_ssh() {
+  local name="$1"
+  local tries="${SSH_WAIT_TRIES:-40}"
+  local nap="${SSH_WAIT_SLEEP:-5}"
+  local i
+  for (( i = 0; i < tries; i++ )); do
+    if vm_ssh "$name" true >/dev/null 2>&1; then
+      log "SSH is ready on '$name'"
+      return 0
+    fi
+    [[ "$nap" == "0" ]] || sleep "$nap"
+  done
+  die "'$name' did not become reachable over SSH after $tries attempts"
+}
+
 usage() {
   cat <<'USAGE'
 jungle_up_gcp.sh — per-session GCP VMs running a WeRoad jungle stack
