@@ -35,8 +35,11 @@ install_base() {
   sudo systemctl enable --now docker
   sudo usermod -aG docker "$USER"
 
-  echo "==> Node and corepack"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  echo "==> Node 22 and corepack"
+  # ⚠️ Node 20 is too old. Measured 2026-08-27: corepack's default pnpm (11.24.0)
+  #    crashes on Node 20 with ERR_UNKNOWN_BUILTIN_MODULE, which reads as a broken
+  #    install rather than a version mismatch.
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
   sudo apt-get install -y -qq nodejs
   sudo corepack enable
 
@@ -67,20 +70,17 @@ install_base() {
     > "$HOME/.docker/config.json"
 }
 
-# pnpm is pinned to the jungle lockfile's packageManager field. A corepack-pulled
-# newer pnpm fails the Docker build with MINIMUM_RELEASE_AGE_VIOLATION.
+# ⚠️ MEASURED 2026-08-27, correcting an earlier assumption in this file: the jungle
+#    root package.json declares NO `packageManager` and NO `engines`. Its whole
+#    dependency set is chalk, handlebars, js-yaml, lodash and nodemon. So the jungle
+#    root installs with plain `npm install` and needs no pnpm at all.
 #
-# Called by golden build AFTER the jungle clone exists. Calling it earlier would
-# read a package.json that is not there yet.
-pin_pnpm() {
-  local pm
-  pm="$(node -p "require('$JUNGLE_DIR/package.json').packageManager || ''" 2>/dev/null || echo '')"
-  if [ -n "$pm" ]; then
-    echo "==> pinning $pm"
-    sudo corepack prepare "$pm" --activate
-  else
-    echo "==> no packageManager field found. Leaving the corepack default." >&2
-  fi
+#    pnpm still matters, but INSIDE the service repos, and those install inside
+#    their own containers. The MINIMUM_RELEASE_AGE_VIOLATION trap belongs there,
+#    not here.
+install_jungle_deps() {
+  echo "==> jungle root dependencies (npm, not pnpm)"
+  ( cd "$JUNGLE_DIR" && npm install --silent )
 }
 
 # Executing runs the install. Sourcing only defines the functions, so `golden

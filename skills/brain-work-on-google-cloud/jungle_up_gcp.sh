@@ -265,7 +265,12 @@ cmd_golden_build() {
   log "Cloning the jungle and all 72 repos"
   run vm_ssh "$GOLDEN_INSTANCE" "git clone $JUNGLE_GIT_URL $JUNGLE_REMOTE_DIR"
   run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/repo.init.sh"
-  run vm_ssh "$GOLDEN_INSTANCE" "source /tmp/vm-bootstrap.sh && pin_pnpm"
+  run vm_ssh "$GOLDEN_INSTANCE" "source /tmp/vm-bootstrap.sh && install_jungle_deps"
+
+  # compose.merge.js resolves an extends: reference into every repo, including two
+  # that a partial clone never fetches. Both directories are gitignored.
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && mkdir -p dbt dlt-pipelines && [ -e dbt/compose.yaml ] || printf 'services:\n  dbt:\n    image: alpine:3.20\n' > dbt/compose.yaml; [ -e dlt-pipelines/compose.yaml ] || printf 'services:\n  pipelines:\n    image: alpine:3.20\n' > dlt-pipelines/compose.yaml"
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && node scripts/compose.merge.js --target=development --no-deps=true"
 
   # hosts.init.sh rewrites tracked compose files. That is forbidden on the laptop
   # and correct here, because the VM tree is disposable.
@@ -466,9 +471,20 @@ AGENT_TMUX_SESSION="claude"
 # Claude Code on the VM authenticates through WeRoad's LiteLLM proxy, so its calls
 # are cost-monitored like every other WeRoad LLM call. Falls back to an explicit
 # ANTHROPIC_API_KEY when the proxy variables are absent.
+# Read one KEY=value out of a dotenv file without sourcing it. Sourcing an
+# unknown .env can execute arbitrary shell.
+dotenv_value() {
+  local file="$1" key="$2"
+  [[ -f "$file" ]] || return 1
+  grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- \
+    | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//' | tr -d '\r'
+}
+
 inject_agent_auth() {
-  local name="$1" tmp
-  local url="${LITELLM_PROXY_URL:-}" key="${LITELLM_PROXY_API_KEY:-}"
+  local name="$1" tmp envfile
+  envfile="${BRAIN_ENV_FILE:-${BRAIN_ROOT:-$PWD}/.env.local}"
+  local url="${LITELLM_PROXY_URL:-$(dotenv_value "$envfile" LITELLM_PROXY_URL || true)}"
+  local key="${LITELLM_PROXY_API_KEY:-$(dotenv_value "$envfile" LITELLM_PROXY_API_KEY || true)}"
 
   if [[ -z "$url" || -z "$key" ]]; then
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then

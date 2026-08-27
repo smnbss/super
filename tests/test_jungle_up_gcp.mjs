@@ -225,11 +225,20 @@ test('vm-bootstrap enables docker under systemd rather than backgrounding docker
   assert.ok(!/^\s*dockerd\b.*&\s*$/m.test(s), 'must not background dockerd');
 });
 
-test('vm-bootstrap pins pnpm to the lockfile version', () => {
+// Measured against the real jungle on 2026-08-27: its root package.json declares
+// no packageManager and no engines, so the root installs with npm, not pnpm.
+test('vm-bootstrap installs jungle root deps with npm, not pnpm', () => {
   const s = readFileSync(BOOTSTRAP, 'utf8');
-  assert.match(s, /packageManager/, 'must read the pinned version from package.json');
+  assert.match(s, /npm install/, 'the jungle root has no packageManager field');
   assert.ok(!/corepack prepare pnpm@latest/.test(s),
     'pnpm@latest triggers MINIMUM_RELEASE_AGE_VIOLATION');
+});
+
+// corepack's default pnpm 11 crashes on Node 20 with ERR_UNKNOWN_BUILTIN_MODULE.
+test('vm-bootstrap installs Node 22, not Node 20', () => {
+  const s = readFileSync(BOOTSTRAP, 'utf8');
+  assert.match(s, /setup_22\.x/);
+  assert.ok(!s.includes('setup_20.x'), 'Node 20 is too old for corepack pnpm 11');
 });
 
 test('credential helper exists and reads the ADC', () => {
