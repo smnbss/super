@@ -582,8 +582,36 @@ test('inject_agent_auth falls back to ANTHROPIC_API_KEY', () => {
 });
 
 test('inject_agent_auth names setup-token when no credential exists', () => {
-  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z CLAUDE_CODE_OAUTH_TOKEN= ANTHROPIC_API_KEY= inject_agent_auth jungle-x');
+  const fake = fakeBin(['gcloud'], { stdout: '' });
+  const r = callFn('PROJECT_ID=p ZONE=z CLAUDE_CODE_OAUTH_TOKEN= ANTHROPIC_API_KEY= inject_agent_auth jungle-x',
+    { binDir: fake.dir });
   assert.match(r.stderr, /setup-token/);
+  assert.match(r.stderr, /secrets create/, 'must give the exact creation command');
+});
+
+// The whole point of the Secret Manager route: the token never reaches the laptop.
+test('the token is fetched ON the VM, never read locally', () => {
+  const src = readFileSync(CLI, 'utf8');
+  assert.match(src, /gcloud secrets versions access latest/, 'must fetch the secret');
+  const fn = src.slice(src.indexOf('fetch_agent_token_from_secret_manager()'),
+                       src.indexOf('agent_token_help()'));
+  assert.match(fn, /vm_ssh/, 'the access must happen over SSH, on the VM');
+  assert.ok(!/\$\(gcloud secrets versions access/.test(fn.split('vm_ssh')[0]),
+    'the laptop must never capture the secret into a local variable');
+});
+
+test('the setup instructions keep the token out of shell history', () => {
+  const src = readFileSync(CLI, 'utf8');
+  assert.match(src, /claude setup-token \| tr -d/, 'must pipe, never echo the token');
+  assert.ok(!/CLAUDE_CODE_OAUTH_TOKEN=<|paste/i.test(src), 'must not ask for a pasted token');
+});
+
+// Scopes are fixed at creation. Without this the VM cannot reach Secret Manager
+// no matter how the IAM is set — and the failure looks like a missing secret.
+test('vm_create grants a scope that can reach Secret Manager', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p SOURCE_IP=203.0.113.7/32 vm_create jungle-x');
+  assert.match(r.stdout, /--scopes=/);
+  assert.match(r.stdout, /cloud-platform/);
 });
 
 // A changed IP broke SSH twice in one session, with a bare timeout as the only clue.

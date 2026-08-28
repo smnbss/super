@@ -123,25 +123,50 @@ alternative.
 Claude on the VM talks to **Anthropic directly**. It does not go through WeRoad's
 LiteLLM proxy.
 
-Two supported credentials, in order.
+**The token never passes through a laptop file, a shell history or an agent
+context.** It is created once, straight into Secret Manager, and each VM fetches it
+with its own service account.
 
-1. **`CLAUDE_CODE_OAUTH_TOKEN`**, from `claude setup-token`. Preferred for a Claude
-   subscription, because it adds no separate API billing. Run `claude setup-token`
-   on the laptop, then export the token before `session agent start`.
-2. **`ANTHROPIC_API_KEY`**, for API-key users.
+### One-time setup
 
-Neither is ever baked into the golden image. Both are injected per session VM and
-removed by the scrub.
+1. Create the secret. The pipe matters: the token is never printed.
 
-⚠️ **The LiteLLM proxy route was removed on 2026-08-27**, for two measured reasons.
+   ```
+   claude setup-token | tr -d '\n' | \
+     gcloud secrets create claude-agent-token --data-file=- --project <project>
+   ```
 
-1. `litellm.weroad.io` sits behind Cloudflare Access. A GCP VM receives HTTP 302 to
-   `weroad.cloudflareaccess.com`, and Claude Code follows it into an HTML login page,
-   reporting "API returned an empty or malformed response (HTTP 200)".
-2. Whether LiteLLM exposes an Anthropic-compatible `/v1/messages` was never verified,
-   so a Cloudflare service token alone might not have been enough.
+2. Let the VM service account read it.
 
-Do not reintroduce it without testing both.
+   ```
+   gcloud secrets add-iam-policy-binding claude-agent-token --project <project> \
+     --member "serviceAccount:<vm-service-account>" \
+     --role roles/secretmanager.secretAccessor
+   ```
+
+3. Rotate later by adding a version. Every future VM picks it up with no code change.
+
+   ```
+   claude setup-token | tr -d '\n' | \
+     gcloud secrets versions add claude-agent-token --data-file=- --project <project>
+   ```
+
+### Resolution order
+
+1. `CLAUDE_CODE_OAUTH_TOKEN` in the environment, for a one-off run.
+2. `ANTHROPIC_API_KEY` in the environment, for API-key users.
+3. Secret Manager, fetched on the VM. This is the intended path.
+
+⚠️ **Scopes are fixed when the instance is created.** The default compute scopes do
+NOT reach Secret Manager, so `vm_create` passes `--scopes=cloud-platform`. A VM built
+without it cannot fetch the token however the IAM is set, and the failure looks like
+a missing secret. Changing the scope afterwards needs the instance stopped.
+
+⚠️ The LiteLLM proxy route was removed on 2026-08-27. `litellm.weroad.io` sits behind
+Cloudflare Access, so a GCP VM receives HTTP 302 to `weroad.cloudflareaccess.com` and
+Claude Code reports "API returned an empty or malformed response (HTTP 200)". Whether
+LiteLLM exposes an Anthropic-compatible `/v1/messages` was never verified either. Do
+not reintroduce it without testing both.
 
 ## Linear tracking
 

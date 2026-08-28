@@ -18,6 +18,11 @@ GOLDEN_INSTANCE="jungle-golden"
 GOLDEN_IMAGE_PREFIX="jungle-golden-"
 FIREWALL_RULE="jungle-session-access"
 NETWORK_TAG="jungle-session"
+AGENT_TOKEN_SECRET="${AGENT_TOKEN_SECRET:-claude-agent-token}"
+# ⚠️ Scopes are fixed at instance creation. The DEFAULT compute scopes do NOT
+#    include Secret Manager, so a VM created without this cannot fetch the agent
+#    token however the IAM is set. Changing it later needs the instance STOPPED.
+VM_SCOPES="${VM_SCOPES:-https://www.googleapis.com/auth/cloud-platform}"
 
 DRY_RUN="${DRY_RUN:-}"
 PROJECT_ID="${PROJECT_ID:-}"
@@ -110,6 +115,7 @@ vm_create() {
     run gcloud --project="$PROJECT_ID" compute instances create "$name" \
       --zone="$ZONE" \
       --source-machine-image="$from_image" \
+      --scopes="$VM_SCOPES" \
       --tags="$NETWORK_TAG" \
       || die "failed to create '$name' from image '$from_image'"
   else
@@ -120,6 +126,7 @@ vm_create() {
       --boot-disk-type=pd-balanced \
       --image-family="$DEFAULT_IMAGE_FAMILY" \
       --image-project="$DEFAULT_IMAGE_PROJECT" \
+      --scopes="$VM_SCOPES" \
       --tags="$NETWORK_TAG" \
       || die "failed to create instance '$name'"
   fi
@@ -560,45 +567,81 @@ verify_render() {
 AGENT_TMUX_SESSION="claude"
 
 # Claude on the VM talks to Anthropic DIRECTLY. It does NOT go through WeRoad's
-# LiteLLM proxy.
+# LiteLLM proxy — that route was removed 2026-08-27 (Cloudflare Access blocks the
+# VM, and an Anthropic-compatible endpoint was never verified). Do not reintroduce
+# it without testing both.
 #
-# ⚠️ Two reasons the proxy route was removed, both measured 2026-08-27:
-#    1. litellm.weroad.io sits behind Cloudflare Access. A GCP VM gets HTTP 302 to
-#       weroad.cloudflareaccess.com, and Claude Code follows it into an HTML login
-#       page, reporting "API returned an empty or malformed response (HTTP 200)".
-#    2. Whether LiteLLM exposes an Anthropic-compatible /v1/messages was never
-#       verified, so even a service token might not have been enough.
-#    Simone's call: the agent uses Claude models, not LiteLLM models.
+# THE TOKEN NEVER PASSES THROUGH THE OPERATOR'S SHELL HISTORY OR AN AGENT CONTEXT.
+# It is created once, straight into Secret Manager, and each VM fetches it itself:
 #
-# Two supported credentials, in order:
-#    1. CLAUDE_CODE_OAUTH_TOKEN — from `claude setup-token`, for a Claude
-#       subscription. Preferred: no separate API billing.
-#    2. ANTHROPIC_API_KEY — for API-key users.
-# Neither is ever baked into the golden image.
+#   claude setup-token | tr -d '\n' | \
+#     gcloud secrets create claude-agent-token --data-file=- --project <project>
+#
+# Resolution order:
+#   1. CLAUDE_CODE_OAUTH_TOKEN in the environment — for a one-off run.
+#   2. ANTHROPIC_API_KEY in the environment — for API-key users.
+#   3. Secret Manager, fetched ON the VM by its own service account. Preferred:
+#      the token never touches the laptop, and rotation is one command that every
+#      future VM picks up with no code change.
 inject_agent_auth() {
   local name="$1" tmp
   local oauth="${CLAUDE_CODE_OAUTH_TOKEN:-}"
   local apikey="${ANTHROPIC_API_KEY:-}"
 
-  if [[ -z "$oauth" && -z "$apikey" ]]; then
-    log "No Claude credential found for the VM agent."
-    log "Preferred, with a Claude subscription:"
-    log "  claude setup-token          # on THIS machine, then re-run with"
-    log "  CLAUDE_CODE_OAUTH_TOKEN=... session agent start ..."
-    log "Or export ANTHROPIC_API_KEY. Or run 'claude setup-token' on the VM once."
+  if [[ -n "$oauth" || -n "$apikey" ]]; then
+    tmp="$(mktemp)"; chmod 600 "$tmp"
+    if [[ -n "$oauth" ]]; then
+      printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$oauth" > "$tmp"
+    else
+      printf 'export ANTHROPIC_API_KEY=%s\n' "$apikey" > "$tmp"
+    fi
+    run vm_scp "$name" "$tmp" "~/.claude-env"
+    rm -f "$tmp"
+    run vm_ssh "$name" "chmod 600 ~/.claude-env && grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc"
     return 0
   fi
 
-  tmp="$(mktemp)"; chmod 600 "$tmp"
-  if [[ -n "$oauth" ]]; then
-    printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$oauth" > "$tmp"
-  else
-    printf 'export ANTHROPIC_API_KEY=%s\n' "$apikey" > "$tmp"
-  fi
+  fetch_agent_token_from_secret_manager "$name"
+}
 
-  run vm_scp "$name" "$tmp" "~/.claude-env"
-  rm -f "$tmp"
-  run vm_ssh "$name" "chmod 600 ~/.claude-env && grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc"
+# The VM reads the secret itself. The value never reaches the laptop.
+fetch_agent_token_from_secret_manager() {
+  local name="$1"
+  run vm_ssh "$name" "set -e
+    tok=\$(gcloud secrets versions access latest --secret='$AGENT_TOKEN_SECRET' --project='$PROJECT_ID' 2>/dev/null || true)
+    if [ -z \"\$tok\" ]; then echo 'AGENT_TOKEN_MISSING'; exit 0; fi
+    umask 077
+    printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\\n' \"\$tok\" > ~/.claude-env
+    grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc
+    echo AGENT_TOKEN_OK" | tee /dev/null | grep -q AGENT_TOKEN_OK && {
+      log "Agent token fetched from Secret Manager on the VM"
+      return 0
+    }
+  agent_token_help
+  return 0
+}
+
+agent_token_help() {
+  cat >&2 <<HELP
+  No agent credential available on the VM.
+
+  Create it ONCE, without the token passing through your shell history:
+
+    claude setup-token | tr -d '\n' | \
+      gcloud secrets create $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID
+
+  Then let the VM service account read it:
+
+    gcloud secrets add-iam-policy-binding $AGENT_TOKEN_SECRET --project $PROJECT_ID \
+      --member "serviceAccount:\$(gcloud compute instances describe <vm> --zone $ZONE \
+        --project $PROJECT_ID --format='value(serviceAccounts[0].email)')" \
+      --role roles/secretmanager.secretAccessor
+
+  To rotate later, add a new version — every future VM picks it up:
+
+    claude setup-token | tr -d '\n' | \
+      gcloud secrets versions add $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID
+HELP
 }
 
 # Ship the brain context the VM cannot reach. Claude runs there, and there is no
