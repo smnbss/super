@@ -586,6 +586,32 @@ test('inject_agent_auth names setup-token when no credential exists', () => {
   assert.match(r.stderr, /setup-token/);
 });
 
+// A changed IP broke SSH twice in one session, with a bare timeout as the only clue.
+test('vm_ssh refreshes the firewall and retries once on failure', () => {
+  // Realistic fake: SSH fails (blocked by a stale firewall) while firewall calls
+  // succeed. A fake that fails everything cannot exercise the retry at all.
+  const dir = mkdtempSync(join(tmpdir(), 'fakebin-'));
+  const log = join(dir, 'calls.log');
+  writeFileSync(join(dir, 'gcloud'), `#!/usr/bin/env bash
+printf 'gcloud' >> "${log}"; for a in "$@"; do printf ' %s' "$a" >> "${log}"; done; printf '\\n' >> "${log}"
+for a in "$@"; do [ "$a" = "ssh" ] && exit 255; done
+exit 0
+`);
+  chmodSync(join(dir, 'gcloud'), 0o755);
+  writeFileSync(log, '');
+  callFn('PROJECT_ID=p ZONE=z SOURCE_IP=203.0.113.7/32 vm_ssh jungle-x true', { binDir: dir });
+  const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+  assert.ok(calls.some(c => c.includes('firewall-rules')), 'must refresh the firewall');
+  assert.equal(calls.filter(c => c.includes('compute ssh')).length, 2, 'exactly one retry');
+});
+
+test('vm_ssh does not retry forever', () => {
+  const fake = fakeBin(['gcloud'], { exitCode: 255 });
+  callFn('PROJECT_ID=p ZONE=z SOURCE_IP=203.0.113.7/32 NO_IP_AUTOREFRESH=1 vm_ssh jungle-x true',
+    { binDir: fake.dir });
+  assert.equal(fake.calls().filter(c => c.includes('compute ssh')).length, 1);
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

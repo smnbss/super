@@ -130,8 +130,25 @@ vm_ip() {
     --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null
 }
 
+# ⚠️ A changed public IP breaks SSH and HTTP together, and the only symptom is a
+#    timeout. Seen TWICE on 2026-08-27 on a mobile hotspot. Rather than make the
+#    operator diagnose it, retry once behind an automatic firewall refresh.
 vm_ssh() {
   local name="$1"; shift
+  # ⚠️ Capture the status with a bare assignment. `local rc=$?` after an `if`
+  #    reads the status of the `if`, and a separate `local rc` line resets $? to
+  #    the status of `local` itself. Both make a failed SSH look successful.
+  local rc
+  gcloud --project="$PROJECT_ID" compute ssh "$name" --zone="$ZONE" --command "$*"
+  rc=$?
+  [[ $rc -eq 0 ]] && return 0
+  [[ -n "${NO_IP_AUTOREFRESH:-}" ]] && return $rc
+  [[ -n "${_IP_REFRESHED:-}" ]] && return $rc
+  log "SSH failed. Refreshing the firewall to your current IP and retrying once."
+  _IP_REFRESHED=1
+  # In a subshell: ensure_firewall_rule calls die on failure, which would exit the
+  # whole script. A refresh that fails should give up and report the ORIGINAL error.
+  ( ensure_firewall_rule "$(resolve_source_cidr)" ) || return $rc
   gcloud --project="$PROJECT_ID" compute ssh "$name" --zone="$ZONE" --command "$*"
 }
 
@@ -142,6 +159,8 @@ vm_scp() {
 
 vm_wait_ssh() {
   local name="$1"
+  # A probe. Auto-refresh here would turn every poll into a firewall write.
+  local NO_IP_AUTOREFRESH=1
   local tries="${SSH_WAIT_TRIES:-40}"
   local nap="${SSH_WAIT_SLEEP:-5}"
   local i
@@ -643,6 +662,9 @@ cmd_session_refresh_ip() {
 branch_is_pushed() {
   [[ -n "${BRANCH_PUSHED:-}" ]] && return 0
   local vm="$1" repo="$2" branch="$3"
+  # A probe guarding a destructive delete. Failure must mean "not pushed",
+  # never "retry until it looks pushed".
+  local NO_IP_AUTOREFRESH=1
   vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR/$repo && git rev-parse --verify --quiet origin/$branch" >/dev/null 2>&1
 }
 
