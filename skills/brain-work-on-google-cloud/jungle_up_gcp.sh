@@ -540,55 +540,41 @@ verify_render() {
 #    the lid suspends the process and drops the mount.
 AGENT_TMUX_SESSION="claude"
 
-# ⚠️ MEASURED 2026-08-27: litellm.weroad.io sits behind CLOUDFLARE ACCESS. A GCP VM
-#    gets HTTP 302 to weroad.cloudflareaccess.com, and Claude Code reports
-#    "API returned an empty or malformed response (HTTP 200)" because it follows the
-#    redirect into an HTML login page. The laptop works only because it holds an
-#    Access session.
+# Claude on the VM talks to Anthropic DIRECTLY. It does NOT go through WeRoad's
+# LiteLLM proxy.
 #
-#    To use the cost-monitored proxy from a VM you need a Cloudflare Access SERVICE
-#    TOKEN for that hostname, passed as extra headers:
-#      ANTHROPIC_CUSTOM_HEADERS="CF-Access-Client-Id: <id>
-#      CF-Access-Client-Secret: <secret>"
-#    Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET and this function wires it.
+# ⚠️ Two reasons the proxy route was removed, both measured 2026-08-27:
+#    1. litellm.weroad.io sits behind Cloudflare Access. A GCP VM gets HTTP 302 to
+#       weroad.cloudflareaccess.com, and Claude Code follows it into an HTML login
+#       page, reporting "API returned an empty or malformed response (HTTP 200)".
+#    2. Whether LiteLLM exposes an Anthropic-compatible /v1/messages was never
+#       verified, so even a service token might not have been enough.
+#    Simone's call: the agent uses Claude models, not LiteLLM models.
 #
-#    Without that token, use ANTHROPIC_API_KEY, or run `claude setup-token` on the
-#    VM once. Both bypass cost monitoring, so prefer the service token.
-# Read one KEY=value out of a dotenv file without sourcing it. Sourcing an
-# unknown .env can execute arbitrary shell.
-dotenv_value() {
-  local file="$1" key="$2"
-  [[ -f "$file" ]] || return 1
-  grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- \
-    | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//' | tr -d '\r'
-}
-
+# Two supported credentials, in order:
+#    1. CLAUDE_CODE_OAUTH_TOKEN — from `claude setup-token`, for a Claude
+#       subscription. Preferred: no separate API billing.
+#    2. ANTHROPIC_API_KEY — for API-key users.
+# Neither is ever baked into the golden image.
 inject_agent_auth() {
-  local name="$1" tmp envfile
-  envfile="${BRAIN_ENV_FILE:-${BRAIN_ROOT:-$PWD}/.env.local}"
-  local url="${LITELLM_PROXY_URL:-$(dotenv_value "$envfile" LITELLM_PROXY_URL || true)}"
-  local key="${LITELLM_PROXY_API_KEY:-$(dotenv_value "$envfile" LITELLM_PROXY_API_KEY || true)}"
+  local name="$1" tmp
+  local oauth="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+  local apikey="${ANTHROPIC_API_KEY:-}"
 
-  if [[ -z "$url" || -z "$key" ]]; then
-    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-      tmp="$(mktemp)"; chmod 600 "$tmp"
-      printf 'export ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" > "$tmp"
-    else
-      log "WARNING: no LiteLLM proxy and no ANTHROPIC_API_KEY."
-      log "Run 'claude setup-token' on the VM once before starting the agent."
-      return 0
-    fi
-  elif [[ -z "${CF_ACCESS_CLIENT_ID:-}" || -z "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
-    log "WARNING: LiteLLM is behind Cloudflare Access and no service token is set."
-    log "A VM cannot reach it. Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET,"
-    log "or set ANTHROPIC_API_KEY, or run 'claude setup-token' on the VM once."
+  if [[ -z "$oauth" && -z "$apikey" ]]; then
+    log "No Claude credential found for the VM agent."
+    log "Preferred, with a Claude subscription:"
+    log "  claude setup-token          # on THIS machine, then re-run with"
+    log "  CLAUDE_CODE_OAUTH_TOKEN=... session agent start ..."
+    log "Or export ANTHROPIC_API_KEY. Or run 'claude setup-token' on the VM once."
     return 0
+  fi
+
+  tmp="$(mktemp)"; chmod 600 "$tmp"
+  if [[ -n "$oauth" ]]; then
+    printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$oauth" > "$tmp"
   else
-    tmp="$(mktemp)"; chmod 600 "$tmp"
-    { printf 'export ANTHROPIC_BASE_URL=%s\n' "$url"
-      printf 'export ANTHROPIC_AUTH_TOKEN=%s\n' "$key"
-      printf 'export ANTHROPIC_CUSTOM_HEADERS="CF-Access-Client-Id: %s\nCF-Access-Client-Secret: %s"\n' \
-        "$CF_ACCESS_CLIENT_ID" "$CF_ACCESS_CLIENT_SECRET"; } > "$tmp"
+    printf 'export ANTHROPIC_API_KEY=%s\n' "$apikey" > "$tmp"
   fi
 
   run vm_scp "$name" "$tmp" "~/.claude-env"

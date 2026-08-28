@@ -560,6 +560,32 @@ test('every wait loop honours DRY_RUN', () => {
   }
 });
 
+// ── Agent auth: Claude models, not LiteLLM ──────────────────────────────────
+test('the skill never routes the agent through LiteLLM', () => {
+  for (const f of ['jungle_up_gcp.sh', 'SKILL.md']) {
+    const t = readFileSync(join(SKILL, f), 'utf8');
+    const live = t.split('\n').filter(l =>
+      /LITELLM|ANTHROPIC_BASE_URL/.test(l) && !/removed|not go through|never|Do not/i.test(l));
+    assert.equal(live.length, 0, `${f} still routes through LiteLLM: ${live.join(' | ')}`);
+  }
+});
+
+test('inject_agent_auth writes an OAuth token when one is set', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z CLAUDE_CODE_OAUTH_TOKEN=tok inject_agent_auth jungle-x');
+  assert.match(r.stdout, /claude-env/);
+  assert.ok(!r.stdout.includes('tok'), 'the token must never be echoed');
+});
+
+test('inject_agent_auth falls back to ANTHROPIC_API_KEY', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z ANTHROPIC_API_KEY=k inject_agent_auth jungle-x');
+  assert.match(r.stdout, /claude-env/);
+});
+
+test('inject_agent_auth names setup-token when no credential exists', () => {
+  const r = callFn('DRY_RUN=1 PROJECT_ID=p ZONE=z CLAUDE_CODE_OAUTH_TOKEN= ANTHROPIC_API_KEY= inject_agent_auth jungle-x');
+  assert.match(r.stderr, /setup-token/);
+});
+
 console.log('═'.repeat(50));
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

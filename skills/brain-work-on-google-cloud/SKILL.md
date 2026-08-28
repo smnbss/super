@@ -118,21 +118,30 @@ Simone chose the website reading on 2026-08-27. This skill never installs Fuse-T
 silently. The preflight prints both readings and stops. mutagen (MIT) is the
 alternative.
 
-## Agent authentication — the one open blocker
+## Agent authentication
 
-⚠️ **MEASURED 2026-08-27: `litellm.weroad.io` sits behind Cloudflare Access.** A GCP
-VM receives HTTP 302 to `weroad.cloudflareaccess.com`. Claude Code follows it into
-an HTML login page and reports "API returned an empty or malformed response
-(HTTP 200)". The laptop works only because it already holds an Access session.
+Claude on the VM talks to **Anthropic directly**. It does not go through WeRoad's
+LiteLLM proxy.
 
-Three ways to authenticate the agent, best first.
+Two supported credentials, in order.
 
-1. **A Cloudflare Access service token for `litellm.weroad.io`.** Keeps the calls
-   cost-monitored. Set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`, and the
-   skill writes `ANTHROPIC_CUSTOM_HEADERS` on the VM. Ask DevOps for the token.
-2. **`ANTHROPIC_API_KEY`.** Works immediately. Bypasses cost monitoring.
-3. **`claude setup-token`, run on the VM once.** Interactive, so it cannot be
-   automated, and it must not be baked into the golden image.
+1. **`CLAUDE_CODE_OAUTH_TOKEN`**, from `claude setup-token`. Preferred for a Claude
+   subscription, because it adds no separate API billing. Run `claude setup-token`
+   on the laptop, then export the token before `session agent start`.
+2. **`ANTHROPIC_API_KEY`**, for API-key users.
+
+Neither is ever baked into the golden image. Both are injected per session VM and
+removed by the scrub.
+
+⚠️ **The LiteLLM proxy route was removed on 2026-08-27**, for two measured reasons.
+
+1. `litellm.weroad.io` sits behind Cloudflare Access. A GCP VM receives HTTP 302 to
+   `weroad.cloudflareaccess.com`, and Claude Code follows it into an HTML login page,
+   reporting "API returned an empty or malformed response (HTTP 200)".
+2. Whether LiteLLM exposes an Anthropic-compatible `/v1/messages` was never verified,
+   so a Cloudflare service token alone might not have been enough.
+
+Do not reintroduce it without testing both.
 
 ## Linear tracking
 
