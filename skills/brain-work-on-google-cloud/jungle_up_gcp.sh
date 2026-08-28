@@ -621,9 +621,17 @@ fetch_agent_token_from_secret_manager() {
     #    stdout captures the banner, the URL and ANSI colour codes rather than the
     #    token. That stores ~2000 bytes of terminal output which fetches fine and
     #    then fails three steps later as a bare \"Not logged in\". Seen 2026-08-28.
+    # ⚠️ The secret often holds \`claude setup-token\`'s whole banner rather than the
+    #    token, because that command is interactive and everyone pipes it. Rather
+    #    than fail, recover the token from inside the blob. Happened on four
+    #    consecutive attempts 2026-08-28.
     case \"\$tok\" in
       sk-ant-*) : ;;
-      *) echo 'AGENT_TOKEN_MALFORMED'; exit 0 ;;
+      *)
+        extracted=\$(printf '%s' \"\$tok\" | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \\
+          | grep -oE 'sk-ant-[A-Za-z0-9_-]+' | head -1)
+        if [ -n \"\$extracted\" ]; then tok=\"\$extracted\"
+        else echo 'AGENT_TOKEN_MALFORMED'; exit 0; fi ;;
     esac
     case \"\$tok\" in
       *[![:print:]]*|*\ *) echo 'AGENT_TOKEN_MALFORMED'; exit 0 ;;
@@ -702,14 +710,39 @@ ship_context_pack() {
 
 # Start the agent detached. It survives the SSH connection closing, so the work
 # continues after the operator closes the laptop.
+# ⚠️ Claude Code refuses to honour a workspace's settings until the directory is
+#    trusted, and in headless mode it simply reports "Not logged in" and exits.
+#    Pre-accept the trust dialog for the working directory.
+trust_agent_workspace() {
+  local vm="$1" wd="$2"
+  run vm_ssh "$vm" "node -e \"
+    const fs=require('fs'),p=process.env.HOME+'/.claude.json';
+    let j={}; try{ j=JSON.parse(fs.readFileSync(p,'utf8')); }catch(e){}
+    j.projects=j.projects||{};
+    j.projects['$wd']=Object.assign({},j.projects['$wd'],{hasTrustDialogAccepted:true});
+    fs.writeFileSync(p,JSON.stringify(j,null,2));
+  \""
+}
+
+# Start the agent detached. It survives the SSH connection closing, so the work
+# continues after the operator closes the laptop.
+#
+# ⚠️ Source ~/.claude-env EXPLICITLY. `bash -lc` is a non-interactive login shell,
+#    and Ubuntu's ~/.bashrc returns early for non-interactive shells, so the token
+#    written there is never loaded. The failure surfaces as "Not logged in" inside
+#    tmux while a hand-run `source ~/.claude-env; claude` works perfectly.
 cmd_agent_start() {
   local session="$1" prompt="$2" vm repo
   vm="$(state_read "$session" vm)"   || die "no session '$session'"
   repo="$(state_read "$session" repo)"
-  local wd="$JUNGLE_REMOTE_DIR/$repo"
+  local wd="\$HOME/jungle/$repo"
+  local wd_literal
+  wd_literal="$(vm_ssh "$vm" "echo \$HOME/jungle/$repo" 2>/dev/null | tr -d '\r\n')"
+
+  [[ -n "$wd_literal" ]] && trust_agent_workspace "$vm" "$wd_literal"
 
   run vm_ssh "$vm" "tmux has-session -t $AGENT_TMUX_SESSION 2>/dev/null && tmux kill-session -t $AGENT_TMUX_SESSION; true"
-  run vm_ssh "$vm" "cd $wd && tmux new-session -d -s $AGENT_TMUX_SESSION \"bash -lc 'claude --dangerously-skip-permissions -p \\\"$prompt\\\" 2>&1 | tee -a ~/agent.log'\""
+  run vm_ssh "$vm" "cd $wd && tmux new-session -d -s $AGENT_TMUX_SESSION \"bash -c '. ~/.claude-env; claude --dangerously-skip-permissions -p \\\"$prompt\\\" 2>&1 | tee -a ~/agent.log'\""
   log "Agent started detached on '$vm'. Close the laptop freely."
   log "Read progress with:  session agent log $session"
 }
