@@ -132,9 +132,16 @@ with its own service account.
 1. Create the secret. The pipe matters: the token is never printed.
 
    ```
-   claude setup-token | tr -d '\n' | \
-     gcloud secrets create claude-agent-token --data-file=- --project <project>
+   claude setup-token                      # interactive; prints the token
+   read -rs TOK && printf '%s' "$TOK" | \
+     gcloud secrets create claude-agent-token --data-file=- --project <project> && unset TOK
    ```
+
+   ⚠️ **Do NOT pipe `claude setup-token` straight into the secret.** It is
+   interactive, so the pipe stores its banner, its URL and ANSI colour codes —
+   about 2000 bytes of terminal output. That fetches successfully and then fails
+   three steps later as a bare "Not logged in". `read -rs` does not echo and does
+   not enter shell history. The skill now validates the shape and says so.
 
 2. Let the VM service account read it.
 
@@ -147,8 +154,9 @@ with its own service account.
 3. Rotate later by adding a version. Every future VM picks it up with no code change.
 
    ```
-   claude setup-token | tr -d '\n' | \
-     gcloud secrets versions add claude-agent-token --data-file=- --project <project>
+   claude setup-token
+   read -rs TOK && printf '%s' "$TOK" | \
+     gcloud secrets versions add claude-agent-token --data-file=- --project <project> && unset TOK
    ```
 
 ### Resolution order

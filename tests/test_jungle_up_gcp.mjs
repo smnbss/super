@@ -600,10 +600,21 @@ test('the token is fetched ON the VM, never read locally', () => {
     'the laptop must never capture the secret into a local variable');
 });
 
-test('the setup instructions keep the token out of shell history', () => {
+// `claude setup-token` is INTERACTIVE. Piping its stdout captures the banner, the
+// URL and ANSI codes — 2014 bytes of terminal output that stores fine and then
+// fails as a bare "Not logged in". Hit for real on 2026-08-28.
+test('setup instructions never pipe setup-token stdout into a secret', () => {
   const src = readFileSync(CLI, 'utf8');
-  assert.match(src, /claude setup-token \| tr -d/, 'must pipe, never echo the token');
-  assert.ok(!/CLAUDE_CODE_OAUTH_TOKEN=<|paste/i.test(src), 'must not ask for a pasted token');
+  assert.ok(!/setup-token\s*\|/.test(src),
+    'piping setup-token captures its interactive UI, not the token');
+  assert.match(src, /read -rs/, 'must read the token without echoing it');
+});
+
+test('the fetched secret is validated for shape, not just presence', () => {
+  const src = readFileSync(CLI, 'utf8');
+  assert.match(src, /AGENT_TOKEN_MALFORMED/);
+  assert.match(src, /sk-ant-/, 'must check the token prefix');
+  assert.match(src, /\[!\[:print:\]\]|print:/, 'must reject escape codes and spaces');
 });
 
 // Scopes are fixed at creation. Without this the VM cannot reach Secret Manager

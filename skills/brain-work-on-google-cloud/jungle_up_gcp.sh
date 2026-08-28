@@ -574,8 +574,12 @@ AGENT_TMUX_SESSION="claude"
 # THE TOKEN NEVER PASSES THROUGH THE OPERATOR'S SHELL HISTORY OR AN AGENT CONTEXT.
 # It is created once, straight into Secret Manager, and each VM fetches it itself:
 #
-#   claude setup-token | tr -d '\n' | \
+#   claude setup-token                      # interactive; prints the token
+#   read -rs TOK && printf '%s' "$TOK" | \
 #     gcloud secrets create claude-agent-token --data-file=- --project <project>
+#
+# ⚠️ Do NOT pipe `claude setup-token` straight into the secret. It is interactive,
+#    so the pipe captures its banner, URL and ANSI codes instead of the token.
 #
 # Resolution order:
 #   1. CLAUDE_CODE_OAUTH_TOKEN in the environment — for a one-off run.
@@ -610,13 +614,37 @@ fetch_agent_token_from_secret_manager() {
   run vm_ssh "$name" "set -e
     tok=\$(gcloud secrets versions access latest --secret='$AGENT_TOKEN_SECRET' --project='$PROJECT_ID' 2>/dev/null || true)
     if [ -z \"\$tok\" ]; then echo 'AGENT_TOKEN_MISSING'; exit 0; fi
+    # ⚠️ Validate the SHAPE. \`claude setup-token\` is interactive, so piping its
+    #    stdout captures the banner, the URL and ANSI colour codes rather than the
+    #    token. That stores ~2000 bytes of terminal output which fetches fine and
+    #    then fails three steps later as a bare \"Not logged in\". Seen 2026-08-28.
+    case \"\$tok\" in
+      sk-ant-*) : ;;
+      *) echo 'AGENT_TOKEN_MALFORMED'; exit 0 ;;
+    esac
+    case \"\$tok\" in
+      *[![:print:]]*|*\ *) echo 'AGENT_TOKEN_MALFORMED'; exit 0 ;;
+    esac
     umask 077
     printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\\n' \"\$tok\" > ~/.claude-env
     grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc
-    echo AGENT_TOKEN_OK" | tee /dev/null | grep -q AGENT_TOKEN_OK && {
-      log "Agent token fetched from Secret Manager on the VM"
-      return 0
-    }
+    echo AGENT_TOKEN_OK" > /tmp/.agent-token-probe 2>&1
+  if grep -q AGENT_TOKEN_OK /tmp/.agent-token-probe 2>/dev/null; then
+    rm -f /tmp/.agent-token-probe
+    log "Agent token fetched from Secret Manager on the VM"
+    return 0
+  fi
+  if grep -q AGENT_TOKEN_MALFORMED /tmp/.agent-token-probe 2>/dev/null; then
+    rm -f /tmp/.agent-token-probe
+    log "ERROR: the secret '$AGENT_TOKEN_SECRET' does not hold a token."
+    log "It must start with sk-ant- and contain no spaces or escape codes."
+    log "\`claude setup-token\` is INTERACTIVE — piping it captures its banner, not"
+    log "the token. Run it, read the token it prints, then:"
+    log "  read -rs TOK && printf '%s' \"\$TOK\" | \\"
+    log "    gcloud secrets versions add $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID"
+    return 0
+  fi
+  rm -f /tmp/.agent-token-probe
   agent_token_help
   return 0
 }
@@ -627,8 +655,12 @@ agent_token_help() {
 
   Create it ONCE, without the token passing through your shell history:
 
-    claude setup-token | tr -d '\n' | \
-      gcloud secrets create $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID
+    claude setup-token                      # interactive; prints the token
+    read -rs TOK && printf '%s' "\$TOK" | \
+      gcloud secrets create $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID && unset TOK
+
+  Do NOT pipe setup-token directly: it is interactive, so the pipe stores its
+  banner and colour codes rather than the token.
 
   Then let the VM service account read it:
 
@@ -639,8 +671,9 @@ agent_token_help() {
 
   To rotate later, add a new version — every future VM picks it up:
 
-    claude setup-token | tr -d '\n' | \
-      gcloud secrets versions add $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID
+    claude setup-token
+    read -rs TOK && printf '%s' "\$TOK" | \
+      gcloud secrets versions add $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID && unset TOK
 HELP
 }
 
