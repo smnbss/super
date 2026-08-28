@@ -613,6 +613,9 @@ fetch_agent_token_from_secret_manager() {
   local name="$1"
   run vm_ssh "$name" "set -e
     tok=\$(gcloud secrets versions access latest --secret='$AGENT_TOKEN_SECRET' --project='$PROJECT_ID' 2>/dev/null || true)
+    # Strip surrounding whitespace. Any paste or here-doc adds a trailing newline,
+    # and that alone must not be treated as a malformed token.
+    tok=\$(printf '%s' \"\$tok\" | tr -d '\\r\\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*\$//')
     if [ -z \"\$tok\" ]; then echo 'AGENT_TOKEN_MISSING'; exit 0; fi
     # ⚠️ Validate the SHAPE. \`claude setup-token\` is interactive, so piping its
     #    stdout captures the banner, the URL and ANSI colour codes rather than the
