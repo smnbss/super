@@ -24,6 +24,18 @@ JUNGLE_GIT_URL="${1:?usage: golden-build-remote.sh <jungle-git-url>}"
 
 rm -f "$DONE"
 
+# ⚠️ A PID FILE, NOT pgrep. The poller runs its liveness check over SSH, and the SSH
+#    command string itself contains "golden-build-remote.sh" — so `pgrep -f` matches the
+#    probe's own shell and reports the build alive forever. Cost real debugging time on
+#    2026-08-29. A pid file cannot lie about this.
+echo $$ > "$HOME/golden-build.pid"
+
+# ⚠️ ALWAYS write the DONE marker, even on failure. The first version wrote it only after
+#    a clean finish, so when the script died mid-restore the laptop poller waited 85
+#    minutes for a marker that was never coming. The marker means FINISHED, not SUCCEEDED —
+#    the poller reads the log to find out which.
+trap 'echo "exit=$?" >> "$LOG"; touch "$DONE"' EXIT
+
 # ⚠️ Postgres creates ~84 databases on first boot and RESTARTS part-way through, so a
 #    passing pg_isready proves nothing. Gate on the database count, the same way the
 #    laptop-side wait_for_databases does.
@@ -98,4 +110,4 @@ wait_for_databases() {
   echo "=== remote build finished $(date -u +%FT%TZ) ==="
 } >> "$LOG" 2>&1
 
-touch "$DONE"
+# the EXIT trap writes the marker

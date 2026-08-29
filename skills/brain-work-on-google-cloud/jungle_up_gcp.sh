@@ -330,30 +330,77 @@ latest_golden_image() {
 
 # Polls the detached remote build. Survives a dropped laptop: every probe is a fresh SSH,
 # and a failed probe is retried rather than treated as a failed build.
+# Polls the detached remote build.
+#
+# ⚠️ THREE STATES, AND THE FIRST VERSION COLLAPSED THEM INTO ONE. It treated an empty
+#    reply as "no answer from the VM" whether SSH had failed or the log was simply quiet,
+#    and it had no way to notice the remote script had DIED. On 2026-08-29 it spun for 85
+#    minutes reporting "no answer" while SSH worked perfectly and the build was long dead.
+#
+#      unreachable  — SSH itself failed. The LAPTOP lost the VM; the build does not care.
+#                     Keep polling.
+#      running      — pid file names a live process. Report progress.
+#      finished     — the DONE marker exists. Success or failure; read the log to see.
+#
+#    A pid file that names no live process, with no DONE marker, means the script was
+#    killed. Say so and stop, rather than waiting for a marker that will never arrive.
 golden_wait_remote() {
-  local i out misses=0
+  local i probe rc unreachable=0 last_size="" stalled=0
   if [[ -n "$DRY_RUN" ]]; then
     printf 'DRY-RUN: wait for the remote golden build to finish\n'
     return 0
   fi
-  for (( i = 0; i < 720; i++ )); do
-    if vm_ssh "$GOLDEN_INSTANCE" "test -f ~/golden-build.done" >/dev/null 2>&1; then
+  for (( i = 0; i < 960; i++ )); do
+    probe="$(vm_ssh "$GOLDEN_INSTANCE" "
+      test -f ~/golden-build.done && echo MARKER=done
+      if [ -f ~/golden-build.pid ] && kill -0 \"\$(cat ~/golden-build.pid)\" 2>/dev/null; then
+        echo PROC=alive
+      else
+        echo PROC=gone
+      fi
+      echo SIZE=\$(stat -c %s ~/golden-build.log 2>/dev/null || echo 0)
+      echo LAST=\$(tail -1 ~/golden-build.log 2>/dev/null | tr -d '\r' | cut -c1-70)
+    " 2>/dev/null)"
+    rc=$?
+
+    if (( rc != 0 )) || [[ -z "$probe" ]]; then
+      unreachable=$(( unreachable + 1 ))
+      (( unreachable % 10 == 0 )) \
+        && log "  (cannot reach the VM — $unreachable probes. The build is detached and continues.)"
+      sleep 30
+      continue
+    fi
+    unreachable=0
+
+    if [[ "$probe" == *MARKER=done* ]]; then
       log "Remote build phase finished"
-      vm_ssh "$GOLDEN_INSTANCE" "tail -4 ~/golden-build.log" 2>/dev/null | sed 's/^/    /' >&2
+      vm_ssh "$GOLDEN_INSTANCE" "tail -5 ~/golden-build.log" 2>/dev/null | sed 's/^/    /' >&2
       return 0
     fi
-    out="$(vm_ssh "$GOLDEN_INSTANCE" "tail -1 ~/golden-build.log 2>/dev/null" 2>/dev/null | tr -d '\r')"
-    if [[ -n "$out" ]]; then
-      misses=0
-      (( i % 5 == 0 )) && log "  … ${out:0:70}"
+
+    local size; size="$(printf '%s' "$probe" | sed -n 's/^SIZE=//p')"
+    if [[ "$probe" == *PROC=gone* ]]; then
+      log "ERROR: the remote build process is gone and wrote no completion marker."
+      log "It was killed rather than finishing. Read ~/golden-build.log on '$GOLDEN_INSTANCE':"
+      vm_ssh "$GOLDEN_INSTANCE" "tail -8 ~/golden-build.log" 2>/dev/null | sed 's/^/    /' >&2
+      return 1
+    fi
+
+    # A live process whose log has not grown for 40 minutes is stuck, not working.
+    if [[ "$size" == "$last_size" ]]; then
+      stalled=$(( stalled + 1 ))
+      if (( stalled == 80 )); then
+        log "WARNING: the log has not grown in ~40 minutes. The build may be stuck."
+        log "Still polling, but check ~/golden-build.log on '$GOLDEN_INSTANCE'."
+      fi
     else
-      # ⚠️ A failed probe means the LAPTOP lost the VM, not that the build died. Keep
-      #    polling; the build is detached and does not care.
-      misses=$(( misses + 1 ))
-      (( misses % 10 == 0 )) && log "  (no answer from the VM for $misses probes — the build continues regardless)"
+      stalled=0
+      last_size="$size"
+      (( i % 5 == 0 )) && log "  … $(printf '%s' "$probe" | sed -n 's/^LAST=//p')"
     fi
     sleep 30
   done
+  log "ERROR: the remote build did not finish within 8 hours."
   return 1
 }
 
