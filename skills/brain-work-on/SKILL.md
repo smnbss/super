@@ -204,6 +204,15 @@ outputs/projects-work-on/<repo|preset>/<session>/
 ```
 
 Rules:
+- **One workspace, one Linear issue.** A session dir tracks exactly one issue. Its
+  sub-issues live in the same dir, because they are phases of one goal sharing one
+  plan file. A NEW goal gets a NEW dir — `brain-work-on-new-issue` creates it, and
+  never reuses this one. Reusing a workspace is how a directory ends up named for one
+  goal while its pointer serves another, with both sharing a log thread.
+- **Once tracked, name the dir after the issue** — `<issue-key>-<slug>`, lowercase,
+  e.g. `sim-64-secret-manager-auth`. The mapping is then visible in the path and
+  `find` locates a workspace from an issue key alone. A dir created before an issue
+  exists keeps its work-stream name.
 - **kebab-case** for `<repo|preset>`, `<session>` and every filename; lowercase `.md`.
 - `<repo|preset>` is the repo or jungle preset, `<session>` names the work stream —
   not the date.
@@ -440,6 +449,11 @@ If it exists and the issue is still open, **reattach to that issue** — a re-ru
 continues the session, it does not start a second one. Write the file as soon as
 the issue exists, before any sub-issue, so an interrupted run is resumable.
 
+⚠️ **Reattach, or hand off — never accumulate.** If the work is NOT what that issue
+describes, this workspace is the wrong one: route to `brain-work-on-new-issue`, which
+opens the next issue AND its own session dir. Adding a second issue to this pointer
+leaves a directory named for one goal serving another, and both sharing a log thread.
+
 ## Step 8 — Brainstorm, then write the plan
 
 Hand off to `superpowers:brainstorming` to settle intent and scope, then
@@ -553,6 +567,7 @@ second source of truth for what the plan says.
 | Looking in `outputs/projects/<name>/` for prior work | Migrated to `projects-<family>/`. Check `projects-work-on/<repo>/*/` first. |
 | Writing code-session files to bare `outputs/projects/` | That's the long-tail bucket. Code work goes to `projects-work-on/<repo|preset>/<session>/`. |
 | One workspace per repo | A repo has many sessions — `super/` holds `gmeet-to-md` **and** `super/`. |
+| Two issues in one workspace's pointer | One workspace, one issue. A new goal gets a new dir via `brain-work-on-new-issue`. |
 | `.linear.json` in the repo dir | Binds every session on that repo to one issue. It goes in the session dir. |
 | Naming the primary doc `README.md` | gbrain skips that basename silently. Five session docs are already invisible. |
 | Emitting `Idea:`/`Task:` titles | Those belong to other skills' conventions. Plain titles here. |

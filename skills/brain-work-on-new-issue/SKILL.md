@@ -173,15 +173,43 @@ The user asked for a new issue, so default to one. But check the discriminator
 first, because getting this backwards is the most common way this skill makes a
 board worse:
 
-| The work is… | Open |
-|---|---|
-| a distinct goal the current issue's title does not describe | a **new issue** in the project |
-| another phase of the goal the current issue already states | a **sub-issue** (`parentId` = current issue) |
-| one more turn of conversation on work already in flight | **nothing** — a reply in the log thread (Step 6) |
+| The work is… | Open | Workspace |
+|---|---|---|
+| a distinct goal the current issue's title does not describe | a **new issue** in the project | a **new session dir** (Step 2b) |
+| another phase of the goal the current issue already states | a **sub-issue** (`parentId` = current issue) | the **same** session dir |
+| one more turn of conversation on work already in flight | **nothing** — a reply in the log thread (Step 6) | the same session dir |
+
+**One issue, one workspace.** A new goal gets both or neither. Sub-issues are phases
+of a goal that already has a workspace and a plan, so they stay in it — splitting a
+phase off would separate it from the plan it came from.
 
 A session is dozens of conversational turns. Issue-per-request makes the board
 untriageable and distorts every count that reads it, so the bar for a new issue is
 a **new goal**, not a new instruction.
+
+### 2b — The new session dir
+
+Create it under the same scope as the workspace you came from:
+
+```
+outputs/projects-work-on/<repo|preset>/<issue-key>-<slug>/
+```
+
+**Name it after the issue.** `sim-64-secret-manager-auth`, not `secret-manager-auth`.
+The mapping is then visible in the path, `find` locates a workspace from an issue key
+alone, and nobody has to open a JSON file to learn which issue a directory serves.
+Lowercase the key. Keep the slug short — 3 or 4 words from the title, kebab-case.
+
+⚠️ **Do not reuse the workspace you recovered in Step 0.** That directory is named
+for a goal this work is not part of, and its `.linear.json` already points at a
+different issue with its own log thread. Measured 2026-08-29: SIM-62's workspace
+`brain-clone-rename/` was reused for SIM-64, so a directory named for a rename
+pointed at an unrelated auth change, and BOTH issues carried SIM-62's `logThreadId`
+— every SIM-64 request would have been logged onto SIM-62.
+
+Create the directory and its `.linear.json` (Step 5) as soon as the issue exists.
+Everything else in the layout — the notes doc, `HANDOFF.md`, `superpowers-artifacts/`
+— appears when the work needs it, per `brain-work-on` Step 4b.
 
 ### Duplicate guard
 
@@ -253,57 +281,50 @@ direction only: plan → Linear. Reading state back out of Linear and into the p
 gives two sources of truth, and they diverge on the first update that lands in only
 one of them.
 
-## Step 5 — Update `.linear.json` by merging, never rewriting
+## Step 5 — Write `.linear.json` in the NEW workspace
 
 Write the file the moment the issue exists, before any sub-issue, so an interrupted
-run is resumable. It goes in the **session workspace**, beside `.jungle-vm.json`
-when there is one.
+run is resumable. It goes in the new session dir from Step 2b, beside
+`.jungle-vm.json` when there is one.
+
+**One workspace, one issue.** The pointer describes this issue and no other.
 
 ```json
 {
-  "repo": "api-partner",
-  "scope": "api-partner",
-  "session": "agenttest",
-  "team": "STM",
-  "linearProject": "Cashew Cost Approval",
-  "issue": "STM-418",
-  "issueUrl": "https://linear.app/weroad/issue/STM-418/...",
-  "planFile": "outputs/projects-work-on/api-partner/agenttest/superpowers-artifacts/plans/2026-08-29-agenttest.md",
-  "logThreadId": "<comment id on STM-418>",
-  "issues": [
-    {"issue": "STM-412", "url": "…", "title": "…", "opened": "2026-08-21", "logThreadId": "…"},
-    {"issue": "STM-418", "url": "…", "title": "…", "opened": "2026-08-29", "logThreadId": "…"}
-  ]
+  "repo": "super",
+  "scope": "super",
+  "session": "sim-64-secret-manager-auth",
+  "team": "SIM",
+  "linearProject": "Super",
+  "issue": "SIM-64",
+  "issueUrl": "https://linear.app/weroad/issue/SIM-64",
+  "planFile": "outputs/projects-work-on/super/sim-64-secret-manager-auth/superpowers-artifacts/plans/2026-08-29-secret-manager-auth.md",
+  "logThreadId": "<comment id on SIM-64>",
+  "previousSession": "outputs/projects-work-on/super/brain-clone-rename"
 }
 ```
 
-- `issue` / `issueUrl` / `logThreadId` always describe the **current** issue.
-  `brain-work-on` reattaches by reading `issue`, so pointing it at the newest is
-  what makes a later re-run continue this work rather than the old work.
-- `issues[]` is append-only history, newest last. On a file that has no `issues[]`
-  yet, seed it from the flat fields **before** appending, or the previous issue is
-  lost from the record.
-- ⚠️ **Move `logThreadId` with `issue`.** Leaving the old thread id in place is
-  silent and costly: every later request in this session gets logged onto the
-  previous issue, so the new one looks abandoned and the old one looks endless.
-- ⚠️ **Merge into the existing JSON — never rewrite it from the template above.**
+- `issue`, `issueUrl` and `logThreadId` describe **this** workspace's one issue.
+  Because a new goal now gets a new directory, none of the three ever has to move,
+  and the drift they used to invite cannot happen.
+- `previousSession` points at the workspace this one split from, when it split from
+  one. It is what keeps a divided work stream traceable in both directions.
+- `scope` is the workspace's first path segment — the repo or preset the session
+  sits under. Record it when it differs from `repo`.
+- ⚠️ **A legacy `issues[]` array may be present.** Older pointers held several issues
+  in one workspace. **Read it, never extend it** — a workspace that needs a second
+  entry needs a second directory instead.
+- ⚠️ **Merge into an existing JSON — never rewrite it from the template above.**
   Real pointer files carry fields this skill does not know about (`branch`,
   `commit`, `pr`, `workspace`), and dropping them breaks whatever wrote them.
-- `scope` is the workspace's first path segment — the repo or preset the session
-  sits under. Record it when it differs from `repo`, so the workspace is findable
-  from the pointer alone.
 - ⚠️ **Never write into `.jungle-vm.json`.** The cloud script owns it and rewrites
   it wholesale on `session create` and `refresh-ip`. Anything added there is lost
   without warning. Tracking state belongs in `.linear.json`.
 
-One workspace carries one current issue. A repo carries several concurrently-tracked
-sessions (`super/` holds both `gmeet-to-md` and `super/`), so the pointer belongs to
-the **session** dir, never a shared parent.
-
-If the new work is genuinely a different **work stream** rather than the next step of
-this one, give it its own session workspace, with its own `.linear.json` — and say
-so, since that is a directory the user will look for later. Same stream, new issue →
-same workspace, merged pointer.
+A repo carries several concurrently-tracked sessions (`super/` holds `gmeet-to-md`,
+`brain-clone-rename` and more), so the pointer belongs to the **session** dir, never a
+shared parent. Say which directory you created — it is one the user will look for
+later.
 
 ## Step 6 — Keep the work tracked as it runs
 
@@ -314,7 +335,7 @@ This is the standing behaviour for the rest of the session, not a one-time step.
 | the user makes another request | a **reply in the log thread** on the current issue (`save_comment`, `parentId` = `logThreadId`) |
 | a phase completes | move that sub-issue's `state` forward |
 | all phases complete | move the issue's `state` forward, and say so in the thread |
-| the goal changes shape | back to Step 1 — a new goal is a new issue |
+| the goal changes shape | back to Step 1 — a new goal is a new issue AND a new workspace |
 
 Create the log thread with a root comment on the new issue as soon as it exists, and
 store its id as `logThreadId`. One thread per issue: the thread is the log, issues
@@ -376,8 +397,10 @@ tracking". A change to any of them has to land in all three.
 | Closing an issue whose branch is unpushed | On a cloud session the code exists only on the VM, and done invites `session rm`. |
 | Assuming the VM agent updated Linear | It runs detached with no brain. Read `session agent log` and write from the laptop. |
 | Rewriting `.linear.json` from the template | Real files carry `branch`, `commit`, `pr`, `workspace`. Merge. |
-| Leaving `logThreadId` pointing at the old issue | Every later request logs onto the previous issue, silently. |
-| Overwriting `issue` without seeding `issues[]` | The previous issue vanishes from the record. |
+| Reusing the previous issue's workspace for a new goal | The directory is named for the old goal and its pointer carries the old log thread. SIM-62's dir held SIM-64 on 2026-08-29. |
+| Naming the session dir after the goal, not the issue | `<issue-key>-<slug>` makes the mapping visible in the path and findable from the key. |
+| Extending `issues[]` with a second issue | One workspace, one issue. A second entry means a second directory. |
+| Splitting a sub-issue into its own workspace | Sub-issues are phases of one goal and share its plan file. |
 | A new issue for every request | Untriageable board, distorted counts. That is what the log thread is for. |
 | `parentId` = the previous issue | Makes a sibling goal into a child of a scope that never covered it. |
 | Inventing phases to fill sub-issues | Empty sub-issues are noise. No clear phases → brainstorm and plan first. |

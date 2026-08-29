@@ -308,6 +308,23 @@ thread as the request log.
 5. Sync one direction only: the plan file to Linear.
 6. Read `.linear.json` first and reattach. Never create a second issue on a re-run.
 7. Record the VM name, the zone, the golden image version and the branch.
+8. **One workspace, one issue.** A session dir tracks exactly one issue, and its
+   sub-issues stay in that dir. A new GOAL gets a new dir, created by
+   `brain-work-on-new-issue`. Never add a second issue to an existing pointer.
+
+⚠️ **Here `<session>` is also the git branch AND part of the VM name**, which the
+local skills' `<session>` is not. So the issue-derived directory name
+(`<issue-key>-<slug>`) does NOT automatically become the session argument:
+
+1. `instance_name` builds `jungle-<repo>-<session>` and truncates at 63 characters.
+   A long issue slug loses its tail, and two issues sharing a prefix then collide on
+   one VM name.
+2. The branch is named `$session`, so an issue-derived session yields an
+   issue-derived branch — which matches Linear's own `gitBranchName` convention and
+   is a real benefit.
+
+Choose the session name for the VM and the branch. Record the issue in
+`.linear.json`, and let the workspace directory carry the issue-derived name.
 
 ## Cost
 
