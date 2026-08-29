@@ -13,6 +13,20 @@ AGENT_TOKEN_SECRET="${AGENT_TOKEN_SECRET:-claude-agent-token}"
 #    token however the IAM is set, and the failure reads as a missing secret.
 #    Changing it afterwards needs the instance stopped.
 VM_SCOPES="${VM_SCOPES:-https://www.googleapis.com/auth/cloud-platform}"
+# ⚠️ THE SERVICE ACCOUNT IS FIXED AT INSTANCE CREATION, exactly like the scopes above.
+#    A VM created without this keeps the DEFAULT COMPUTE account, which carries
+#    roles/editor on the whole project — a throwaway dev box able to delete other
+#    people's instances. Changing it afterwards needs the instance stopped.
+#
+#    claude-cloud-vm@ already existed for this and nothing used it. It holds
+#    secretmanager.secretAccessor and artifactregistry.reader, and NOT roles/editor.
+#    Measured 2026-08-29. See SIM-67.
+#
+#    ⚠️ Its secretAccessor is PROJECT-level, so it can read every secret. That is the
+#    starting point, not the end state — SIM-68 moves to one secret per key with
+#    per-secret bindings.
+VM_SERVICE_ACCOUNT="${VM_SERVICE_ACCOUNT:-claude-cloud-vm@weroad-test-simon.iam.gserviceaccount.com}"
+
 NODE_VERSION="20.19.0"
 STARTUP_MARKER="/var/lib/brain-clone-in-gcp/startup.done"
 
@@ -564,6 +578,7 @@ CREATE_ARGS=(
   --image-project="$DEFAULT_IMAGE_PROJECT"
   --metadata-from-file="startup-script=$STARTUP_SCRIPT"
   --scopes="$VM_SCOPES"
+  --service-account="$VM_SERVICE_ACCOUNT"
   --tags="xrdp"
 )
 

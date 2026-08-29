@@ -37,6 +37,19 @@ LINEAR_EMAIL_SECRET="${LINEAR_EMAIL_SECRET:-wr-linear-user-email}"
 #    include Secret Manager, so a VM created without this cannot fetch the agent
 #    token however the IAM is set. Changing it later needs the instance STOPPED.
 VM_SCOPES="${VM_SCOPES:-https://www.googleapis.com/auth/cloud-platform}"
+# ⚠️ THE SERVICE ACCOUNT IS FIXED AT INSTANCE CREATION, exactly like the scopes above.
+#    A VM created without this keeps the DEFAULT COMPUTE account, which carries
+#    roles/editor on the whole project — a throwaway dev box able to delete other
+#    people's instances. Changing it afterwards needs the instance stopped.
+#
+#    claude-cloud-vm@ already existed for this and nothing used it. It holds
+#    secretmanager.secretAccessor and artifactregistry.reader, and NOT roles/editor.
+#    Measured 2026-08-29. See SIM-67.
+#
+#    ⚠️ Its secretAccessor is PROJECT-level, so it can read every secret. That is the
+#    starting point, not the end state — SIM-68 moves to one secret per key with
+#    per-secret bindings.
+VM_SERVICE_ACCOUNT="${VM_SERVICE_ACCOUNT:-claude-cloud-vm@weroad-test-simon.iam.gserviceaccount.com}"
 
 DRY_RUN="${DRY_RUN:-}"
 REFRESH="${REFRESH:-}"
@@ -159,6 +172,7 @@ vm_create() {
       --zone="$ZONE" \
       --source-machine-image="$from_image" \
       --scopes="$VM_SCOPES" \
+      --service-account="$VM_SERVICE_ACCOUNT" \
       --tags="$NETWORK_TAG" \
       || die "failed to create '$name' from image '$from_image'"
   else
@@ -170,6 +184,7 @@ vm_create() {
       --image-family="$DEFAULT_IMAGE_FAMILY" \
       --image-project="$DEFAULT_IMAGE_PROJECT" \
       --scopes="$VM_SCOPES" \
+      --service-account="$VM_SERVICE_ACCOUNT" \
       --tags="$NETWORK_TAG" \
       || die "failed to create instance '$name'"
   fi
