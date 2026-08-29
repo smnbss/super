@@ -103,10 +103,24 @@ resolve_source_cidr() {
     printf '%s' "$SOURCE_IP"
     return 0
   fi
-  local ip
-  ip="$(detect_public_ip)" \
-    || die "cannot detect your public IPv4. Pass --source-ip <cidr>. Refusing to open the firewall to the world."
-  printf '%s/32' "$ip"
+  local ip existing
+  if ip="$(detect_public_ip)"; then
+    printf '%s/32' "$ip"
+    return 0
+  fi
+  # ⚠️ A TRANSIENT NETWORK BLIP IS NOT A REASON TO ABORT A BUILD. On 2026-08-29 a wifi
+  #    switch made all three IP services unreachable for a few seconds, and `golden build
+  #    --refresh` died — AFTER it had already deleted the golden instance, destroying 36
+  #    restored databases for nothing. If the firewall rule already carries a /32, reuse
+  #    it: it is the last address that provably worked. Still no open-world fallback.
+  existing="$(gcloud --project="$PROJECT_ID" compute firewall-rules describe "$FIREWALL_RULE" \
+    --format='value(sourceRanges.list())' 2>/dev/null | tr -d '[:space:]')"
+  if [[ "$existing" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]]; then
+    log "Cannot detect your public IPv4. Reusing the firewall's current $existing."
+    printf '%s' "$existing"
+    return 0
+  fi
+  die "cannot detect your public IPv4. Pass --source-ip <cidr>. Refusing to open the firewall to the world."
 }
 
 ensure_firewall_rule() {
@@ -347,6 +361,13 @@ cmd_golden_build() {
   local stamp image
   stamp="$(date +%Y%m%d)"
   image="${GOLDEN_IMAGE_PREFIX}${stamp}"
+
+  # ⚠️ RESOLVE THE FIREWALL CIDR BEFORE DESTROYING ANYTHING. On 2026-08-29 --refresh
+  #    deleted the golden instance and THEN failed on an undetectable public IP during a
+  #    wifi switch, throwing away 36 restored databases for a transient blip. Anything
+  #    that can fail must fail before the delete.
+  local _cidr; _cidr="$(resolve_source_cidr)" || exit 1
+  ensure_firewall_rule "$_cidr"
 
   # ⚠️ --refresh was PARSED AND DISCARDED, so a rebuild collided with the jungle-golden
   #    instance left by the previous build and failed at the first step. See SIM-63.
