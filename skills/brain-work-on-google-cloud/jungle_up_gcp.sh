@@ -19,12 +19,27 @@ GOLDEN_IMAGE_PREFIX="jungle-golden-"
 FIREWALL_RULE="jungle-session-access"
 NETWORK_TAG="jungle-session"
 AGENT_TOKEN_SECRET="${AGENT_TOKEN_SECRET:-claude-agent-token}"
+# ⚠️ A VM AGENT HAS NO MCP SERVERS AT ALL, and this surprises everyone.
+#    claude.ai connectors — Linear included — are an ACCOUNT feature delivered by the
+#    Claude app. The `claude` CLI reads MCP servers from ~/.claude.json and .mcp.json
+#    only, so CLAUDE_CODE_OAUTH_TOKEN buys model access and NOTHING else. `claude mcp
+#    list` on a fresh session VM prints "No MCP servers configured". Measured 2026-08-29.
+#
+#    So a cloud agent cannot read its own Linear issue. The workaround is an API key
+#    from Secret Manager, exported as LINEAR_API_KEY, used against the GraphQL API at
+#    https://api.linear.app/graphql with the key as a BARE Authorization header.
+#
+# ⚠️ A LINEAR API KEY ACTS AS THE OPERATOR ACROSS THE WHOLE WORKSPACE, read AND write.
+#    It is not scoped to a team or a project. Treat it as the operator's identity.
+LINEAR_KEY_SECRET="${LINEAR_KEY_SECRET:-wr-linear-api-key}"
+LINEAR_EMAIL_SECRET="${LINEAR_EMAIL_SECRET:-wr-linear-user-email}"
 # ⚠️ Scopes are fixed at instance creation. The DEFAULT compute scopes do NOT
 #    include Secret Manager, so a VM created without this cannot fetch the agent
 #    token however the IAM is set. Changing it later needs the instance STOPPED.
 VM_SCOPES="${VM_SCOPES:-https://www.googleapis.com/auth/cloud-platform}"
 
 DRY_RUN="${DRY_RUN:-}"
+REFRESH="${REFRESH:-}"
 PROJECT_ID="${PROJECT_ID:-}"
 ZONE="${ZONE:-$DEFAULT_ZONE}"
 MACHINE_TYPE="${MACHINE_TYPE:-$DEFAULT_MACHINE_TYPE}"
@@ -36,6 +51,20 @@ die() { printf 'error: %s\n' "$1" >&2; exit "${2:-1}"; }
 run() {
   if [[ -n "$DRY_RUN" ]]; then
     printf 'DRY-RUN: %s\n' "$*"
+    return 0
+  fi
+  "$@"
+}
+
+# Like run(), but for a command whose FAILURE must stop the script. run() always
+# returns 0, so `run cmd || die` can never fire and silently reports success.
+#
+# ⚠️ Not hypothetical: `session create` used `run vm_ssh ... git switch -c`, so a
+#    branch that was never created still produced a state file claiming it, and an
+#    exit code of 0. See SIM-63.
+run_checked() {
+  if [[ -n "$DRY_RUN" ]]; then
+    printf 'DRY-RUN: %s\n' "$*" >&2
     return 0
   fi
   "$@"
@@ -237,6 +266,18 @@ inject_github_auth() {
   run vm_scp "$name" "$tmp" "~/.git-credentials"
   rm -f "$tmp"
   run vm_ssh "$name" "chmod 600 ~/.git-credentials && git config --global credential.helper store && git config --global url.'https://github.com/'.insteadOf 'git@github.com:'"
+
+  # ⚠️ Without an identity `git commit` fails on the VM, and an agent that hits this
+  #    INFERS one from the surrounding history rather than stopping — so commits land
+  #    under a guessed name. Seen on the HD-24 session, 2026-08-29.
+  local gname gmail
+  gname="$(git config --global user.name 2>/dev/null || true)"
+  gmail="$(git config --global user.email 2>/dev/null || true)"
+  if [[ -n "$gname" && -n "$gmail" ]]; then
+    run vm_ssh "$name" "git config --global user.name '$gname' && git config --global user.email '$gmail'"
+  else
+    log "WARNING: no global git identity on this laptop. Commits on the VM will fail."
+  fi
 }
 
 # ⚠️ Deletes files only. NEVER call `gcloud auth application-default revoke` here.
@@ -245,7 +286,11 @@ inject_github_auth() {
 #    tests/test_jungle_up_gcp.mjs fails the build if that call ever appears.
 scrub_credentials() {
   local name="$1"
-  run vm_ssh "$name" "rm -f ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json ~/.docker/config.json ~/.git-credentials ~/.gitconfig"
+  # ⚠️ ~/.claude-env WAS MISSING FROM THIS LIST, so jungle-golden-20260827 shipped a
+  #    live LiteLLM API token, and so did every VM built from it. A machine image is a
+  #    copyable artifact. ANY credential file this script writes must also be listed
+  #    here. See SIM-63.
+  run vm_ssh "$name" "rm -f ~/.config/gcloud/application_default_credentials.json ~/.npmrc ~/.composer/auth.json ~/.docker/config.json ~/.git-credentials ~/.gitconfig ~/.claude-env"
 }
 
 JUNGLE_REMOTE_DIR="${JUNGLE_REMOTE_DIR:-\$HOME/jungle}"
@@ -276,10 +321,40 @@ wait_for_databases() {
   die "Postgres never reported at least 80 databases"
 }
 
+# Reports what repo.init.sh actually produced. Deliberately NOT fatal: the image does not
+# need the repos — `docker compose config` parses cleanly with 57 of 60 build contexts
+# absent, because compose.yaml is generated up front. A partial clone is a slow first
+# session, never a broken one, and failing here would throw away a 2-hour run.
+golden_report_repo_count() {
+  local got want
+  if [[ -n "$DRY_RUN" ]]; then
+    printf 'DRY-RUN: report the golden repo count\n'
+    return 0
+  fi
+  got="$(vm_ssh "$GOLDEN_INSTANCE" "find $JUNGLE_REMOTE_DIR -mindepth 2 -maxdepth 2 -name .git | wc -l" 2>/dev/null | tr -d '[:space:]')"
+  # ⚠️ repos.sh lists weroad/starter TWICE. Unique-count, never line-count.
+  want="$(vm_ssh "$GOLDEN_INSTANCE" "grep -oE 'weroad/[a-zA-Z0-9._-]+\.git' $JUNGLE_REMOTE_DIR/bin/repos.sh | sort -u | wc -l" 2>/dev/null | tr -d '[:space:]')"
+  log "Golden image holds ${got:-?} of ${want:-?} declared repos"
+  if [[ "$got" =~ ^[0-9]+$ && "$want" =~ ^[0-9]+$ ]] && (( got < want )); then
+    log "NOTE: $(( want - got )) repos are absent. Sessions clone what they build from."
+  fi
+}
+
 cmd_golden_build() {
   local stamp image
   stamp="$(date +%Y%m%d)"
   image="${GOLDEN_IMAGE_PREFIX}${stamp}"
+
+  # ⚠️ --refresh was PARSED AND DISCARDED, so a rebuild collided with the jungle-golden
+  #    instance left by the previous build and failed at the first step. See SIM-63.
+  if gcloud --project="$PROJECT_ID" compute instances describe "$GOLDEN_INSTANCE" \
+       --zone="$ZONE" >/dev/null 2>&1; then
+    [[ -n "$REFRESH" ]] \
+      || die "instance '$GOLDEN_INSTANCE' already exists. Re-run with --refresh to replace it."
+    log "Deleting the previous golden instance"
+    run gcloud --project="$PROJECT_ID" compute instances delete "$GOLDEN_INSTANCE" \
+      --zone="$ZONE" --quiet
+  fi
 
   log "Creating the golden instance. This takes 1 to 2 hours."
   vm_create "$GOLDEN_INSTANCE"
@@ -295,7 +370,9 @@ cmd_golden_build() {
 
   log "Cloning the jungle and all 72 repos"
   run vm_ssh "$GOLDEN_INSTANCE" "git clone $JUNGLE_GIT_URL $JUNGLE_REMOTE_DIR"
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/repo.init.sh"
+  vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/repo.init.sh" \
+    || log "WARNING: repo.init.sh failed. Sessions will clone what they need."
+  golden_report_repo_count
   run vm_ssh "$GOLDEN_INSTANCE" "source /tmp/vm-bootstrap.sh && install_jungle_deps"
 
   # compose.merge.js resolves an extends: reference into every repo, including two
@@ -405,9 +482,21 @@ cmd_session_create() {
   run vm_wait_ssh "$name"
   inject_credentials "$name"
 
+  inject_agent_auth "$name" \
+    || die "no usable agent credential on '$name'. Fix the secret, then: session rm $session"
+  # Order matters: inject_agent_auth rewrites ~/.claude-env, this one appends to it.
+  inject_linear_auth "$name"
+
+  local services
+  services="$(ensure_session_repos "$name" "$repo")" \
+    || die "no compose service matches '$repo'. Check it against: docker compose -f compose.yaml config --services"
+
   log "Preparing the branch"
-  run vm_ssh "$name" "cd $JUNGLE_REMOTE_DIR/$repo && git pull --ff-only"
-  run vm_ssh "$name" "cd $JUNGLE_REMOTE_DIR/$repo && git switch -c $session"
+  run_checked vm_ssh "$name" "cd $JUNGLE_REMOTE_DIR/$repo && git switch -c $session" \
+    || die "cannot create branch '$session' in $JUNGLE_REMOTE_DIR/$repo on '$name'"
+
+  ship_context_pack "$name" "$repo"
+  stack_up "$name" "$repo" "$services"
 
   ip="$(vm_ip "$name" 2>/dev/null || echo '')"
   state_write "$repo" "$session" \
@@ -415,6 +504,15 @@ cmd_session_create() {
     "image=$image" "repo=$repo" "session=$session" "branch=$session" \
     "mount=$HOME/vm/$session"
   log "Session state written to $(state_path "$session" "$repo")"
+
+  # ⚠️ The state file must be written BEFORE this point: chrome_command reads the IP
+  #    back out of it.
+  local host; host="$(primary_host "$services")"
+  if [[ -z "$DRY_RUN" ]]; then
+    verify_render "$name" "$host"
+  fi
+  log "Open the stack with:"
+  chrome_command "$session" "$host"
 }
 
 # Fuse-T licence position, recorded because the two sources disagree:
@@ -442,6 +540,49 @@ Licence, before you install:
   "Swapping the mount for a sync".
 PREFLIGHT
   return 1
+}
+
+# ⚠️ stack_up and derive_services were defined and called by NOTHING, so `session create`
+#    finished with a VM that served nothing, while SKILL.md documented nine measured
+#    behaviours of a function no verb ran. See SIM-63.
+#
+#    `session create` now calls stack_up itself. This verb re-runs it — what you want
+#    after `session stop`, after a compose change, or when a container died.
+cmd_session_up() {
+  local session="$1" vm repo services
+  vm="$(state_read "$session" vm)" || die "no session '$session'. Run: session create"
+  repo="$(state_read "$session" repo)"
+  services="$(ensure_session_repos "$vm" "$repo")" || die "no compose service matches '$repo'"
+  stack_up "$vm" "$repo" "$services"
+  log "Stack up on '$vm':"
+  printf '%s\n' "$services" | sed 's/^/    /' >&2
+}
+
+# ⚠️ Databases were the one thing NOTHING refreshed. `golden build` restored them once, at
+#    image-build time, and `session create` never touched them — so a session VM served
+#    data frozen on the day the image was built, and the only cure was a 1-2 hour rebuild.
+#    The >7-day warning in cmd_session_create says exactly this. See SIM-63.
+#
+#    This restores ONLY the databases the session's own services use. A beye session needs
+#    api_beye: one database, not 84.
+cmd_session_refresh_db() {
+  local session="$1"; shift
+  local vm repo dbs
+  vm="$(state_read "$session" vm)" || die "no session '$session'. Run: session create"
+  repo="$(state_read "$session" repo)"
+
+  if [[ -n "$DRY_RUN" ]]; then
+    printf 'DRY-RUN: refresh databases for %s on %s\n' "$repo" "$vm"
+    return 0
+  fi
+
+  run vm_scp "$vm" "$SKILL_DIR/files/refresh-db.sh" "/tmp/refresh-db.sh" \
+    || die "cannot copy refresh-db.sh to '$vm'"
+  # Explicit database names, when given, skip derivation entirely.
+  dbs="$(vm_ssh "$vm" "bash /tmp/refresh-db.sh '$repo' $*")" \
+    || die "database refresh failed on '$vm'"
+  log "Refreshed on '$vm':"
+  printf '%s\n' "$dbs" | sed 's/^/    /' >&2
 }
 
 cmd_session_mount() {
@@ -474,19 +615,52 @@ cmd_session_unmount() {
 #    so `open -na` silently sends you to the previous session's VM and everything
 #    looks fine. Seen live 2026-08-27: a request meant for a session VM landed on
 #    the golden VM, and only the nginx access log revealed it.
+# The service a person opens: neither an API, nor an MCP, nor a php-fpm pool. For beye
+# that is beye.weroad.wr, for partner it is partner.weroad.wr.
+#
+# ⚠️ Falls back to the FIRST service rather than guessing a name. A wrong host here
+#    sends the operator to a stack that is not theirs.
+primary_host() {
+  local services="$1" svc
+  for svc in $services; do
+    case "$svc" in
+      laravel.*|api-*|nest-*|mcp-*) continue ;;
+      *) printf '%s' "$svc"; return 0 ;;
+    esac
+  done
+  printf '%s' "$(printf '%s\n' $services | head -1)"
+}
+
+# ⚠️ This hardcoded api-partner.weroad.wr, so every session opened the partner URL
+#    whatever repo it was for. See SIM-63.
 chrome_command() {
-  local session="$1" ip
+  local session="$1" host="$2" ip
   ip="$(state_read "$session" ip)" || die "no session '$session'"
-  printf 'pkill -f "user-data-dir=/tmp/chrome-%s" 2>/dev/null; sleep 1; open -na "Google Chrome" --args --user-data-dir=/tmp/chrome-%s --no-first-run --no-default-browser-check --host-resolver-rules="MAP *.weroad.wr %s" "http://api-partner.weroad.wr/"\n' \
-    "$session" "$session" "$ip"
+  printf 'pkill -f "user-data-dir=/tmp/chrome-%s" 2>/dev/null; sleep 1; open -na "Google Chrome" --args --user-data-dir=/tmp/chrome-%s --no-first-run --no-default-browser-check --host-resolver-rules="MAP *.weroad.wr %s" "http://%s/"\n' \
+    "$session" "$session" "$ip" "$host"
 }
 
 # One logical service is often several compose entries. A Laravel API is BOTH
 # api-x.weroad.wr (nginx) and its php-fpm sibling. nginx alone returns 502.
 # Derive the set from compose. Never guess it.
-derive_services() {
+# ⚠️ derive_services lived here and was called by NOTHING. Its grep is now the first
+#    step of files/ensure-repos.sh, which runs ON the VM so that deriving the services
+#    and cloning what they build from cannot drift apart. See SIM-63.
+#
+# Clone or refresh every repo the matching services build from, then print the service
+# names on STDOUT. Progress goes to stderr on both sides.
+ensure_session_repos() {
   local vm="$1" repo="$2"
-  vm_ssh "$vm" "cd $JUNGLE_REMOTE_DIR && docker compose -f compose.yaml config --services | grep -- '$repo'"
+  # ⚠️ Nothing may reach STDOUT here except the service names — the caller captures
+  #    this with $(...). run() prints its DRY-RUN transcript on stdout, so the dry-run
+  #    branch comes FIRST and the scp never runs under it.
+  if [[ -n "$DRY_RUN" ]]; then
+    printf 'DRY-RUN: ensure repos and derive services for %s\n' "$repo" >&2
+    return 0
+  fi
+  vm_scp "$vm" "$SKILL_DIR/files/ensure-repos.sh" "/tmp/ensure-repos.sh" >&2 \
+    || die "cannot copy ensure-repos.sh to '$vm'"
+  vm_ssh "$vm" "bash /tmp/ensure-repos.sh '$repo'"
 }
 
 # GCE is expected to carry IPv6, so DVO-419 probably does not apply here. Probe.
@@ -579,12 +753,22 @@ verify_render() {
   local vm="$1" host="$2" out code bytes
   out="$(vm_ssh "$vm" "curl -s -o /tmp/render.html -w '%{http_code} %{size_download}' -H 'Host: $host' http://127.0.0.1/")"
   code="${out%% *}"; bytes="${out##* }"
-  [[ "$code" == "200" ]] || die "$host returned HTTP $code"
-  if [[ "$bytes" =~ ^[0-9]+$ ]] && (( bytes > 2000 )); then
-    log "$host rendered ($bytes bytes)"
-    return 0
-  fi
-  die "$host returned 200 with an empty shell ($bytes bytes). The page did not render."
+  # ⚠️ A 3xx IS A HEALTHY ANSWER, and treating it as failure rejects every authenticated
+  #    stack. beye redirects to /auth/login and on to staging-auth.weroad.io; partner
+  #    behaves the same. Measured 2026-08-29.
+  case "$code" in
+    3??)
+      log "$host answered HTTP $code — a redirect, normally the login hand-off. Reachable."
+      return 0 ;;
+    200)
+      if [[ "$bytes" =~ ^[0-9]+$ ]] && (( bytes > 2000 )); then
+        log "$host rendered ($bytes bytes)"
+        return 0
+      fi
+      die "$host returned 200 with an empty shell ($bytes bytes). The page did not render." ;;
+    *)
+      die "$host returned HTTP ${code:-no response}" ;;
+  esac
 }
 
 # ── The detached agent ──────────────────────────────────────────────────────
@@ -619,6 +803,14 @@ inject_agent_auth() {
   local name="$1" tmp
   local oauth="${CLAUDE_CODE_OAUTH_TOKEN:-}"
   local apikey="${ANTHROPIC_API_KEY:-}"
+
+  # ⚠️ PURGE FIRST. Absent, this broke a live run on 2026-08-29: the golden image
+  #    bakes a ~/.claude-env pointing at the REMOVED LiteLLM proxy route. Every write
+  #    below uses `>`, but a failed fetch writes nothing, so the stale file survived
+  #    and the agent used it, failing with "API returned an empty or malformed
+  #    response (HTTP 200)". Deleting first means a failure yields NO credential
+  #    rather than a wrong one.
+  run vm_ssh "$name" "rm -f ~/.claude-env"
 
   if [[ -n "$oauth" || -n "$apikey" ]]; then
     tmp="$(mktemp)"; chmod 600 "$tmp"
@@ -669,10 +861,42 @@ fetch_agent_token_from_secret_manager() {
     log "the token. Run it, read the token it prints, then:"
     log "  read -rs TOK && printf '%s' \"\$TOK\" | \\"
     log "    gcloud secrets versions add $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID"
-    return 0
+    return 1
   fi
   rm -f /tmp/.agent-token-probe
   agent_token_help
+  return 1
+}
+
+# Gives the VM agent Linear access, since it has no MCP servers. See LINEAR_KEY_SECRET.
+#
+# ⚠️ MUST RUN AFTER inject_agent_auth. That function DELETES ~/.claude-env and rewrites
+#    it with `>`. This one appends, so the order is load-bearing.
+#
+# Non-fatal by design: plenty of sessions never touch Linear.
+inject_linear_auth() {
+  local name="$1"
+  if [[ -n "$DRY_RUN" ]]; then
+    printf 'DRY-RUN: fetch %s into ~/.claude-env on %s\n' "$LINEAR_KEY_SECRET" "$name" >&2
+    return 0
+  fi
+  vm_ssh "$name" "set -e
+    key=\$(gcloud secrets versions access latest --secret='$LINEAR_KEY_SECRET' --project='$PROJECT_ID' 2>/dev/null | tr -d '\\r\\n')
+    mail=\$(gcloud secrets versions access latest --secret='$LINEAR_EMAIL_SECRET' --project='$PROJECT_ID' 2>/dev/null | tr -d '\\r\\n')
+    if [ -z \"\$key\" ]; then echo LINEAR_KEY_MISSING; exit 0; fi
+    umask 077
+    printf 'export LINEAR_API_KEY=%s\\n' \"\$key\" >> ~/.claude-env
+    [ -n \"\$mail\" ] && printf 'export LINEAR_USER_EMAIL=%s\\n' \"\$mail\" >> ~/.claude-env
+    echo LINEAR_KEY_OK" > /tmp/.linear-probe 2>&1
+  if grep -q LINEAR_KEY_OK /tmp/.linear-probe 2>/dev/null; then
+    rm -f /tmp/.linear-probe
+    log "Linear API key fetched from Secret Manager on the VM"
+    return 0
+  fi
+  rm -f /tmp/.linear-probe
+  log "NOTE: no Linear key on '$name'. A cloud agent cannot read its own issue."
+  log "Grant the VM service account secretAccessor on '$LINEAR_KEY_SECRET', or pass the"
+  log "issue text to the agent as a file instead."
   return 0
 }
 
@@ -844,7 +1068,7 @@ parse_common_flags() {
       --machine-type)  MACHINE_TYPE="${2:-}"; shift 2 ;;
       --disk-size-gb)  DISK_SIZE_GB="${2:-}"; shift 2 ;;
       --source-ip)     SOURCE_IP="${2:-}"; shift 2 ;;
-      --refresh)       shift ;;
+      --refresh)       REFRESH=1; shift ;;
       *)               die "unknown option: $1" 2 ;;
     esac
   done
@@ -858,6 +1082,8 @@ jungle_up_gcp.sh — per-session GCP VMs running a WeRoad jungle stack
 
   golden build [--refresh]              build or rebuild the golden machine image
   session create <repo|preset> <session>  clone the image, start one service stack
+  session up <session>                  (re)start that session's stack
+  session refresh-db <session> [db...]  re-download and restore only this session's dbs
   session list                          show sessions, uptime and disk cost
   session stop <session>                stop the VM, keep the disk
   session rm <session>                  unmount, verify branch pushed, delete
@@ -894,6 +1120,16 @@ main() {
         unmount)
           local u="${1:-}"; [[ -n "$u" ]] || die "usage: session unmount <session>" 2
           shift; parse_common_flags "$@"; cmd_session_unmount "$u" ;;
+        up)
+          local upn="${1:-}"; [[ -n "$upn" ]] || die "usage: session up <session>" 2
+          shift; parse_common_flags "$@"; cmd_session_up "$upn" ;;
+        refresh-db)
+          local rdn="${1:-}"; [[ -n "$rdn" ]] || die "usage: session refresh-db <session> [db...]" 2
+          shift
+          # Positional database names come before any flag; split on the first dash.
+          local rddbs=()
+          while [[ $# -gt 0 && "$1" != --* ]]; do rddbs+=("$1"); shift; done
+          parse_common_flags "$@"; cmd_session_refresh_db "$rdn" "${rddbs[@]}" ;;
         list)    parse_common_flags "$@"; cmd_session_list ;;
         stop)
           local st="${1:-}"; [[ -n "$st" ]] || die "usage: session stop <session>" 2

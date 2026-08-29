@@ -43,6 +43,18 @@ install_base() {
   sudo apt-get install -y -qq nodejs
   sudo corepack enable
 
+  # ⚠️ ASSERT THE MAJOR VERSION. Ubuntu 24.04 ships nodejs 20, so if the nodesource step
+  #    above fails the apt install silently succeeds with the WRONG Node, and the build
+  #    captures an image nobody questions until pnpm breaks inside it.
+  #    jungle-golden-20260827 shipped Node 20 exactly this way. Measured 2026-08-29.
+  node_major="$(node -v 2>/dev/null | sed -e 's/^v//' -e 's/\..*//')"
+  if [ "${node_major:-0}" -lt 22 ]; then
+    echo "FATAL: node is $(node -v 2>/dev/null || echo absent), expected 22 or newer." >&2
+    echo "The nodesource repository did not take. Check /etc/apt/sources.list.d/nodesource.sources." >&2
+    exit 1
+  fi
+  echo "    node $(node -v)"
+
   echo "==> Google Cloud CLI"
   if [ ! -d /opt/google-cloud-sdk ]; then
     curl -fsSL -o /tmp/gcloud.tar.gz \

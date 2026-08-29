@@ -31,6 +31,8 @@ while the operator's laptop is closed.
 ```
 jungle_up_gcp.sh golden build [--refresh]
 jungle_up_gcp.sh session create <repo|preset> <session>
+jungle_up_gcp.sh session up <session>
+jungle_up_gcp.sh session refresh-db <session> [db...]
 jungle_up_gcp.sh session agent start <session> "<prompt>"
 jungle_up_gcp.sh session agent log <session>
 jungle_up_gcp.sh session agent attach <session>
@@ -76,6 +78,76 @@ Do not re-derive these. Each cost a failed run.
 9. **A partner stack is FOUR compose services**, not one:
    `laravel.api-partner.weroad.wr`, `api-partner.weroad.wr`,
    `nest-api-partner.weroad.wr`, `partner.weroad.wr`. Derive the set. Never guess.
+
+## Measured behaviour — verified 2026-08-29 on a real VM
+
+Found while starting a beye session. Tracked as SIM-63.
+
+10. **The golden image does not need the repos.** `docker compose -f compose.yaml config`
+    parses cleanly with 57 of 60 build contexts absent, because compose.yaml is generated
+    up front and lists every service whatever is on disk. So a partial image is a slow
+    first session, never a broken one. `files/ensure-repos.sh` clones what a session
+    actually builds from, on the VM.
+11. **A 3xx is a healthy answer.** beye redirects to `/auth/login` and on to
+    `staging-auth.weroad.io`; partner behaves the same. Only a 4xx, a 5xx, no response,
+    or a 200 with an empty body is a failure.
+12. **beye authenticates against staging-auth.weroad.io, not the local FusionAuth.** Do
+    not start `fusionauth.weroad.wr` for it. The callback is
+    `http://beye.weroad.wr/auth/callback`, so the Chrome host-resolver mapping is what
+    makes the login return.
+13. **The operator ADC must keep being copied, and a registry audit does not prove
+    otherwise.** Dropping it was tried on 2026-08-29 and reverted the same day. Nothing
+    pulls from a private registry — true, and beside the point. **Jungle compose
+    bind-mounts `~/.config/gcloud` into the containers and services authenticate to
+    Google APIs with it at RUNTIME.** `api-beye` reads and writes the bucket
+    `weroad-eu-api-beye-development` that way, and without the ADC it returns 403 on
+    dashboard content while the rest of beye keeps working. The real fix is IAM on the VM
+    service account, in a WeRoad project — not a change to this script. `SKIP_ADC=1` opts
+    out for a stack that provably needs no Google API at runtime.
+14. **`run` always returns 0, so `run cmd || die` can never fire.** Use `run_checked` for
+    any command whose failure must stop the script. `session create` reported success for
+    a branch it never created because of this.
+15. **Databases are the one thing nothing refreshed.** `golden build` restores them once,
+    at image-build time; `session create` never touched them. `session refresh-db`
+    restores only the session's own databases — one, not 84.
+16. **The service-to-database mapping is NOT in the resolved compose config.** Only 5 of
+    ~88 services expose any DB variable through `docker compose config`, because the
+    jungle declares env with the long-form `env_file: [{path: …}]`, which compose does
+    not inline. Read the name from each repo's own deploy env file, and note that BOTH
+    spellings are needed: `DB_NAME` (NestJS, `beye` → `api_beye`) and `DB_DATABASE`
+    (Laravel, `api-partner` → `api_partner`).
+
+⚠️ **Run the guard tests after ANY edit to the script.** No network, no VM:
+
+```
+node tests/test_jungle_up_gcp.mjs
+```
+
+Its dead-code check exists because five functions in this file were defined and called by
+nothing, while SKILL.md documented all five as live.
+
+## A VM agent has NO MCP servers — give it a Linear API key instead
+
+⚠️ Measured 2026-08-29: `claude mcp list` on a fresh session VM prints *"No MCP servers
+configured"*. claude.ai connectors are an **account** feature delivered by the Claude app;
+the `claude` CLI reads MCP servers from `~/.claude.json` and `.mcp.json` only, and
+`CLAUDE_CODE_OAUTH_TOKEN` carries no connector configuration. Being "logged in" changes
+nothing.
+
+The symptom is not an error: a careful agent stops and asks for the issue text, which
+reads as obtuseness. It cannot see Linear at all.
+
+`session create` now fetches `wr-linear-api-key` from Secret Manager and appends
+`LINEAR_API_KEY` to `~/.claude-env`. The key goes in the header **bare** — no `Bearer`.
+
+⚠️ **A Linear API key acts as the operator across the WHOLE workspace, read AND write.**
+
+⚠️ `inject_linear_auth` MUST run AFTER `inject_agent_auth`, which deletes and rewrites
+`~/.claude-env`. The order is load-bearing.
+
+⚠️ The credential-free fallback still works: scp the issue body to the VM and say in the
+prompt that the file is **authoritative and complete** — without that wording an agent
+stops to ask whether it is missing context.
 
 ## The first argument is a repo OR a preset
 
@@ -182,6 +254,15 @@ with its own service account.
    ```
 
 ### Resolution order
+
+⚠️ **Any credential file this script writes must also be listed in `scrub_credentials`.**
+`~/.claude-env` was not, so `jungle-golden-20260827` shipped a live LiteLLM API token and
+so did every VM built from it. A machine image is a copyable artifact.
+
+⚠️ **`session create` deletes `~/.claude-env` before writing one.** Every write uses `>`,
+but a failed fetch writes nothing, so a stale credential would otherwise survive — which
+is exactly how a VM ended up using the removed LiteLLM route.
+
 
 1. `CLAUDE_CODE_OAUTH_TOKEN` in the environment, for a one-off run.
 2. `ANTHROPIC_API_KEY` in the environment, for API-key users.
