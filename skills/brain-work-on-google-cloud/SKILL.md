@@ -135,7 +135,7 @@ nothing, while SKILL.md documented all five as live.
 ## A VM agent has NO MCP servers — give it a Linear API key instead
 
 ⚠️ Measured 2026-08-29: `claude mcp list` on a fresh session VM prints *"No MCP servers
-configured"*. claude.ai connectors are an **account** feature delivered by the Claude app;
+configured"*. claude.ai connectors are an **account** feature delivered by the Claude app.
 the `claude` CLI reads MCP servers from `~/.claude.json` and `.mcp.json` only, and
 `CLAUDE_CODE_OAUTH_TOKEN` carries no connector configuration. Being "logged in" changes
 nothing.

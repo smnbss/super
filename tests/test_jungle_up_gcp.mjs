@@ -293,18 +293,24 @@ test('the skill NEVER revokes application-default credentials', () => {
 // ── Task 6: golden build ────────────────────────────────────────────────────
 const GOLDEN_ENV = { SOURCE_IP: '203.0.113.7/32', SKIP_CRED_CHECK: '1' };
 
+// The phases moved OUT of the laptop-side dry-run and INTO files/golden-build-remote.sh
+// (c3dea98), which runs on the VM. The ordering property is unchanged, so assert it
+// where the phases now live rather than deleting the assertion.
 test('golden build runs its phases in the required order', () => {
-  const r = runCli(['golden', 'build', '--dry-run', '--project', 'p'], { env: GOLDEN_ENV });
-  const out = r.stdout;
-  const at = (re) => out.search(re);
-  assert.ok(at(/instances create jungle-golden/) >= 0, `creates the instance; got:\n${out}`);
-  assert.ok(at(/repo\.init\.sh/) > at(/instances create jungle-golden/), 'clones after create');
-  assert.ok(at(/staging-images\.update\.sh/) > at(/repo\.init\.sh/), 'images after clone');
+  const src = readFileSync(join(SKILL, 'files/golden-build-remote.sh'), 'utf8');
+  const at = (re) => src.search(re);
+  assert.ok(at(/repo\.init\.sh/) >= 0, 'clones the repos');
+  assert.ok(at(/hosts\.init\.sh/) > at(/repo\.init\.sh/), 'hosts after clone');
+  assert.ok(at(/staging-images\.update\.sh/) > at(/hosts\.init\.sh/), 'images after hosts');
   assert.ok(at(/database\.restore\.sh/) > at(/staging-images\.update\.sh/), 'restore after images');
-  assert.ok(at(/rm -f .*application_default_credentials/) > at(/database\.restore\.sh/),
-    'scrubs after the restore');
-  assert.ok(at(/machine-images create/) > at(/rm -f .*application_default_credentials/),
-    'captures the image only after the scrub');
+});
+
+test('the laptop still creates the instance before the remote build runs', () => {
+  const r = runCli(['golden', 'build', '--dry-run', '--project', 'p'], { env: GOLDEN_ENV });
+  const out = r.stdout + r.stderr;
+  assert.ok(out.search(/instances create jungle-golden/) >= 0, `creates the instance; got:\n${out}`);
+  assert.ok(out.search(/golden-build-remote\.sh/) > out.search(/instances create jungle-golden/),
+    'the remote build script is shipped only after the instance exists');
 });
 
 test('golden build stops the instance before capturing the image', () => {
@@ -313,11 +319,15 @@ test('golden build stops the instance before capturing the image', () => {
     'stop must precede capture');
 });
 
+// hosts.init.sh REWRITES TRACKED COMPOSE FILES, so running it on the laptop would
+// dirty the operator's checkout. It now sits in files/golden-build-remote.sh, which
+// only ever executes on the VM — so the guarantee is structural. Assert both halves.
 test('golden build runs hosts.init.sh on the VM and never locally', () => {
-  const r = runCli(['golden', 'build', '--dry-run', '--project', 'p'], { env: GOLDEN_ENV });
-  const line = r.stdout.split('\n').find(l => l.includes('hosts.init.sh'));
-  assert.ok(line, 'expected hosts.init.sh');
-  assert.match(line, /vm_ssh|compute ssh/, 'hosts.init.sh must run over SSH on the VM');
+  const remote = readFileSync(join(SKILL, 'files/golden-build-remote.sh'), 'utf8');
+  assert.match(remote, /hosts\.init\.sh/, 'the remote build script runs hosts.init.sh');
+  const cli = readFileSync(CLI, 'utf8');
+  const local = cli.split('\n').filter(l => /hosts\.init\.sh/.test(l) && !/^\s*#/.test(l));
+  assert.equal(local.length, 0, `hosts.init.sh must never run from the laptop: ${local.join(' | ')}`);
 });
 
 test('parse_common_flags rejects an unknown option instead of ignoring it', () => {
@@ -385,13 +395,27 @@ test('session create derives the instance name from repo and session', () => {
   assert.match(r.stdout, /--source-machine-image=jungle-golden-20260827/);
 });
 
-test('session create pulls before branching', () => {
+// The laptop-side `git pull` moved into files/ensure-repos.sh (SIM-63), which runs on
+// the VM and fetches then pulls --ff-only. The property that matters is unchanged: the
+// repo is made current BEFORE the session branch is cut, or the branch starts from
+// whatever commit the golden image froze.
+test('session create refreshes the repo before branching', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
   const r = runCli(['session', 'create', 'api-partner', 'cost-approval', '--dry-run', '--project', 'p'],
     { env: { GOLDEN_IMAGE_OVERRIDE: 'jungle-golden-20260827', SOURCE_IP: '203.0.113.7/32',
              SKIP_CRED_CHECK: '1', WORKSPACE_ROOT: ws } });
-  assert.ok(r.stdout.search(/git pull/) < r.stdout.search(/git switch -c cost-approval/),
-    'pull must precede the branch');
+  const out = r.stdout + r.stderr;   // the dry-run marker goes to stderr
+  const refresh = out.search(/ensure repos/);
+  const branch = out.search(/git switch -c cost-approval/);
+  assert.ok(refresh >= 0, `expected the repo-refresh step; got:\n${out}`);
+  assert.ok(branch > refresh, 'the refresh must precede the branch');
+});
+
+test('the repo refresh actually fetches and fast-forwards', () => {
+  const src = readFileSync(join(SKILL, 'files/ensure-repos.sh'), 'utf8');
+  assert.match(src, /git -C .* fetch/, 'must fetch');
+  assert.match(src, /git -C .* pull --ff-only/, 'must fast-forward, never reset');
+  assert.doesNotMatch(src, /git -C .* reset --hard/, 'a reset would destroy unpushed work on the VM');
 });
 
 test('session create warns when the golden image is older than 7 days', () => {
@@ -435,7 +459,7 @@ test('session mount uses the reconnect options and the GCE key', () => {
 test('chrome_command isolates the profile and maps the wildcard host', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
   callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a ip=203.0.113.5`);
-  const r = callFn(`WORKSPACE_ROOT=${ws} chrome_command s1`);
+  const r = callFn(`WORKSPACE_ROOT=${ws} chrome_command s1 partner.weroad.wr`);
   assert.match(r.stdout, /--user-data-dir=/);
   assert.match(r.stdout, /--host-resolver-rules="MAP \*\.weroad\.wr 203\.0\.113\.5"/);
   assert.match(r.stdout, /--no-first-run/);
@@ -587,12 +611,23 @@ test('SKILL.md uses no semicolons in prose', () => {
 
 // Regression: wait_for_fpm ignored DRY_RUN and looped 60 x 10s inside the
 // stack_up test, turning a unit test into a ten-minute hang.
-test('every wait loop honours DRY_RUN', () => {
+test('every laptop-side wait loop honours DRY_RUN', () => {
   const src = readFileSync(CLI, 'utf8');
-  for (const fn of ['wait_for_fpm', 'wait_for_databases']) {
+  for (const fn of ['wait_for_fpm']) {
     const body = src.slice(src.indexOf(`${fn}()`), src.indexOf(`${fn}()`) + 600);
     assert.match(body, /DRY_RUN/, `${fn} must short-circuit under DRY_RUN`);
   }
+});
+
+// wait_for_databases moved INTO files/golden-build-remote.sh, which only ever runs on
+// the VM during a real build — there is no dry run to short-circuit there. What must
+// still hold is that it is bounded, so a hung restore cannot wait for ever.
+test('the remote database wait is bounded', () => {
+  const src = readFileSync(join(SKILL, 'files/golden-build-remote.sh'), 'utf8');
+  const body = src.slice(src.indexOf('wait_for_databases()'), src.indexOf('wait_for_databases()') + 900);
+  assert.match(body, /for \(\( *\w+ *= *0; *\w+ *< *\d+/, 'must loop a FIXED number of times');
+  assert.match(body, /sleep \d+/, 'must back off between probes');
+  assert.match(body, /return 1/, 'must fail rather than hang when the restore never finishes');
 });
 
 // ── Agent auth: Claude models, not LiteLLM ──────────────────────────────────

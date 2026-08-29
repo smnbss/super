@@ -732,7 +732,11 @@ primary_host() {
 # ⚠️ This hardcoded api-partner.weroad.wr, so every session opened the partner URL
 #    whatever repo it was for. See SIM-63.
 chrome_command() {
-  local session="$1" host="$2" ip
+  # ⚠️ `host` was added when this function was wired up. Under `set -u` a missing $2
+  #    aborted with a bare "unbound variable" and an EMPTY command, which reads as a
+  #    broken session rather than a miscall.
+  local session="${1:?usage: chrome_command <session> <host>}"
+  local host="${2:?usage: chrome_command <session> <host>}" ip
   ip="$(state_read "$session" ip)" || die "no session '$session'"
   printf 'pkill -f "user-data-dir=/tmp/chrome-%s" 2>/dev/null; sleep 1; open -na "Google Chrome" --args --user-data-dir=/tmp/chrome-%s --no-first-run --no-default-browser-check --host-resolver-rules="MAP *.weroad.wr %s" "http://%s/"\n' \
     "$session" "$session" "$ip" "$host"
