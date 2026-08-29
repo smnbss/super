@@ -302,42 +302,45 @@ latest_golden_image() {
     --format='value(name)' --limit=1 2>/dev/null | grep . || return 1
 }
 
-# Postgres creates ~84 databases on first boot and restarts part-way through, so a
-# passing pg_isready proves nothing. Gate on the database count instead.
-wait_for_databases() {
-  local name="$1" i count
+# ⚠️ wait_for_databases moved INTO files/golden-build-remote.sh, which is where the
+#    database restore now happens. Gate on the DATABASE COUNT, never pg_isready:
+#    postgres creates ~84 databases on first boot and restarts part-way through, so a
+#    passing pg_isready proves nothing and yields "Connection refused" mid-restore.
+
+
+# ⚠️ The repo count is now reported by files/golden-build-remote.sh, which does the
+#    cloning. It is deliberately NOT fatal: compose.yaml is generated up front and
+#    parses with most build contexts absent, so a partial clone is a slow first
+#    session, never a broken one.
+
+
+# Polls the detached remote build. Survives a dropped laptop: every probe is a fresh SSH,
+# and a failed probe is retried rather than treated as a failed build.
+golden_wait_remote() {
+  local i out misses=0
   if [[ -n "$DRY_RUN" ]]; then
-    printf 'DRY-RUN: wait for postgres to report >= 80 databases on %s\n' "$name"
+    printf 'DRY-RUN: wait for the remote golden build to finish\n'
     return 0
   fi
-  for (( i = 0; i < 60; i++ )); do
-    count="$(vm_ssh "$name" "docker exec jungle-postgresql.weroad.wr-1 psql -U admin -tAc 'select count(*) from pg_database'" 2>/dev/null | tr -d '[:space:]')"
-    if [[ "$count" =~ ^[0-9]+$ ]] && (( count >= 80 )); then
-      log "Postgres reports $count databases"
+  for (( i = 0; i < 720; i++ )); do
+    if vm_ssh "$GOLDEN_INSTANCE" "test -f ~/golden-build.done" >/dev/null 2>&1; then
+      log "Remote build phase finished"
+      vm_ssh "$GOLDEN_INSTANCE" "tail -4 ~/golden-build.log" 2>/dev/null | sed 's/^/    /' >&2
       return 0
     fi
-    sleep 10
+    out="$(vm_ssh "$GOLDEN_INSTANCE" "tail -1 ~/golden-build.log 2>/dev/null" 2>/dev/null | tr -d '\r')"
+    if [[ -n "$out" ]]; then
+      misses=0
+      (( i % 5 == 0 )) && log "  … ${out:0:70}"
+    else
+      # ⚠️ A failed probe means the LAPTOP lost the VM, not that the build died. Keep
+      #    polling; the build is detached and does not care.
+      misses=$(( misses + 1 ))
+      (( misses % 10 == 0 )) && log "  (no answer from the VM for $misses probes — the build continues regardless)"
+    fi
+    sleep 30
   done
-  die "Postgres never reported at least 80 databases"
-}
-
-# Reports what repo.init.sh actually produced. Deliberately NOT fatal: the image does not
-# need the repos — `docker compose config` parses cleanly with 57 of 60 build contexts
-# absent, because compose.yaml is generated up front. A partial clone is a slow first
-# session, never a broken one, and failing here would throw away a 2-hour run.
-golden_report_repo_count() {
-  local got want
-  if [[ -n "$DRY_RUN" ]]; then
-    printf 'DRY-RUN: report the golden repo count\n'
-    return 0
-  fi
-  got="$(vm_ssh "$GOLDEN_INSTANCE" "find $JUNGLE_REMOTE_DIR -mindepth 2 -maxdepth 2 -name .git | wc -l" 2>/dev/null | tr -d '[:space:]')"
-  # ⚠️ repos.sh lists weroad/starter TWICE. Unique-count, never line-count.
-  want="$(vm_ssh "$GOLDEN_INSTANCE" "grep -oE 'weroad/[a-zA-Z0-9._-]+\.git' $JUNGLE_REMOTE_DIR/bin/repos.sh | sort -u | wc -l" 2>/dev/null | tr -d '[:space:]')"
-  log "Golden image holds ${got:-?} of ${want:-?} declared repos"
-  if [[ "$got" =~ ^[0-9]+$ && "$want" =~ ^[0-9]+$ ]] && (( got < want )); then
-    log "NOTE: $(( want - got )) repos are absent. Sessions clone what they build from."
-  fi
+  return 1
 }
 
 cmd_golden_build() {
@@ -368,40 +371,19 @@ cmd_golden_build() {
   log "Injecting credentials for the build only"
   inject_credentials "$GOLDEN_INSTANCE"
 
-  log "Cloning the jungle and all 72 repos"
-  run vm_ssh "$GOLDEN_INSTANCE" "git clone $JUNGLE_GIT_URL $JUNGLE_REMOTE_DIR"
-  vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/repo.init.sh" \
-    || log "WARNING: repo.init.sh failed. Sessions will clone what they need."
-  golden_report_repo_count
-  run vm_ssh "$GOLDEN_INSTANCE" "source /tmp/vm-bootstrap.sh && install_jungle_deps"
-
-  # compose.merge.js resolves an extends: reference into every repo, including two
-  # that a partial clone never fetches. Both directories are gitignored.
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && mkdir -p dbt dlt-pipelines && [ -e dbt/compose.yaml ] || printf 'services:\n  dbt:\n    image: alpine:3.20\n' > dbt/compose.yaml; [ -e dlt-pipelines/compose.yaml ] || printf 'services:\n  pipelines:\n    image: alpine:3.20\n' > dlt-pipelines/compose.yaml"
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && node scripts/compose.merge.js --target=development --no-deps=true"
-
-  # hosts.init.sh rewrites tracked compose files. That is forbidden on the laptop
-  # and correct here, because the VM tree is disposable.
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/hosts.init.sh"
-
-  # ⚠️ --development IS REQUIRED, and without it this step has NEVER worked. Measured
-  #    2026-08-29: `gcloud` ON THE VM authenticates as the default compute service
-  #    account, not as the operator — the injected ADC is for client libraries, not for
-  #    the gcloud CLI. That account has no `artifactregistry.repositories.get` on
-  #    weroad-eu-production, so every image lookup returns PERMISSION_DENIED and the
-  #    step fails for all ~40 services while the build carries on.
+  # ⚠️ THE LONG HALF RUNS ON THE VM, DETACHED. It used to be a sequence of live
+  #    `gcloud compute ssh` calls from the laptop, so a 1-2 hour build depended on the
+  #    laptop staying awake, online and on the SAME IP throughout. It died three times on
+  #    2026-08-29 — terminal exited, instance stopped, and a wifi change that broke every
+  #    SSH pipe and left the laptop hung for 1h42m on a dead connection. See SIM-63.
   #
-  #    --development is what the tool itself recommends in that error, and it is the
-  #    right answer here: it skips the registry and lets compose build from source,
-  #    which is what a session stack does anyway. With it the step exits 0.
-  log "Configuring images for local builds (--development, no registry access needed)."
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/staging-images.update.sh --development"
+  #    Now the laptop only polls. A dropped laptop no longer kills the build: reconnect,
+  #    run `golden build --refresh` again and it picks up, or just watch the log.
+  log "Starting the long build phase ON the VM, detached. The laptop only polls."
+  run vm_scp "$GOLDEN_INSTANCE" "$SKILL_DIR/files/golden-build-remote.sh" "/tmp/golden-build-remote.sh"
+  run vm_ssh "$GOLDEN_INSTANCE" "chmod +x /tmp/golden-build-remote.sh && rm -f ~/golden-build.done && setsid nohup /tmp/golden-build-remote.sh '$JUNGLE_GIT_URL' >/dev/null 2>&1 < /dev/null & sleep 3; echo launched"
 
-  log "Restoring the databases"
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/jungle.up.sh reverseproxy.wr"
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/database.up.sh"
-  wait_for_databases "$GOLDEN_INSTANCE"
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/database.restore.sh"
+  golden_wait_remote || die "the remote build phase did not finish. Read ~/golden-build.log on '$GOLDEN_INSTANCE'."
 
   log "Scrubbing credentials before the capture"
   scrub_credentials "$GOLDEN_INSTANCE"
