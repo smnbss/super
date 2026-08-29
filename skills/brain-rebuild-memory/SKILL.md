@@ -70,7 +70,10 @@ Trigger a full rebuild by passing `full` (or `force`) as the skill argument, or 
 
 Driven by `$BRAIN_CONFIG` (default `<project>/.super/brain.config.yml`, where `<project>` is found by walking up from cwd to the nearest **real** `.super/` directory — skip the `<project>/.super/.super` debug symlink, stop the walk before reaching `$HOME`, and realpath-skip any `.super/` that resolves to `$HOME/.super` (the global super install). If the walk returns `$HOME` or nothing, abort — never write memory at the top of the user's home directory). Relevant keys:
 
-- `teams[]` — canonical engineering teams (name, slug, calendar_patterns, linear_teams). Drives `team-<slug>.md` scaffolding.
+- `teams[]` — canonical engineering teams (name, slug, calendar_patterns, `linear_key`, `idp_owner`).
+  Drives `team-<slug>.md` scaffolding. ⚠️ The old `linear_teams:` field held Linear team NAMES and
+  was replaced by `linear_key` (the issue-id prefix — `SAITAMA` is the name, `STM` is the key).
+  A config still carrying `linear_teams:` has not been migrated, and every key lookup against it fails.
 - `sources.clickup.monkeys_wiki_path` / `team_docs_prefix` — org-specific ClickUp folder names.
 - `sources.confluence.intranet_path` / `wiki_path` — Confluence folder names.
 - `sources.gdrive.exco_folder` / `projects_folder` / `one_pagers_folder` — named GDrive folders.

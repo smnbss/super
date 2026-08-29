@@ -30,7 +30,7 @@ while the operator's laptop is closed.
 
 ```
 jungle_up_gcp.sh golden build [--refresh]
-jungle_up_gcp.sh session create <repo> <session>
+jungle_up_gcp.sh session create <repo|preset> <session>
 jungle_up_gcp.sh session agent start <session> "<prompt>"
 jungle_up_gcp.sh session agent log <session>
 jungle_up_gcp.sh session agent attach <session>
@@ -43,9 +43,9 @@ jungle_up_gcp.sh session refresh-ip <s>
 
 1. Read the context on the laptop. Read `DEVELOPER.md`, the matching repo under
    `github/weroad/jungle/`, the service docs in `outputs/services/`, and any prior
-   session in `outputs/projects-work-on/<repo>/`.
+   session in `outputs/projects-work-on/<repo|preset>/`.
 2. Confirm a golden image exists. Run `golden build` when it does not.
-3. Run `session create <repo> <session>`.
+3. Run `session create <repo|preset> <session>`.
 4. Run `session agent start <session> "<prompt>"`.
 5. Open the printed Chrome command. Confirm the page renders.
 6. Close the laptop. Read progress later with `session agent log <session>`.
@@ -76,6 +76,28 @@ Do not re-derive these. Each cost a failed run.
 9. **A partner stack is FOUR compose services**, not one:
    `laravel.api-partner.weroad.wr`, `api-partner.weroad.wr`,
    `nest-api-partner.weroad.wr`, `partner.weroad.wr`. Derive the set. Never guess.
+
+## The first argument is a repo OR a preset
+
+`session create <repo|preset> <session>` takes one name and uses it three ways: the
+git directory to branch on the VM, the pattern `derive_services` greps compose with,
+and the VM name. A **preset** is a name that selects a whole stack rather than one
+repo — `partner` derives four compose services, `my` likewise. The script holds no
+preset list. The grep is the mechanism.
+
+The session workspace is `outputs/projects-work-on/<repo|preset>/<session>/`, the
+same shape `brain-work-on` uses, so a local session and a cloud session on the same
+repo group together and one session's notes, plan, `.linear.json` and
+`.jungle-vm.json` sit side by side.
+
+⚠️ **This layout changed on 2026-08-29.** It used to be flat —
+`outputs/projects-work-on/<session>/` — which put a session exactly where a repo
+directory belongs. `state_path` still resolves the flat form so an existing session
+keeps working, but nothing writes it any more.
+
+⚠️ **Every verb but `create` takes only `<session>`**, so the directory is resolved
+by searching for that name. Two scopes carrying the same session name is refused,
+not guessed — a wrong guess would point `rm` at the wrong VM.
 
 ## Seeing two sessions at once
 
@@ -178,8 +200,14 @@ not reintroduce it without testing both.
 
 ## Linear tracking
 
-⚠️ **These rules are a second copy. `brain-work-on` holds the first copy.** A change
-to the Linear conventions must land in both skills.
+⚠️ **These rules are one of THREE copies.** `brain-work-on` Step 9 holds the first,
+`brain-work-on-new-issue` the third. A change to the Linear conventions must land in
+all three.
+
+**Opening the NEXT issue on a session is `brain-work-on-new-issue`'s job, not this
+skill's.** It reads `.jungle-vm.json` for the repo, VM, zone, image and branch, so a
+cloud session created without tracking can still get its first issue — and it knows
+not to close an issue whose branch exists only on the VM.
 
 Three tiers. One session issue. One sub-issue for each plan phase. One comment
 thread as the request log.

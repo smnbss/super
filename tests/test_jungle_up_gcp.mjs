@@ -1,11 +1,18 @@
 // tests/test_jungle_up_gcp.mjs — brain-work-on-gcp CLI
 import { strict as assert } from 'assert';
 import { execFileSync, spawnSync } from 'child_process';
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
-const SKILL = join(process.env.HOME, '.super/skills/brain-work-on-google-cloud');
+// Resolve the skill from THIS checkout, never from $HOME/.super. Pointing the tests
+// at the installed copy means they measure a different tree than the one they ship
+// in: a change here passed while the repo's own script was untouched, and the same
+// suite would go green against a stale install. Same trap as comparing two installed
+// VERSION files instead of the upstream one.
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
+const SKILL = process.env.GCP_SKILL_DIR || join(REPO, 'skills/brain-work-on-google-cloud');
 const CLI = join(SKILL, 'jungle_up_gcp.sh');
 
 let passed = 0, failed = 0;
@@ -322,15 +329,43 @@ test('parse_common_flags rejects an unknown option instead of ignoring it', () =
 // ── Task 7: session state and session create ────────────────────────────────
 test('state_write then state_read round-trips a value', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
-  const r = callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a ip=203.0.113.5; ` +
+  const r = callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a ip=203.0.113.5; ` +
                    `WORKSPACE_ROOT=${ws} state_read s1 ip`);
   assert.equal(r.stdout.trim(), '203.0.113.5');
 });
 
 test('state file lands in the session workspace', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
-  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a`);
-  assert.ok(existsSync(join(ws, 's1/.jungle-vm.json')), 'expected <ws>/<session>/.jungle-vm.json');
+  callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a`);
+  assert.ok(existsSync(join(ws, 'api-partner/s1/.jungle-vm.json')),
+    'expected <ws>/<repo|preset>/<session>/.jungle-vm.json');
+});
+
+// The layout moved to <repo|preset>/<session>/ on 2026-08-29 so a cloud session and
+// a local brain-work-on session on the same repo group together. Every verb but
+// `create` addresses a session by name alone, so resolution must survive the change.
+test('state_path resolves a session by name under its scope', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write my s1 vm=jungle-a`);
+  const r = callFn(`WORKSPACE_ROOT=${ws} state_path s1`);
+  assert.match(r.stdout, /\/my\/s1\/\.jungle-vm\.json/, 'expected the scoped path');
+});
+
+test('state_path still resolves a pre-2026-08-29 flat session', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  mkdirSync(join(ws, 'legacy'), { recursive: true });
+  writeFileSync(join(ws, 'legacy/.jungle-vm.json'), JSON.stringify({ vm: 'jungle-old' }));
+  const r = callFn(`WORKSPACE_ROOT=${ws} state_read legacy vm`);
+  assert.equal(r.stdout.trim(), 'jungle-old', 'a flat session must keep working');
+});
+
+test('state_path REFUSES an ambiguous session name', () => {
+  const ws = mkdtempSync(join(tmpdir(), 'ws-'));
+  callFn(`WORKSPACE_ROOT=${ws} state_write my dup vm=jungle-a`);
+  callFn(`WORKSPACE_ROOT=${ws} state_write partner dup vm=jungle-b`);
+  const r = callFn(`WORKSPACE_ROOT=${ws} state_path dup`);
+  assert.match(r.stderr, /several scopes/, 'must refuse rather than pick one');
+  assert.equal(r.stdout.trim(), '', 'must not emit a path it guessed');
 });
 
 test('session create refuses when no golden image exists', () => {
@@ -389,7 +424,7 @@ test('mount preflight states the licence conflict and names the fallback', () =>
 
 test('session mount uses the reconnect options and the GCE key', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
-  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a ip=203.0.113.5 mount=/tmp/m-s1`);
+  callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a ip=203.0.113.5 mount=/tmp/m-s1`);
   const fake = fakeBin(['sshfs']);
   const r = callFn(`WORKSPACE_ROOT=${ws} DRY_RUN=1 cmd_session_mount s1`, { binDir: fake.dir });
   assert.match(r.stdout, /reconnect/);
@@ -399,7 +434,7 @@ test('session mount uses the reconnect options and the GCE key', () => {
 
 test('chrome_command isolates the profile and maps the wildcard host', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
-  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a ip=203.0.113.5`);
+  callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a ip=203.0.113.5`);
   const r = callFn(`WORKSPACE_ROOT=${ws} chrome_command s1`);
   assert.match(r.stdout, /--user-data-dir=/);
   assert.match(r.stdout, /--host-resolver-rules="MAP \*\.weroad\.wr 203\.0\.113\.5"/);
@@ -478,7 +513,7 @@ test('verify_render accepts a real body', () => {
 // ── Task 10: list, stop, rm and the two gates ───────────────────────────────
 test('session rm REFUSES to delete when the branch is unpushed', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
-  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a repo=api-partner branch=s1 mount=/tmp/m-x`);
+  callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a repo=api-partner branch=s1 mount=/tmp/m-x`);
   const fake = fakeBin(['gcloud'], { exitCode: 1 });
   const r = callFn(`WORKSPACE_ROOT=${ws} PROJECT_ID=p ZONE=z cmd_session_rm s1`, { binDir: fake.dir });
   assert.notEqual(r.status, 0);
@@ -488,7 +523,7 @@ test('session rm REFUSES to delete when the branch is unpushed', () => {
 
 test('session rm unmounts and scrubs before it deletes', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
-  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a repo=api-partner branch=s1 mount=/tmp/m-x`);
+  callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a repo=api-partner branch=s1 mount=/tmp/m-x`);
   const r = callFn(`WORKSPACE_ROOT=${ws} DRY_RUN=1 PROJECT_ID=p ZONE=z BRANCH_PUSHED=1 cmd_session_rm s1`);
   const at = (re) => r.stdout.search(re);
   assert.ok(at(/rm -f .*application_default_credentials/) < at(/instances delete/),
@@ -504,7 +539,7 @@ test('session list surfaces cost, because forgotten VMs are the real risk', () =
 
 test('the agent starts detached under tmux, so it survives a closed laptop', () => {
   const ws = mkdtempSync(join(tmpdir(), 'ws-'));
-  callFn(`WORKSPACE_ROOT=${ws} state_write s1 vm=jungle-a repo=api-partner branch=s1`);
+  callFn(`WORKSPACE_ROOT=${ws} state_write api-partner s1 vm=jungle-a repo=api-partner branch=s1`);
   const r = callFn(`WORKSPACE_ROOT=${ws} DRY_RUN=1 PROJECT_ID=p ZONE=z cmd_agent_start s1 "fix the thing"`);
   assert.match(r.stdout, /tmux new-session -d/, 'must be detached');
   assert.match(r.stdout, /claude /);

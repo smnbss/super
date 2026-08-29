@@ -48,7 +48,7 @@ the seam explicit up front saves the model from re-deriving it mid-task.
 Each name may match:
 - A repo under `github/<org>/<name>` (exact match preferred, then substring)
 - A service doc at `outputs/services/<name>.agent.md` or `*<name>*.agent.md`
-- A session workspace at `outputs/projects-work-on/<repo>/<session>/` (see Step 4)
+- A session workspace at `outputs/projects-work-on/<repo|preset>/<session>/` (see Step 4)
 
 If no name is provided, stop and ask:
 > "Which project(s) should I set up context for? Example: `/brain-work-on ask-weroad` or `/brain-work-on catalog api-catalog`"
@@ -154,8 +154,14 @@ alone.**
 ### 4a — Always check `projects-work-on` first
 
 This skill exists to start code-editing sessions, so its home family is
-`outputs/projects-work-on/`, laid out as **`<repo>/<session>/`** — one dir per
-repo, one dir per work stream inside it:
+`outputs/projects-work-on/`, laid out as **`<repo|preset>/<session>/`** — one dir
+per repo, one dir per work stream inside it.
+
+The first segment is usually a repo. It may also be a **jungle preset** — a name
+that selects a whole stack rather than one repo, like `partner` (four compose
+services) or `my`. `brain-work-on-google-cloud` creates sessions under the same
+path with the same first segment, so a local session and a cloud session on the
+same repo or preset group together:
 
 ```bash
 # existing sessions for this repo
@@ -185,10 +191,12 @@ Match the newest established pattern (`idp/idp-qa-tab`, 2026-08-19), not the old
 bare-`plans/` variant (`partner/ai-creation`, 2026-08-07):
 
 ```
-outputs/projects-work-on/<repo>/<session>/
+outputs/projects-work-on/<repo|preset>/<session>/
 ├── <session>-notes.md                 primary doc — NOT README.md, see below
 ├── HANDOFF.md                         state to carry into the next session
 ├── .linear.json                       tracking pointer (Step 7d)
+├── .jungle-vm.json                    cloud-session VM state, when there is one —
+│                                      owned by brain-work-on-google-cloud, never edit
 ├── superpowers-artifacts/
 │   ├── plans/<YYYY-MM-DD>-<session>.md
 │   └── specs/<YYYY-MM-DD>-<session>-design.md
@@ -196,8 +204,9 @@ outputs/projects-work-on/<repo>/<session>/
 ```
 
 Rules:
-- **kebab-case** for `<repo>`, `<session>` and every filename; lowercase `.md`.
-- `<repo>` is the repo name, `<session>` names the work stream — not the date.
+- **kebab-case** for `<repo|preset>`, `<session>` and every filename; lowercase `.md`.
+- `<repo|preset>` is the repo or jungle preset, `<session>` names the work stream —
+  not the date.
 - Dates belong in plan/spec **filenames**, not directory names.
 - Create only the parts you use; `prototypes/` and `specs/` are optional.
 
@@ -247,7 +256,7 @@ add the cross-project synthesis section if more than one name was given.
 **Prior workspace** (outputs/projects-work-on/<repo>/):
 - [session] <session-name> — <what it covers> <(this session's stream | other stream)>
 - <file or note>
-(or: "none — fresh workspace, will create outputs/projects-work-on/<repo>/<session>/")
+(or: "none — fresh workspace, will create outputs/projects-work-on/<repo|preset>/<session>/")
 
 **Cross-source mentions** (if Step 5 ran):
 - <source>: <one-line>
@@ -411,7 +420,7 @@ never the repo dir — one repo carries several concurrently-tracked sessions, s
 repo-level pointer would bind them all to one issue and reattach to the wrong work:
 
 ```
-outputs/projects-work-on/<repo>/<session>/.linear.json
+outputs/projects-work-on/<repo|preset>/<session>/.linear.json
 ```
 
 ```json
@@ -437,7 +446,7 @@ Hand off to `superpowers:brainstorming` to settle intent and scope, then
 `superpowers:writing-plans` to write the plan into the session dir from Step 4b:
 
 ```
-outputs/projects-work-on/<repo>/<session>/superpowers-artifacts/plans/<YYYY-MM-DD>-<session>.md
+outputs/projects-work-on/<repo|preset>/<session>/superpowers-artifacts/plans/<YYYY-MM-DD>-<session>.md
 ```
 
 Any design doc produced alongside it goes to `superpowers-artifacts/specs/<YYYY-MM-DD>-<session>-design.md`.
@@ -503,6 +512,11 @@ One issue per request is wrong — a session is dozens of conversational turns, 
 issue-per-request makes the board untriageable and distorts every count. The
 thread is the log; issues are the structure.
 
+When the session moves on to a **new goal** the session issue's title does not
+describe, that is not a thread reply — hand off to `brain-work-on-new-issue`, which
+opens the next issue in the same project and merges the pointer file rather than
+overwriting it.
+
 As each plan phase completes, move its sub-issue's `state` forward. That is the
 only Linear write driven by progress rather than by a user request.
 
@@ -537,7 +551,7 @@ second source of truth for what the plan says.
 | Reading state back from Linear into the plan | Two sources of truth diverge. Plan → Linear, one direction. |
 | Creating a second issue on re-run | Read `.linear.json` first and reattach. |
 | Looking in `outputs/projects/<name>/` for prior work | Migrated to `projects-<family>/`. Check `projects-work-on/<repo>/*/` first. |
-| Writing code-session files to bare `outputs/projects/` | That's the long-tail bucket. Code work goes to `projects-work-on/<repo>/<session>/`. |
+| Writing code-session files to bare `outputs/projects/` | That's the long-tail bucket. Code work goes to `projects-work-on/<repo|preset>/<session>/`. |
 | One workspace per repo | A repo has many sessions — `super/` holds `gmeet-to-md` **and** `super/`. |
 | `.linear.json` in the repo dir | Binds every session on that repo to one issue. It goes in the session dir. |
 | Naming the primary doc `README.md` | gbrain skips that basename silently. Five session docs are already invisible. |

@@ -9,6 +9,11 @@
 # <project>/.super/.super debug symlink to ~/.super is ignored).
 #
 # The defaults below are Simone Basso / WeRoad. Adapt to your own org.
+#
+# ⚠️ THIS IS THE TEMPLATE, NOT A LIVE CONFIG. Editing it does not change any brain.
+# A fix applied only here silently leaves every existing <project>/.super/brain.config.yml
+# on the old shape — which is exactly what happened to the linear_teams -> linear_key
+# migration. Change both, or change the live file first.
 
 organization:
   # Human-readable name — used in report templates and agent prompts
@@ -91,7 +96,7 @@ sources:
 # ids (`STM-412` -> `STM`). Several are NOT derivable from the name (`SAIAN` -> `AI`,
 # `SAITAMA` -> `STM`), so read them off Linear rather than guessing:
 #   wr-linear teams list --all        # each row carries both `key` and `name`
-# Verified against live Linear 2026-08-21. An entry with no live team keeps
+# Verified against live Linear 2026-08-29. An entry with no live team keeps
 # `linear_key:` empty; that is honest, and it makes brain-work-on ask instead of guess.
 #
 # `idp_owner` is the value this team has in the service catalog's "Owning team" field.
@@ -143,13 +148,14 @@ teams:
     idp_owner: rocket
   - name: Data Engineering
     slug: data
-    calendar_patterns: [Data, YoData]
+    calendar_patterns: [Data]
     linear_key: DE
     idp_owner: data-engineers
   - name: YoData
     slug: yodata
     calendar_patterns: [YoData]
     linear_key:             # no live Linear team — superseded by Data Engineering
+    idp_owner: yodata       # but it still owns 1 catalogued service, so this row must stay
   - name: IT
     slug: it
     calendar_patterns: [IT]

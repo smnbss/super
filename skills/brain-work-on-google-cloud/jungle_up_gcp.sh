@@ -327,11 +327,35 @@ cmd_golden_build() {
 
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-$PWD/outputs/projects-work-on}"
 
-state_path() { printf '%s/%s/.jungle-vm.json' "$WORKSPACE_ROOT" "$1"; }
+# The workspace is <repo|preset>/<session>/, the same shape brain-work-on uses, so
+# one session's notes, plan, .linear.json and .jungle-vm.json sit together and a repo
+# with several sessions groups them. `create` knows the scope; every other verb takes
+# only <session>, so resolve the directory by searching for it.
+#
+# Depth 3 is the current layout. Depth 2 is the pre-2026-08-29 flat one, still
+# resolved so an existing session keeps working after the change.
+state_path() {          # <session> [<repo|preset>]
+  local session="$1" scope="${2:-}"
+  if [[ -n "$scope" ]]; then
+    printf '%s/%s/%s/.jungle-vm.json' "$WORKSPACE_ROOT" "$scope" "$session"; return 0
+  fi
+  local hits n
+  hits="$(find "$WORKSPACE_ROOT" -mindepth 2 -maxdepth 3 -type f -name .jungle-vm.json \
+            -path "*/$session/.jungle-vm.json" 2>/dev/null)"
+  n="$(printf '%s' "$hits" | grep -c . || true)"
+  # Two scopes can carry the same session name. Guessing which one would point a
+  # destructive verb at the wrong VM, so refuse instead.
+  if (( n > 1 )); then
+    printf 'session %s exists under several scopes:\n%s\n' "$session" "$hits" >&2
+    printf 'Remove the duplicate, or address it by path.\n' >&2
+    return 1
+  fi
+  printf '%s' "$hits"
+}
 
 state_write() {
-  local session="$1"; shift
-  local f; f="$(state_path "$session")"
+  local scope="$1" session="$2"; shift 2
+  local f; f="$(state_path "$session" "$scope")"
   mkdir -p "$(dirname "$f")"
   {
     printf '{\n'
@@ -348,6 +372,10 @@ state_write() {
 state_read() {
   local f; f="$(state_path "$1")"
   [[ -f "$f" ]] || return 1
+  # require() resolves a bare relative path as a MODULE, not a file, and throws a
+  # stack trace instead of returning empty. WORKSPACE_ROOT defaults to an absolute
+  # path, but an operator can export a relative one.
+  [[ "$f" == /* ]] || f="$PWD/$f"
   node -e "const s=require('$f');process.stdout.write(String(s['$2']||''))" 2>/dev/null
 }
 
@@ -382,11 +410,11 @@ cmd_session_create() {
   run vm_ssh "$name" "cd $JUNGLE_REMOTE_DIR/$repo && git switch -c $session"
 
   ip="$(vm_ip "$name" 2>/dev/null || echo '')"
-  state_write "$session" \
+  state_write "$repo" "$session" \
     "vm=$name" "zone=$ZONE" "project=$PROJECT_ID" "ip=$ip" \
     "image=$image" "repo=$repo" "session=$session" "branch=$session" \
     "mount=$HOME/vm/$session"
-  log "Session state written to $(state_path "$session")"
+  log "Session state written to $(state_path "$session" "$repo")"
 }
 
 # Fuse-T licence position, recorded because the two sources disagree:
@@ -841,7 +869,7 @@ usage() {
 jungle_up_gcp.sh — per-session GCP VMs running a WeRoad jungle stack
 
   golden build [--refresh]              build or rebuild the golden machine image
-  session create <repo> <session>       clone the image, start one service stack
+  session create <repo|preset> <session>  clone the image, start one service stack
   session list                          show sessions, uptime and disk cost
   session stop <session>                stop the VM, keep the disk
   session rm <session>                  unmount, verify branch pushed, delete
@@ -870,7 +898,7 @@ main() {
       case "$sub" in
         create)
           local repo="${1:-}" sess="${2:-}"
-          [[ -n "$repo" && -n "$sess" ]] || die "usage: session create <repo> <session>" 2
+          [[ -n "$repo" && -n "$sess" ]] || die "usage: session create <repo|preset> <session>" 2
           shift 2; parse_common_flags "$@"; cmd_session_create "$repo" "$sess" ;;
         mount)
           local m="${1:-}"; [[ -n "$m" ]] || die "usage: session mount <session>" 2
