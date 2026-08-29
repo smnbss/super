@@ -53,7 +53,7 @@ $PATTERN"
     found="$(grep -rhE '^(DB_NAME|DB_DATABASE)=' \
       "$JUNGLE/$dir"/deploy/development.env \
       "$JUNGLE/$dir"/*/deploy/development.env 2>/dev/null \
-      | cut -d= -f2- | tr -d '"'"'" \r' | sort -u)"
+      | cut -d= -f2- | tr -d "\"' \r" | sort -u)"
     [[ -n "$found" ]] && DBS="$DBS
 $found" || say "no database found for $dir"
   done
@@ -66,7 +66,17 @@ if [[ -z "$DBS" ]]; then
   exit 1
 fi
 
+# ⚠️ RESTORING REPLACES THE DATABASE. Any data created on this VM since the image was
+#    built is DESTROYED — uploaded dashboards, test fixtures, everything. There is no
+#    merge. `--list` previews the derivation so nobody discovers this after the fact.
+if [[ "${REFRESH_DB_LIST:-}" == "1" ]]; then
+  say "would refresh (nothing changed):"
+  printf '%s\n' $DBS
+  exit 0
+fi
+
 say "refreshing: $(printf '%s ' $DBS)"
+say "WARNING: this REPLACES those databases. Data created on this VM will be lost."
 
 # ⚠️ Download BEFORE restore. database.restore.sh reads whatever dump is on disk, so
 #    restoring without downloading first silently re-restores the STALE dump baked into

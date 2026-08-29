@@ -549,9 +549,23 @@ PREFLIGHT
 #    `session create` now calls stack_up itself. This verb re-runs it — what you want
 #    after `session stop`, after a compose change, or when a container died.
 cmd_session_up() {
-  local session="$1" vm repo services
+  local session="$1" vm repo services ip
   vm="$(state_read "$session" vm)" || die "no session '$session'. Run: session create"
   repo="$(state_read "$session" repo)"
+
+  # ⚠️ A STOPPED VM COMES BACK ON A DIFFERENT EXTERNAL IP. Nothing refreshed it, so the
+  #    state file kept the old address and `chrome_command` handed out a dead one —
+  #    which looks exactly like the stack being broken. Seen live 2026-08-29 after a
+  #    stop/start: 207.175.117.220 became 34.14.73.195. Re-read it every time.
+  ip="$(vm_ip "$vm" 2>/dev/null || echo '')"
+  if [[ -n "$ip" && "$ip" != "$(state_read "$session" ip)" ]]; then
+    log "External IP changed to $ip — updating the session state"
+    state_write "$repo" "$session" \
+      "vm=$vm" "zone=$ZONE" "project=$PROJECT_ID" "ip=$ip" \
+      "image=$(state_read "$session" image)" "repo=$repo" "session=$session" \
+      "branch=$(state_read "$session" branch)" "mount=$(state_read "$session" mount)"
+    ensure_firewall_rule "$(resolve_source_cidr)"
+  fi
   services="$(ensure_session_repos "$vm" "$repo")" || die "no compose service matches '$repo'"
   stack_up "$vm" "$repo" "$services"
   log "Stack up on '$vm':"
@@ -565,6 +579,11 @@ cmd_session_up() {
 #
 #    This restores ONLY the databases the session's own services use. A beye session needs
 #    api_beye: one database, not 84.
+#
+# ⚠️⚠️ A RESTORE REPLACES THE DATABASE. Everything created on the VM since the image was
+#      built is DESTROYED — uploaded dashboards, seeded fixtures, an agent's test data.
+#      There is no merge and no prompt. Run `REFRESH_DB_LIST=1 session refresh-db <s>`
+#      first to see which databases would be replaced.
 cmd_session_refresh_db() {
   local session="$1"; shift
   local vm repo dbs
@@ -579,9 +598,13 @@ cmd_session_refresh_db() {
   run vm_scp "$vm" "$SKILL_DIR/files/refresh-db.sh" "/tmp/refresh-db.sh" \
     || die "cannot copy refresh-db.sh to '$vm'"
   # Explicit database names, when given, skip derivation entirely.
-  dbs="$(vm_ssh "$vm" "bash /tmp/refresh-db.sh '$repo' $*")" \
+  dbs="$(vm_ssh "$vm" "REFRESH_DB_LIST='${REFRESH_DB_LIST:-}' bash /tmp/refresh-db.sh '$repo' $*")" \
     || die "database refresh failed on '$vm'"
-  log "Refreshed on '$vm':"
+  if [[ "${REFRESH_DB_LIST:-}" == "1" ]]; then
+    log "Would refresh on '$vm' (nothing changed):"
+  else
+    log "Refreshed on '$vm':"
+  fi
   printf '%s\n' "$dbs" | sed 's/^/    /' >&2
 }
 
@@ -1147,6 +1170,10 @@ main() {
             *) die "usage: session agent start|log|attach <session>" 2 ;;
           esac ;;
         refresh-ip)
+          # ⚠️ SKILL.md documents `session refresh-ip <session>`, but the session name was
+          #    never consumed, so the documented form died with "unknown option". The
+          #    firewall rule is global, so the name is accepted and ignored. See SIM-63.
+          [[ $# -gt 0 && "$1" != --* ]] && shift
           parse_common_flags "$@"; cmd_session_refresh_ip ;;
         *) die "unknown session verb: ${sub:-<none>}" 2 ;;
       esac
