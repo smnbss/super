@@ -7,6 +7,12 @@ DEFAULT_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_SSH_MODE="oslogin"
 DEFAULT_ZONE="europe-west1-b"
+AGENT_TOKEN_SECRET="${AGENT_TOKEN_SECRET:-claude-agent-token}"
+# ⚠️ Scopes are FIXED when the instance is created. The DEFAULT compute scopes do
+#    NOT reach Secret Manager, so a VM built without this cannot fetch the Claude
+#    token however the IAM is set, and the failure reads as a missing secret.
+#    Changing it afterwards needs the instance stopped.
+VM_SCOPES="${VM_SCOPES:-https://www.googleapis.com/auth/cloud-platform}"
 NODE_VERSION="20.19.0"
 STARTUP_MARKER="/var/lib/brain-clone-in-gcp/startup.done"
 
@@ -557,6 +563,7 @@ CREATE_ARGS=(
   --image-family="$DEFAULT_IMAGE_FAMILY"
   --image-project="$DEFAULT_IMAGE_PROJECT"
   --metadata-from-file="startup-script=$STARTUP_SCRIPT"
+  --scopes="$VM_SCOPES"
   --tags="xrdp"
 )
 
@@ -696,6 +703,110 @@ if [[ -z "$EXPLICIT_SOURCES" && -f "$PROJECT_DIR/sources.github.md" ]]; then
   gcloud_scp "$PROJECT_DIR/sources.github.md" "$INSTANCE_NAME:~/brain/sources.github.md"
 fi
 gcloud_scp "$REMOTE_BOOTSTRAP" "$INSTANCE_NAME:~/.super-bootstrap.sh"
+
+# ── Claude authentication on the VM ────────────────────────────────────────────
+#
+# THE TOKEN NEVER PASSES THROUGH THE OPERATOR'S SHELL HISTORY OR AN AGENT CONTEXT.
+# It is created once, straight into Secret Manager, and each VM fetches it itself.
+#
+# Resolution order:
+#   1. CLAUDE_CODE_OAUTH_TOKEN in the environment — for a one-off run.
+#   2. ANTHROPIC_API_KEY in the environment — for API-key users.
+#   3. Secret Manager, fetched ON the VM by its own service account. Preferred:
+#      the token never touches the laptop, and rotation is one command that every
+#      future VM picks up with no code change.
+#
+# ⚠️ This is a SECOND COPY of brain-work-on-google-cloud's mechanism, which also
+#    holds the IP-detection and firewall logic this script duplicates. A fix to one
+#    does NOT reach the other.
+inject_agent_auth() {
+  local tmp oauth="${CLAUDE_CODE_OAUTH_TOKEN:-}" apikey="${ANTHROPIC_API_KEY:-}"
+
+  if [[ -n "$oauth" || -n "$apikey" ]]; then
+    tmp="$(mktemp)"; chmod 600 "$tmp"
+    if [[ -n "$oauth" ]]; then
+      printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$oauth" > "$tmp"
+    else
+      printf 'export ANTHROPIC_API_KEY=%s\n' "$apikey" > "$tmp"
+    fi
+    gcloud_scp "$tmp" "$INSTANCE_NAME:~/.claude-env" >/dev/null || log "Could not copy ~/.claude-env."
+    rm -f "$tmp"
+    gcloud_ssh --command "chmod 600 ~/.claude-env && (grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc)" >/dev/null || true
+    log "Claude authenticated from the environment"
+    return 0
+  fi
+
+  fetch_agent_token_from_secret_manager
+}
+
+# The VM reads the secret itself. The value never reaches the laptop.
+fetch_agent_token_from_secret_manager() {
+  gcloud_ssh --command "set -e
+    tok=\$(gcloud secrets versions access latest --secret='$AGENT_TOKEN_SECRET' --project='$PROJECT_ID' 2>/dev/null || true)
+    if [ -z \"\$(printf '%s' \"\$tok\" | tr -d '[:space:]')\" ]; then echo 'AGENT_TOKEN_MISSING'; exit 0; fi
+    # 'claude setup-token' is INTERACTIVE, so everyone pipes it and the secret ends
+    # up holding its banner, URL and ANSI codes instead of the token. Recover the
+    # token from inside the blob rather than failing.
+    # ⚠️ Strip ANSI but KEEP the line structure, then grep. Collapsing newlines
+    #    FIRST welds the next word onto the token — a banner reading
+    #    \"<esc>sk-ant-TOKEN<esc>\\nDone.\" yielded \"sk-ant-TOKENDone\", which passes
+    #    every check here and then fails at runtime as a bare \"Not logged in\".
+    tok=\$(printf '%s' \"\$tok\" | sed -e 's/\\x1b\\[[0-9;?]*[a-zA-Z]//g' \\
+          | grep -oE 'sk-ant-[A-Za-z0-9_-]+' | head -1)
+    if [ -z \"\$tok\" ]; then echo 'AGENT_TOKEN_MALFORMED'; exit 0; fi
+    umask 077
+    printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\n' \"\$tok\" > ~/.claude-env
+    grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc
+    echo AGENT_TOKEN_OK" > /tmp/.agent-token-probe 2>&1
+
+  if grep -q AGENT_TOKEN_OK /tmp/.agent-token-probe 2>/dev/null; then
+    rm -f /tmp/.agent-token-probe
+    log "Claude authenticated from Secret Manager ('$AGENT_TOKEN_SECRET')"
+    return 0
+  fi
+  if grep -q AGENT_TOKEN_MALFORMED /tmp/.agent-token-probe 2>/dev/null; then
+    rm -f /tmp/.agent-token-probe
+    log "WARNING: the secret '$AGENT_TOKEN_SECRET' does not hold a token."
+    log "It must start with sk-ant- and contain no spaces or escape codes."
+    log "\`claude setup-token\` is INTERACTIVE — piping it captures its banner, not"
+    log "the token. Run it, read the token it prints, then:"
+    log "  read -rs TOK && printf '%s' \"\\\$TOK\" | \\"
+    log "    gcloud secrets versions add $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID"
+    return 0
+  fi
+  rm -f /tmp/.agent-token-probe
+  agent_token_help
+  return 0
+}
+
+# Never fatal. An unauthenticated VM is still a usable machine — the operator can
+# run `claude` and log in by hand.
+agent_token_help() {
+  cat >&2 <<HELP
+  No Claude credential available on the VM. It is installed but not logged in.
+
+  Create the secret ONCE, without the token passing through your shell history:
+
+    claude setup-token                      # interactive; prints the token
+    read -rs TOK && printf '%s' "\$TOK" | \
+      gcloud secrets create $AGENT_TOKEN_SECRET --data-file=- --project $PROJECT_ID && unset TOK
+
+  Do NOT pipe setup-token directly: it is interactive, so the pipe stores its
+  banner and colour codes rather than the token.
+
+  Then let the VM service account read it:
+
+    gcloud secrets add-iam-policy-binding $AGENT_TOKEN_SECRET --project $PROJECT_ID \
+      --member "serviceAccount:\$(gcloud compute instances describe $INSTANCE_NAME \
+        --zone $ZONE --project $PROJECT_ID --format='value(serviceAccounts[0].email)')" \
+      --role roles/secretmanager.secretAccessor
+
+  Rotate later by adding a version. Every future VM picks it up with no code change.
+HELP
+}
+
+log "Authenticating Claude on the VM..."
+inject_agent_auth
 
 log "Bootstrapping super on the VM..."
 gcloud_ssh --command "chmod +x ~/.super-bootstrap.sh && ~/.super-bootstrap.sh"

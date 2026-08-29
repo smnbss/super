@@ -63,8 +63,45 @@ The script will:
 - Run a startup script that installs: `git`, `curl`, `zstd`, Node.js 20.19.0, Ollama, Chromium, the Google Cloud CLI, and the `@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli` npm globals
 - With `--desktop`: additionally install GNOME (`ubuntu-desktop-minimal`) and XRDP, force the GNOME-on-Xorg session for xrdp, create the `allow-xrdp` firewall rule, and print the RDP connection address
 - Create/update the `allow-ssh` (and, with `--desktop`, `allow-xrdp`) firewall rules so they only permit traffic from the caller's current public IPv4 (auto-detected via `curl -4 https://api.ipify.org` with fallbacks). Override with `--source-ip`. The IP is refreshed on every run — including `--name` reuse — so the lockdown tracks your current IP if it changes. If detection fails and no `--source-ip` is given, the script aborts rather than falling back to `0.0.0.0/0`.
+- Authenticate Claude on the VM. Resolution order: `CLAUDE_CODE_OAUTH_TOKEN` in the environment,
+  then `ANTHROPIC_API_KEY`, then GCP Secret Manager (`claude-agent-token`), which is the intended
+  path. **The VM reads the secret itself, so the token never reaches the laptop.** It writes
+  `~/.claude-env` with `umask 077` and sources it from `~/.bashrc`. Never fatal — an
+  unauthenticated VM is still usable, and the script prints how to create the secret.
 - Wait for SSH readiness, copy `.env.local` plus `sources.md` and `sources.github.md` (or, with `--source`, just the single explicit file as `sources.md`), then bootstrap `super` (git clone into `~/.super` + `super install --all`)
 - Print the SSH command plus manual start/stop/delete commands for the workstation
+
+## Claude authentication
+
+The VM fetches its own token from Secret Manager, so it is usable with `claude` straight away.
+
+Create the secret ONCE per GCP project:
+
+```bash
+claude setup-token                      # interactive; prints the token
+read -rs TOK && printf '%s' "$TOK" | \
+  gcloud secrets create claude-agent-token --data-file=- --project <project> && unset TOK
+```
+
+⚠️ **Do NOT pipe `claude setup-token` straight into the secret.** It is interactive, so the pipe
+stores its banner, URL and colour codes rather than the token. `read -rs` does not echo and does not
+enter shell history. The script recovers a token from inside such a blob rather than failing, but
+the secret is cleaner if it holds only the token.
+
+Then let the VM service account read it:
+
+```bash
+gcloud secrets add-iam-policy-binding claude-agent-token --project <project> \
+  --member "serviceAccount:<vm-service-account>" \
+  --role roles/secretmanager.secretAccessor
+```
+
+⚠️ **Scopes are fixed when the instance is created.** The default compute scopes do NOT reach Secret
+Manager, so the script passes `--scopes=cloud-platform`. **A VM created before 2026-08-29 lacks it
+and can never fetch the token, however the IAM is set** — the failure looks like a missing secret.
+That matters on the `--name` reuse path. Fixing an old instance needs it stopped.
+
+Rotate by adding a version. Every future VM picks it up with no code change.
 
 ## Environment Variables
 

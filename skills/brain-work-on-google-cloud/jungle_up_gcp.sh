@@ -641,29 +641,17 @@ fetch_agent_token_from_secret_manager() {
   local name="$1"
   run vm_ssh "$name" "set -e
     tok=\$(gcloud secrets versions access latest --secret='$AGENT_TOKEN_SECRET' --project='$PROJECT_ID' 2>/dev/null || true)
-    # Strip surrounding whitespace. Any paste or here-doc adds a trailing newline,
-    # and that alone must not be treated as a malformed token.
-    tok=\$(printf '%s' \"\$tok\" | tr -d '\\r\\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*\$//')
-    if [ -z \"\$tok\" ]; then echo 'AGENT_TOKEN_MISSING'; exit 0; fi
-    # ⚠️ Validate the SHAPE. \`claude setup-token\` is interactive, so piping its
-    #    stdout captures the banner, the URL and ANSI colour codes rather than the
-    #    token. That stores ~2000 bytes of terminal output which fetches fine and
-    #    then fails three steps later as a bare \"Not logged in\". Seen 2026-08-28.
-    # ⚠️ The secret often holds \`claude setup-token\`'s whole banner rather than the
-    #    token, because that command is interactive and everyone pipes it. Rather
-    #    than fail, recover the token from inside the blob. Happened on four
-    #    consecutive attempts 2026-08-28.
-    case \"\$tok\" in
-      sk-ant-*) : ;;
-      *)
-        extracted=\$(printf '%s' \"\$tok\" | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \\
+    if [ -z \"\$(printf '%s' \"\$tok\" | tr -d '[:space:]')\" ]; then echo 'AGENT_TOKEN_MISSING'; exit 0; fi
+    # 'claude setup-token' is INTERACTIVE, so everyone pipes it and the secret ends
+    # up holding its banner, URL and ANSI codes instead of the token. Recover the
+    # token from inside the blob rather than failing.
+    # ⚠️ Strip ANSI but KEEP the line structure, then grep. Collapsing newlines
+    #    FIRST welds the next word onto the token — a banner reading
+    #    \"<esc>sk-ant-TOKEN<esc>\\nDone.\" yielded \"sk-ant-TOKENDone\", which passes
+    #    every check here and then fails at runtime as a bare \"Not logged in\".
+    tok=\$(printf '%s' \"\$tok\" | sed -e 's/\\x1b\\[[0-9;?]*[a-zA-Z]//g' \\
           | grep -oE 'sk-ant-[A-Za-z0-9_-]+' | head -1)
-        if [ -n \"\$extracted\" ]; then tok=\"\$extracted\"
-        else echo 'AGENT_TOKEN_MALFORMED'; exit 0; fi ;;
-    esac
-    case \"\$tok\" in
-      *[![:print:]]*|*\ *) echo 'AGENT_TOKEN_MALFORMED'; exit 0 ;;
-    esac
+    if [ -z \"\$tok\" ]; then echo 'AGENT_TOKEN_MALFORMED'; exit 0; fi
     umask 077
     printf 'export CLAUDE_CODE_OAUTH_TOKEN=%s\\n' \"\$tok\" > ~/.claude-env
     grep -q claude-env ~/.bashrc || echo '[ -f ~/.claude-env ] && . ~/.claude-env' >> ~/.bashrc

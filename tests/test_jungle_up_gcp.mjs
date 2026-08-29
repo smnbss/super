@@ -648,8 +648,39 @@ test('setup instructions never pipe setup-token stdout into a secret', () => {
 test('the fetched secret is validated for shape, not just presence', () => {
   const src = readFileSync(CLI, 'utf8');
   assert.match(src, /AGENT_TOKEN_MALFORMED/);
-  assert.match(src, /sk-ant-/, 'must check the token prefix');
-  assert.match(src, /\[!\[:print:\]\]|print:/, 'must reject escape codes and spaces');
+  assert.match(src, /AGENT_TOKEN_MISSING/);
+  // Extraction by this character class is what guarantees the result carries no
+  // space and no escape code, so no separate printable-character guard is needed.
+  assert.match(src, /grep -oE 'sk-ant-\[A-Za-z0-9_-\]\+'/, 'must extract by a restricted class');
+  assert.match(src, /x1b/, 'must strip ANSI before extracting');
+});
+
+// The banner-welding regression, 2026-08-29. Collapsing newlines BEFORE the grep
+// joins the token to the next line: "<esc>sk-ant-TOKEN<esc>\nDone." extracted as
+// "sk-ant-TOKENDone" — which passes every check and then fails at runtime as a
+// bare "Not logged in", the exact symptom the recovery exists to prevent.
+// Both scripts carry their own copy of this function, so assert BOTH. That
+// duplication is stated in jungle_up_gcp.sh's own header: a fix to one does not
+// reach the other, and this test is what makes that survivable.
+const CLONE_CLI = join(REPO, 'skills/brain-clone-in-gcp/setup_gcp.sh');
+
+test('ANSI is stripped WITHOUT collapsing newlines first', () => {
+  for (const f of [CLI, CLONE_CLI]) {
+  const src = readFileSync(f, 'utf8');
+  const fn = src.slice(src.indexOf('fetch_agent_token_from_secret_manager()'));
+  const body = fn.slice(0, fn.indexOf('umask 077'));
+  assert.ok(!/tr -d '\\?\\r\\\\?\\n'/.test(body),
+    'must not collapse newlines before the grep');
+  assert.ok(body.indexOf('x1b') < body.indexOf("grep -oE 'sk-ant-"),
+    'ANSI stripping must come before extraction');
+  }
+});
+
+test('brain-clone-in-gcp creates its VM with a Secret-Manager-capable scope', () => {
+  const src = readFileSync(CLONE_CLI, 'utf8');
+  assert.match(src, /VM_SCOPES=/, 'must define the scope');
+  assert.match(src, /cloud-platform/);
+  assert.match(src, /--scopes="\$VM_SCOPES"/, 'must pass it on instances create');
 });
 
 // Scopes are fixed at creation. Without this the VM cannot reach Secret Manager
