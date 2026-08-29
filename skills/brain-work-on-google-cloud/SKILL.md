@@ -95,7 +95,13 @@ Found while starting a beye session. Tracked as SIM-63.
     not start `fusionauth.weroad.wr` for it. The callback is
     `http://beye.weroad.wr/auth/callback`, so the Chrome host-resolver mapping is what
     makes the login return.
-13. **The operator ADC must keep being copied, and a registry audit does not prove
+13. **`gcloud` on the VM is NOT the operator.** It authenticates as the default compute
+    service account; the injected ADC serves client libraries, not the gcloud CLI. That
+    account cannot read `weroad-eu-production`'s artifact registry, so
+    `staging-images.update.sh` returned PERMISSION_DENIED for every service until the
+    golden build started passing `--development`. Anything that shells out to `gcloud`
+    on a VM runs as the service account — check that before assuming the ADC covers it.
+14. **The operator ADC must keep being copied, and a registry audit does not prove
     otherwise.** Dropping it was tried on 2026-08-29 and reverted the same day. Nothing
     pulls from a private registry — true, and beside the point. **Jungle compose
     bind-mounts `~/.config/gcloud` into the containers and services authenticate to
@@ -104,13 +110,13 @@ Found while starting a beye session. Tracked as SIM-63.
     dashboard content while the rest of beye keeps working. The real fix is IAM on the VM
     service account, in a WeRoad project — not a change to this script. `SKIP_ADC=1` opts
     out for a stack that provably needs no Google API at runtime.
-14. **`run` always returns 0, so `run cmd || die` can never fire.** Use `run_checked` for
+15. **`run` always returns 0, so `run cmd || die` can never fire.** Use `run_checked` for
     any command whose failure must stop the script. `session create` reported success for
     a branch it never created because of this.
-15. **Databases are the one thing nothing refreshed.** `golden build` restores them once,
+16. **Databases are the one thing nothing refreshed.** `golden build` restores them once,
     at image-build time; `session create` never touched them. `session refresh-db`
     restores only the session's own databases — one, not 84.
-16. **The service-to-database mapping is NOT in the resolved compose config.** Only 5 of
+17. **The service-to-database mapping is NOT in the resolved compose config.** Only 5 of
     ~88 services expose any DB variable through `docker compose config`, because the
     jungle declares env with the long-form `env_file: [{path: …}]`, which compose does
     not inline. Read the name from each repo's own deploy env file, and note that BOTH

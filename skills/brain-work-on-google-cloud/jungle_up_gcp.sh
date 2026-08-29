@@ -384,8 +384,18 @@ cmd_golden_build() {
   # and correct here, because the VM tree is disposable.
   run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/hosts.init.sh"
 
-  log "Pulling the staging images. This is the slow step."
-  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/staging-images.update.sh"
+  # ⚠️ --development IS REQUIRED, and without it this step has NEVER worked. Measured
+  #    2026-08-29: `gcloud` ON THE VM authenticates as the default compute service
+  #    account, not as the operator — the injected ADC is for client libraries, not for
+  #    the gcloud CLI. That account has no `artifactregistry.repositories.get` on
+  #    weroad-eu-production, so every image lookup returns PERMISSION_DENIED and the
+  #    step fails for all ~40 services while the build carries on.
+  #
+  #    --development is what the tool itself recommends in that error, and it is the
+  #    right answer here: it skips the registry and lets compose build from source,
+  #    which is what a session stack does anyway. With it the step exits 0.
+  log "Configuring images for local builds (--development, no registry access needed)."
+  run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/staging-images.update.sh --development"
 
   log "Restoring the databases"
   run vm_ssh "$GOLDEN_INSTANCE" "cd $JUNGLE_REMOTE_DIR && ./bin/jungle.up.sh reverseproxy.wr"
