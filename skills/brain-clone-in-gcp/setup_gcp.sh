@@ -8,7 +8,7 @@ DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_SSH_MODE="oslogin"
 DEFAULT_ZONE="europe-west1-b"
 NODE_VERSION="20.19.0"
-STARTUP_MARKER="/var/lib/super-clone-in-gcp/startup.done"
+STARTUP_MARKER="/var/lib/brain-clone-in-gcp/startup.done"
 
 usage() {
   cat <<'EOF'
@@ -322,7 +322,7 @@ cat >"$STARTUP_SCRIPT" <<HEAD
 #!/usr/bin/env bash
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
-exec > >(tee -a /var/log/super-clone-in-gcp.log) 2>&1
+exec > >(tee -a /var/log/brain-clone-in-gcp.log) 2>&1
 STARTUP_MARKER="$STARTUP_MARKER"
 NODE_VERSION="$NODE_VERSION"
 HEAD
@@ -681,7 +681,7 @@ for _ in $(seq 1 60); do
   fi
   sleep 10
 done
-[[ "$READY" -eq 1 ]] || die "VM did not become ready in time. Check serial console or /var/log/super-clone-in-gcp.log."
+[[ "$READY" -eq 1 ]] || die "VM did not become ready in time. Check serial console or /var/log/brain-clone-in-gcp.log."
 
 log "Copying project files..."
 gcloud_ssh --command "mkdir -p ~/brain"

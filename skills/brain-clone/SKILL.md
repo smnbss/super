@@ -1,11 +1,11 @@
 ---
-name: super-clone
+name: brain-clone
 description: >-
   Create an OrbStack Ubuntu machine pre-configured for the current project,
   copying `.env.local`, `sources.md`, and `sources.github.md`. Optional GNOME desktop via XRDP.
 ---
 
-# /super-clone
+# /brain-clone
 
 Create a cloned OrbStack Ubuntu machine for the current project.
 
@@ -17,29 +17,29 @@ Create a cloned OrbStack Ubuntu machine for the current project.
 ## Steps
 
 1. Locate the `setup_ubuntu.sh` script in the skill directory:
-   - `.agents/skills/super-clone/setup_ubuntu.sh` (Codex and Gemini)
-   - `.claude/skills/super-clone/setup_ubuntu.sh` (Claude)
+   - `.agents/skills/brain-clone/setup_ubuntu.sh` (Codex and Gemini)
+   - `.claude/skills/brain-clone/setup_ubuntu.sh` (Claude)
 2. Run it with the current working directory as the project path:
    ```bash
-   <skill-dir>/super-clone/setup_ubuntu.sh "$(pwd)"
+   <skill-dir>/brain-clone/setup_ubuntu.sh "$(pwd)"
    ```
    For a machine with GNOME desktop and XRDP:
    ```bash
-   <skill-dir>/super-clone/setup_ubuntu.sh "$(pwd)" --desktop
+   <skill-dir>/brain-clone/setup_ubuntu.sh "$(pwd)" --desktop
    ```
    By default it copies both `sources.md` (non-GitHub → `src/`) and `sources.github.md` (repos → `github/`).
    To copy a single specific sources file (e.g. `sources.dev.super.md`) as `sources.md` instead, pass it positionally or via `--source` (this skips the `sources.github.md` companion):
    ```bash
-   <skill-dir>/super-clone/setup_ubuntu.sh sources.dev.super.md
-   <skill-dir>/super-clone/setup_ubuntu.sh --source sources.dev.super.md
+   <skill-dir>/brain-clone/setup_ubuntu.sh sources.dev.super.md
+   <skill-dir>/brain-clone/setup_ubuntu.sh --source sources.dev.super.md
    ```
    Combine both:
    ```bash
-   <skill-dir>/super-clone/setup_ubuntu.sh sources.dev.super.md --desktop
+   <skill-dir>/brain-clone/setup_ubuntu.sh sources.dev.super.md --desktop
    ```
    To reuse (and upgrade) an existing machine instead of creating a new timestamped one, pass `--name`:
    ```bash
-   <skill-dir>/super-clone/setup_ubuntu.sh --name super-dev
+   <skill-dir>/brain-clone/setup_ubuntu.sh --name super-dev
    ```
    If `super-dev` exists, it will be started (if stopped) and `super install --all` will run inside it to refresh tooling. If it doesn't exist, a new machine is created with that name.
 3. Report the machine name created or any errors.

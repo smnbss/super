@@ -1,11 +1,11 @@
 ---
-name: super-clone-in-gcp
+name: brain-clone-in-gcp
 description: >-
   Create a persistent GCP Ubuntu machine pre-configured for the current project,
   copying `.env.local`, `sources.md`, and `sources.github.md`. Optional GNOME desktop via XRDP.
 ---
 
-# /super-clone-in-gcp
+# /brain-clone-in-gcp
 
 Create a persistent Google Compute Engine Ubuntu machine for the current project.
 
@@ -17,43 +17,43 @@ Create a persistent Google Compute Engine Ubuntu machine for the current project
 ## Steps
 
 1. Locate the `setup_gcp.sh` script in the skill directory:
-   - `.agents/skills/super-clone-in-gcp/setup_gcp.sh` (Codex and Gemini)
-   - `.claude/skills/super-clone-in-gcp/setup_gcp.sh` (Claude)
+   - `.agents/skills/brain-clone-in-gcp/setup_gcp.sh` (Codex and Gemini)
+   - `.claude/skills/brain-clone-in-gcp/setup_gcp.sh` (Claude)
 2. Run it with the current working directory as the project path:
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)"
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh "$(pwd)"
    ```
    For a machine with GNOME desktop and XRDP:
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --desktop
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh "$(pwd)" --desktop
    ```
    If your project does not have a `default` VPC network, specify `--network` and `--subnet`:
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --network weroad-vpc-1-development --subnet weroad-eu-subnet-1-development
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh "$(pwd)" --network weroad-vpc-1-development --subnet weroad-eu-subnet-1-development
    ```
    By default it copies both `sources.md` (non-GitHub → `src/`) and `sources.github.md` (repos → `github/`).
    To copy a single specific sources file (e.g. `sources.dev.super.md`) as `sources.md` instead, pass it positionally or via `--source` (this skips the `sources.github.md` companion):
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh sources.dev.super.md
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" --source sources.dev.super.md
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh sources.dev.super.md
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh "$(pwd)" --source sources.dev.super.md
    ```
    Combine both:
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh "$(pwd)" sources.dev.super.md --desktop
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh "$(pwd)" sources.dev.super.md --desktop
    ```
    To reuse (and upgrade) an existing instance instead of creating a new timestamped one, pass `--name`:
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh --name super-dev
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh --name super-dev
    ```
    If the instance exists, it will be started (if TERMINATED) and `super install --all` will run over SSH to refresh tooling. If it doesn't exist, a new instance is created with that name.
    To restrict SSH/XRDP to a specific IP or CIDR (instead of the auto-detected public IP), pass `--source-ip`:
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh --name super-dev --source-ip 203.0.113.4/32
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh --name super-dev --source-ip 203.0.113.4/32
    ```
    Multiple IPs/CIDRs can be passed comma-separated (e.g. `--source-ip 1.2.3.4/32,5.6.7.0/24`).
    For the full flag list (`--project`, `--zone`, `--machine-type`, `--disk-size-gb`, `--ssh-mode`, `--network`, `--subnet`, `--source-ip`, `--name`, `--dry-run`), run:
    ```bash
-   <skill-dir>/super-clone-in-gcp/setup_gcp.sh --help
+   <skill-dir>/brain-clone-in-gcp/setup_gcp.sh --help
    ```
 3. Report the machine name created or any errors.
 

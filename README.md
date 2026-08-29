@@ -144,7 +144,7 @@ Skills are prompt-based capabilities installed into each CLI's native skill dire
 | **super-setup** | Project-scoped setup wizard — run from inside your brain project. Writes `<project>/.super/brain.config.yml`, scaffolds `agents/memory/outputs/src`, and generates `<project>/sources.md`. Run right after `super install`. |
 | **super-persist** | Summarize the conversation and save it to the session file |
 | **super-resume** | Read the session file and summarize what the session is about |
-| **super-clone** | Create an OrbStack Ubuntu machine pre-configured for the current project |
+| **brain-clone** | Create an OrbStack Ubuntu machine pre-configured for the current project |
 
 ### Brain skills
 
@@ -209,7 +209,7 @@ mkdir ~/my-project && cd ~/my-project
 super install
 ```
 
-Or use `/super-clone` to provision an OrbStack machine automatically.
+Or use `/brain-clone` to provision an OrbStack machine automatically.
 
 ## License
 

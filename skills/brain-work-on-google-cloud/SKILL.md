@@ -115,7 +115,7 @@ the `Host` header arrives unmodified and nginx-proxy routes correctly.
 
 ## Why this duplicates setup_gcp.sh
 
-`super-clone-in-gcp/setup_gcp.sh` also creates a VM, detects the caller's public IP
+`brain-clone-in-gcp/setup_gcp.sh` also creates a VM, detects the caller's public IP
 and scopes a firewall rule to it. This skill reimplements all three, because
 `setup_gcp.sh` additionally installs Ollama, Chromium, three AI CLIs and the
 `super` bootstrap, and copies `.env.local` and both sources files.

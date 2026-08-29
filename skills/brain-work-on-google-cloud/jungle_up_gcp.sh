@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # jungle_up_gcp.sh — create and manage per-session GCP VMs running a WeRoad jungle stack.
 #
-# ⚠️ This script deliberately does NOT call super-clone-in-gcp/setup_gcp.sh. It
+# ⚠️ This script deliberately does NOT call brain-clone-in-gcp/setup_gcp.sh. It
 #    reimplements instance creation, public-IP detection, the IP-scoped firewall
 #    rule and the SSH wait. Two copies of that logic now exist and will drift.
 #    See SKILL.md, "Why this duplicates setup_gcp.sh".
