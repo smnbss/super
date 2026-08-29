@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
 DEFAULT_MACHINE_TYPE="e2-standard-4"
 DEFAULT_DISK_SIZE_GB="80"
 DEFAULT_IMAGE_FAMILY="ubuntu-2404-lts-amd64"
@@ -707,7 +709,18 @@ done
 
 log "Copying project files..."
 gcloud_ssh --command "mkdir -p ~/brain"
-gcloud_scp "$ENV_LOCAL" "$INSTANCE_NAME:~/brain/.env.local"
+# ⚠️ .env.local IS NO LONGER COPIED. It holds 62 keys, ~27 of them live secrets —
+#    including POSTGRESQL_PRODUCTION_PASSWORD — and copying it put all of them on every
+#    clone VM. SIM-64 had already rejected this file as a carrier for the Claude token
+#    for exactly that reason; SIM-66 applies the same verdict to the other 61.
+#
+#    The VM rebuilds the file itself from Secret Manager, using its own service account,
+#    so no credential value originates on the laptop or crosses the wire from it.
+#    Secrets are named brain-env-<KEY> and ENUMERATED at run time — never listed here.
+gcloud_scp "$SKILL_DIR/files/materialise-env-local.sh" "$INSTANCE_NAME:/tmp/materialise-env-local.sh" >/dev/null \
+  || die "could not copy materialise-env-local.sh to $INSTANCE_NAME"
+gcloud_ssh "$INSTANCE_NAME" --command "chmod +x /tmp/materialise-env-local.sh && /tmp/materialise-env-local.sh '$PROJECT_ID'" \
+  || die "could not build ~/brain/.env.local on $INSTANCE_NAME from Secret Manager"
 if [[ -f "$SOURCES_MD" ]]; then
   gcloud_scp "$SOURCES_MD" "$INSTANCE_NAME:~/brain/sources.md"
 fi
