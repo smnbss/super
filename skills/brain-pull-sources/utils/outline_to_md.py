@@ -48,7 +48,7 @@ All-collections mode:
     with a non-zero exit at the end so pull_sources still marks the source failed.
 
 Environment:
-    OUTLINE_API_TOKEN  -- Outline personal API token (if --token not provided)
+    OUTLINE_API_KEY    -- Outline personal API token (if --token not provided)
     OUTLINE_BASE_URL   -- Outline base URL (default https://docs.weroad.com)
 
 Notes:
@@ -430,8 +430,8 @@ def main():
     parser.add_argument("url", nargs="?",
                         help="Collection URL or urlId. Omit it, or pass just the base URL "
                              "(https://docs.weroad.com/), to export EVERY collection the token can see.")
-    parser.add_argument("--token", default=os.environ.get("OUTLINE_API_TOKEN", ""),
-                        help="Outline API token (or set OUTLINE_API_TOKEN env var)")
+    parser.add_argument("--token", default=os.environ.get("OUTLINE_API_KEY", ""),
+                        help="Outline API token (or set OUTLINE_API_KEY env var)")
     parser.add_argument("--list", action="store_true",
                         help="List previously exported collections and exit")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -452,7 +452,7 @@ def main():
 
     token = args.token
     if not token:
-        print("ERROR: Outline API token required. Set OUTLINE_API_TOKEN or use --token.",
+        print("ERROR: Outline API token required. Set OUTLINE_API_KEY or use --token.",
               file=sys.stderr)
         sys.exit(1)
 
