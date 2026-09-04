@@ -92,28 +92,62 @@ once from `resources/morning-start-additional.template.md` (relative to this ski
   cut -f1 .github-changed-repos.tsv
   ```
 
-  **Zero lines → skip the phase entirely.** Report `Services: 0 docs (no repos moved)` and go to
-  1b.5. Do not dispatch a subagent "just to check" — that check *is* the ledger.
+  ⚠️⚠️ **THE LEDGER IS A STARTING POINT, NOT THE WORK-LIST. GATE ON DIVERGENCE, NEVER ON MOVEMENT.**
+  `brain-rebuild-services` §0.1 is explicit about this and this phase must match it. The ledger
+  records *"HEAD moved during this run"*, which is a different question from *"is this doc behind its
+  clone?"*. A repo whose HEAD moves on a day its doc is **not** regenerated — the run failed, was
+  interrupted, or the clone was skipped for uncommitted work — never appears in a later ledger, so a
+  ledger-driven work-list can **never** repair it. Measured 2026-09-04: the divergence sweep read
+  **25 MATCH · 26 DIVERGED · 18 NO-STAMP · 2 BAD-SRC**, and it caught `weroad/cli` (3 files stale)
+  plus **both** `.db.agent.md` docs, for `wemeet-hosted-ops` and `wetracker` — **all three absent from
+  that day's 56-line ledger.**
+
+  **Zero ledger lines does NOT mean zero work.** Run the divergence sweep anyway.
 
   ⚠️ **Pass the CHANGED FILE LIST, not just the repo name.** A repo name invites a full working-tree
-  read; a file list does not. It is one `git -C` per repo and zero model requests:
+  read; a file list does not. It is one `git -C` per doc and zero model requests:
 
   ```bash
-  # ⚠️ The read variable is `repopath`, NOT `path`. In zsh `path` is a special array TIED TO
-  # $PATH, so `read -r repo path` overwrites PATH with a repo path and EVERY command in the loop
-  # then dies with "command not found" - grep, head, cut and git all fail, every `rec` comes back
-  # empty, and the rule below reads that as "inert, do not dispatch". Measured on a real ledger
-  # 2026-09-04: 0 work-list entries against a true 25. Never name a shell variable `path`.
-  while IFS=$'\t' read -r repo repopath; do
-    rec=$(grep -oE 'head: [0-9a-f]+' "outputs/services/**/$repo.agent.md" 2>/dev/null | head -1 | cut -d' ' -f2)
-    [ -n "$rec" ] && printf '=== %s\n%s\n' "$repo" \
-      "$(git -C "$repopath" diff --name-only "$rec..HEAD" 2>/dev/null)"
-  done < .github-changed-repos.tsv
+  # ⚠️ TWO TRAPS LIVE IN THIS LOOP AND BOTH FAIL SILENTLY IN THE EXPENSIVE DIRECTION.
+  #
+  # 1. NEVER name a shell variable `path`. In zsh `path` is a special array TIED TO $PATH, so
+  #    `read -r repo path` overwrites PATH and EVERY later command in the loop dies with
+  #    "command not found" - grep, head, cut and git all fail, every `rec` comes back empty, and
+  #    the rule below reads that as "inert, do not dispatch". Measured on a real ledger
+  #    2026-09-04: 0 work-list entries against a true 25.
+  #
+  # 2. NEVER glob the doc path. `"outputs/services/**/$repo.agent.md"` is WRONG twice over: `**`
+  #    does not recurse without globstar, and inside double quotes it is not glob-expanded at all,
+  #    so grep receives a literal path that never exists. `rec` is then empty for EVERY repo and
+  #    the whole work-list reads as inert. Verified 2026-09-04 against a real doc: the quoted glob
+  #    returns "No such file or directory" while `find` returns head 7a43190d. USE `find`.
+  #
+  # 3. ANCHOR the stamp read to the `verified:` comment. A bare `head: [0-9a-f]+` grep matches the
+  #    FIRST occurrence anywhere in the doc, and a dated note or a YAML frontmatter field can carry
+  #    an OLDER sha. Measured 2026-09-04: unison.agent.md returned acbbd5e4 from its frontmatter
+  #    while its verified stamp read cad5b77c, so the gate reported a false DIVERGED on a doc that
+  #    was current. (That frontmatter field was itself stale and has been corrected.)
+  #
+  # Drive the loop from the DOCS, not from the ledger - that is what makes it a divergence gate.
+  find outputs/services -name '*.agent.md' | while read -r doc; do
+    rec=$(grep -m1 -oE '<!-- verified:[^>]*head: [0-9a-f]{7,40}' "$doc" | grep -oE '[0-9a-f]{7,40}$')
+    src=$(grep -m1 -oE '<!-- verified:[^>]*source: [^ |]+' "$doc" | grep -oE '[^ ]+$' | sed 's#/$##')
+    [ -z "$rec" ] && { echo "NO-STAMP $doc"; continue; }
+    [ -d "$src/.git" ] || { echo "BAD-SRC $doc -> $src"; continue; }
+    cur=$(git -C "$src" rev-parse HEAD 2>/dev/null)
+    case "$cur" in "$rec"*) continue;; esac          # MATCH, nothing to do
+    printf '=== %s | %s | %s..%s\n%s\n' "$doc" "$src" "$rec" "${cur:0:8}" \
+      "$(git -C "$src" diff --name-only "$rec..HEAD" 2>/dev/null)"
+  done
   ```
 
-  A repo whose list comes back **empty is inert — do not dispatch it at all.** The worker is
+  A doc whose file list comes back **empty is inert — do not dispatch it at all.** The worker is
   instructed to stop rather than fall back to a full read if the list is missing, so omitting the
   list does not fail safe: it fails expensive.
+
+  ⚠️ **`NO-STAMP` and `BAD-SRC` are findings, not errors to swallow.** A doc with no `head:` can never
+  take the cheap path and needs a human. A `BAD-SRC` doc declares a `source:` that is not a git repo —
+  **report it, and correct nothing until a human decides which path is right.**
 - **1b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its
   `run <path>` directives in order. *After 1b, before 1c.*
 - **1c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`, plus `AGENTS.md` and `DEVELOPER.md`.
