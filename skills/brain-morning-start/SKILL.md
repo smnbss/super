@@ -99,10 +99,15 @@ once from `resources/morning-start-additional.template.md` (relative to this ski
   read; a file list does not. It is one `git -C` per repo and zero model requests:
 
   ```bash
-  while IFS=$'\t' read -r repo path; do
+  # ⚠️ The read variable is `repopath`, NOT `path`. In zsh `path` is a special array TIED TO
+  # $PATH, so `read -r repo path` overwrites PATH with a repo path and EVERY command in the loop
+  # then dies with "command not found" - grep, head, cut and git all fail, every `rec` comes back
+  # empty, and the rule below reads that as "inert, do not dispatch". Measured on a real ledger
+  # 2026-09-04: 0 work-list entries against a true 25. Never name a shell variable `path`.
+  while IFS=$'\t' read -r repo repopath; do
     rec=$(grep -oE 'head: [0-9a-f]+' "outputs/services/**/$repo.agent.md" 2>/dev/null | head -1 | cut -d' ' -f2)
     [ -n "$rec" ] && printf '=== %s\n%s\n' "$repo" \
-      "$(git -C "$path" diff --name-only "$rec..HEAD" 2>/dev/null)"
+      "$(git -C "$repopath" diff --name-only "$rec..HEAD" 2>/dev/null)"
   done < .github-changed-repos.tsv
   ```
 
