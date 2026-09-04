@@ -673,10 +673,59 @@ written down.
 
 | Case | Action |
 |---|---|
-| Source already listed | Update **only** its count/figure text. Copy every other line of its entry through **verbatim**. |
+| Source already listed | Update **only** its count/figure text. Copy every **durable** line of its entry through **verbatim**. A dated run-log line is not durable — see the eviction rule below. |
 | Source on disk (or in `sources.md` / `sources.github.md`) but **absent** from the block | Add a minimal entry — name, path, counts — and **flag it in the Phase 5 digest as needing annotation.** Never invent a trap note. |
 | Entry present but its tree is **gone** | Remove the entry, and **name in the digest every annotation line you dropped with it**, so a real caveat can be re-homed rather than lost. |
 | Anything you cannot classify | Leave it exactly as it is and report it. |
+
+#### ⚠️⚠️ The eviction rule — this block is NOT a changelog, and without this rule it can only grow
+
+**Measured 2026-09-04: `AGENTS.md` reached 210,519 B, about 58,500 tokens loaded into every session
+on every surface, because `CLAUDE.md` and `GEMINI.md` are symlinks to it. `## Repository Layout` was
+125,983 B of that — 59.8%. Of that block, only 2,645 B was actual path-and-gloss layout. The other
+123,337 B, 98% of the block, was dated narrative.** The cause was the merge contract above: it said
+copy every other line through verbatim, and nothing ever said what to stop copying. Each run appended
+another dated paragraph and no run ever removed one.
+
+**Every annotation line in this block is one of two kinds. Classify each one before you copy it.**
+
+1. **A DURABLE TRAP** — a timeless operational constraint with no run date attached. "Spreadsheets
+   export the first sheet only." "Cite by `gdrive_url`, never by path." "`metadata.json` `attendees`
+   is the invite list, not the attendance list." "Unique-count, never line-count." **Copy these
+   through verbatim, forever. The carry-through rule above governs them and does not change.**
+2. **A DATED RUN-LOG LINE** — it opens with or contains a specific date, and it reports what one run
+   measured. "2026-08-24: 3 repos moved HEAD." "This run's pull reported 60 new and 65 pruned."
+   **Do NOT copy these through. They do not belong in this block at all.**
+
+**Where a dated line belongs instead.** Every source in this block already has an owning `memory/L1`
+page with a working cap and a rotating archive. `src/gdrive/` → [[gdrive]]. `src/confluence/` →
+[[confluence]]. `src/linear/` → [[linear]]. `src/metabase/` → [[metabase]]. `src/idp/` and
+`outputs/services/` → [[services]]. `github/` → [[github]]. `src/personio/` → [[team-members]].
+`src/gmeet/` → [[meetings]]. `src/workflowly/` → [[workflowy]]. **Write the dated fact to that page,
+which Phase 3 already does. Then leave it out of here.** This block carries the CURRENT count and the
+durable traps, and points at the owning page for the history.
+
+⚠️ **This is not a licence to drop a caveat.** A line carrying a date AND a durable rule is durable —
+keep it, and keep its date, because the date is part of the claim. When in doubt, treat the line as
+durable and keep it. **The failure this rule prevents is unbounded growth, not thoroughness.** The
+carry-through rule still outranks brevity.
+
+#### Byte budget — measure it, and report a breach
+
+`AGENTS.md` had no cap and no rotation target for its whole life, which is why it grew unbounded
+while every `memory/` page stayed inside 40,960 B. It now has one.
+
+```bash
+stat -f '%z' AGENTS.md          # whole file  — target ≤ 61,440 B (60 KB), hard warn at 81,920 B
+```
+
+- **Per-block targets: `brain-rebuild-memory` ≤ 24,576 B · `repository-layout` ≤ 12,288 B.**
+- These are **budgets, not shears.** ⚠️ **Never drop a durable trap to hit a number** — the
+  carry-through rule wins, exactly as it does for the `memory/` page cap. If the block cannot fit
+  inside its budget on durable content alone, **say so in the Phase 5 digest and let a human decide**,
+  the same way an over-cap service doc is escalated rather than silently cut.
+- Report the whole-file size and both block sizes in the Phase 5 digest **every run**, breach or not.
+  A number nobody prints is a number nobody notices moving.
 
 - **Re-measure every count from disk this run.** Never read a figure back out of the block you are
   about to rewrite — that is precisely how a stale count survives many rebuilds.

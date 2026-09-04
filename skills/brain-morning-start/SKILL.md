@@ -111,9 +111,30 @@ once from `resources/morning-start-additional.template.md` (relative to this ski
   list does not fail safe: it fails expensive.
 - **1b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its
   `run <path>` directives in order. *After 1b, before 1c.*
-- **1c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/` (46 files: 19 L1 + 27 L2), plus
-  `AGENTS.md` and `DEVELOPER.md`. It only **writes markdown** — the gbrain index is refreshed by the
-  single `gbrain sync` in Part 3. **No gbrain step inside 1c.** *After 1b.5.*
+- **1c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`, plus `AGENTS.md` and `DEVELOPER.md`.
+  It only **writes markdown** — the gbrain index is refreshed by the single `gbrain sync` in Part 3.
+  **No gbrain step inside 1c.** *After 1b.5.*
+  ⚠️ **Never state the L1/L2 file counts here or in the dispatch prompt. Re-measure them from disk**
+  (`ls memory/L1/*.md | wc -l`, `ls memory/L2/*.md | wc -l`). A count written into a skill file is a
+  count nobody re-measures, and it goes stale silently.
+
+  ⚠️⚠️ **PASS THE `AGENTS.md` BYTE BUDGET INTO THE 1c DISPATCH, AND MEASURE IT BEFORE AND AFTER.**
+  `AGENTS.md` is loaded into every session on every surface, because `CLAUDE.md` and `GEMINI.md` are
+  symlinks to it. **Measured 2026-09-04 it had reached 210,519 B, about 58,500 tokens per session,
+  because it was the one generated page on this brain with no cap and no rotation target.** Its
+  `## Repository Layout` block was 125,983 B, and only 2,645 B of that was actual layout — 98% was
+  dated run-log narrative already duplicated in the `memory/L1` pages that own it.
+
+  ```bash
+  stat -f '%z' AGENTS.md    # target ≤ 61,440 B · hard warn at 81,920 B
+  ```
+
+  The generator carries the rule (`brain-rebuild-memory` §3.5a-2, "the eviction rule"): a **durable
+  trap** is copied through verbatim forever, a **dated run-log line** is written to the owning
+  `memory/L1` page and left out of `AGENTS.md`. **Your job here is only to measure and report** —
+  ⚠️ **never instruct the subagent to cut a caveat to hit the number.** The carry-through rule
+  outranks the budget. If the file cannot fit on durable content alone, that is a finding for
+  Simone, not something to fix by deleting.
 
 ## Part 2 — Harvest meetings since last harvest (parallel with Part 1a)
 
@@ -225,9 +246,16 @@ Clones:   <N> repos with local work — <merged | skipped | CONFLICT> (else "all
 Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
 Services: <N> docs refreshed, <M> repos skipped (HEAD unchanged)
 Memory:   L2 <N> files, L1 <N> MOCs · gbrain graph: <N> edges, <N> timeline
+Context:  AGENTS.md <N> B (<±N> B) · layout block <N> B · budget 61,440 B <ok | OVER>
 Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet/
 gbrain reindex: <N> chunks embedded
 ```
+
+**The `Context:` line is not decoration.** `AGENTS.md` grew to 210,519 B — roughly 58,500 tokens
+charged to every session on every surface — over weeks in which no run ever printed its size. **A
+number nobody prints is a number nobody notices moving.** Print it every run, breach or not, and
+print the delta so a slow climb is visible before it becomes a rewrite. Re-measure both figures from
+disk; never carry either forward.
 
 **`Clones:` and `Changed:` come from two files `github_clone` writes during Part 1a** (repo root),
 both truncated at the start of each run: `.github-clone-report.md` (anything that wasn't a clean
