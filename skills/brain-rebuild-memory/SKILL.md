@@ -608,6 +608,15 @@ contract.
    theme, each showing the L2 pages it connects to as `[[wikilinks]]`. Derive the groupings and the
    L1→L2 edges from the just-rebuilt files (the Phase 3 derivation table plus each L2's `Topics:`
    footer). This is the traversal spine and must match the real link graph.
+   ⚠️⚠️ **THE KNOWLEDGE MAP IS A LINK GRAPH, NOT A DIGEST. THE EVICTION RULE IN §3.5a-2 APPLIES HERE
+   TOO.** Each entry gets the L1 page name, a SHORT standing gloss of what that page is for, and its
+   `[[wikilinks]]`. **It does NOT get a paragraph of what that page's newest dated entry says.**
+   Measured 2026-09-04: this subsection had grown to 24,626 B carrying 39 ⚠️ markers, because each run
+   appended its own findings under the L1 it touched — "Its 2026-09-04 entry records…". **That prose
+   belongs on the L1 page itself, which already has a cap and a rotating archive. Write it there and
+   link to it here.** ⚠️ The navigation RULES that live in this section are durable and stay: the
+   deleted-doc wikilink guard, both halves of the `.db.agent.md` guard, and the `erp-buddy` inverted
+   case. **Never drop those to save bytes** — they are named in the carry-through rule below.
 3. **Freshness Tracking** — the `verified:` fact-block convention, `staleness_threshold:` frontmatter,
    the `superseded:` marker, and the rule that a claim wrong in *every* clause is deleted rather than
    annotated.
