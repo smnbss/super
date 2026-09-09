@@ -12,27 +12,63 @@ Rebuild the memory layers L2 and L1 from `outputs/` and `src/`.
 
 ## Execution discipline
 
-⚠️⚠️ **ONE SHORT-LIVED WORKER PER TARGET FILE. Do not walk the target list in one context.**
+⚠️⚠️ **ONE WORKER PER *BATCH OF TARGETS*, SIZED BY WEIGHT. Never one context that walks the
+whole target list, and never one worker for a single cheap page.**
 
-This phase is the worst cost-weighted step in the morning routine — **4.9M input-equivalent
-tokens**, of which **2.9M were CACHE WRITES over just 66 requests** (2026-08-18). A cache-write
-figure that size against that few requests means the prompt cache was being **rebuilt almost
-every request**, which is what an 80-minute runtime with multi-minute thinking gaps produces:
-one long-lived context that grows with every target it touches, re-paying for the whole prefix
-each time and outliving the cache TTL in the gaps.
+This phase is the worst cost-weighted step in the morning routine, and it has now failed in
+**both** directions. Read both measurements before changing the rule again.
+
+**2026-08-18 — too few workers.** 4.9M input-equivalent tokens, of which **2.9M were CACHE WRITES
+over just 66 requests**. A cache-write figure that size against that few requests means the prompt
+cache was being rebuilt almost every request: one long-lived context growing with every target it
+touched, re-paying the whole prefix each time and outliving the cache TTL in the thinking gaps.
+The fix was one worker per target file.
+
+**2026-09-09 — too many workers. That fix solved half the problem and created a new one.** The
+phase fanned out to **30 workers and cost 71.6M effective tokens** (weighting cache reads 0.1x,
+cache writes 2x, output 5x). Of that: **26.1M (36%) was re-reading an identical ~130K header**, and
+**29.6M (41%) was STILL cache writes** — the rebuild-per-worker problem was not fixed, only spread
+across 30 workers. **Actual output was 1.08M tokens, 8% of the cost.**
+
+⚠️⚠️ **THE MEASUREMENT THAT SETTLES THE RULE, AND IT IS COUNTERINTUITIVE: A WORKER'S CACHE-WRITE
+SHARE FALLS AS IT RUNS LONGER**, because the fixed ~130K boot amortises. Measured 2026-09-09:
+`team-content-seo.md` at 22 turns paid **61%** of its cost in cache writes; `team-staff.md` at 44
+turns paid 43%; `monkeys-wiki.md` at 117 turns paid **25%**. **So a one-page worker is the WORST
+shape available — it pays a full boot and never amortises it.** Batching light targets is a win on
+*both* axes at once, and the 2026-08-18 fear does not apply to a BOUNDED batch.
+
+⚠️ **Only ~1.4% of a worker's opening context is its own task prompt.** The rest is the harness
+system prompt and eager tool schemas (~72K, not yours to change), `AGENTS.md` + `MEMORY.md` (~36K),
+the skill listing (~10K) and deferred tool names (~9K). **You cannot shrink the header from here.
+You can only pay it fewer times.** That is what this rule is for.
 
 The fix is structural, and this skill already has the mechanism for it — **every target
 declares its own `inputs`** (see the state-file schema below). So:
 
-- **One worker per output file.** It receives that target's `inputs` glob set and nothing else.
-  It reads, writes one file, and exits. Its context stays small and stays hot.
+- **Weigh each dirty target first, then group.** A target is HEAVY if it is a team L2 with a
+  live Linear/Personio join, or any target whose declared `inputs` exceed roughly 15 files or
+  200 KB. Everything else is LIGHT.
+- **HEAVY target → its own worker.** Measured 2026-09-09, these ran 2.3M–5.9M each and are already
+  amortising their boot: `teams`, `monkeys-wiki`, `technologies`+`releases`, the gdrive-driven L2
+  set, `skills`+`system-map`, `cross-references`, `team-members`, `product-areas`+`business-domains`.
+- **LIGHT targets → batch them, MAX 5 PER WORKER, GROUPED BY SHARED `inputs`.** The grouping matters
+  as much as the count: all eleven `team-*.md` targets read the same `brain.config.yml` `teams[]`,
+  the same `src/personio/personio-staff.tsv` and the same weekly gmeet digest, so a batch reads
+  those **once instead of eleven times**. Measured 2026-09-09: 13 workers cost under 2.0M each and
+  **19.5M in total to produce 276K of output**.
+- ⚠️ **A BATCH IS A BOUNDED LIST HANDED TO THE WORKER UP FRONT. It is NOT "walk the target list".**
+  That distinction is the whole difference between this rule and the 2026-08-18 failure. Never let
+  a worker discover more targets as it goes, and never exceed 5.
 - **Never hand a worker the whole `src/` or `outputs/` tree** "for context". The declared
   inputs ARE the context; anything else is prefix you pay to re-cache.
-- **Batch by independence, not by convenience:** all L2 targets are independent of each other,
-  so they go in one fan-out. L1 MOCs depend on L2 output, so they are a second fan-out after it.
-  `AGENTS.md` is last because it depends on both.
-- **A worker that would touch more than a handful of files is mis-scoped** — split the target,
-  or fix its `inputs`.
+- **Dependency order still governs the fan-outs:** all L2 targets are independent of each other, so
+  they go in one fan-out (batched per the rule above). L1 MOCs depend on L2 output, so they are a
+  second fan-out after it. `AGENTS.md` is last because it depends on both.
+- **A worker whose batch would touch more than a handful of files beyond its declared `inputs` is
+  mis-scoped** — split the batch, or fix the `inputs`.
+- ⚠️ **Report the worker count and the per-worker turn count in the Phase 5 digest.** The failure
+  mode in both directions was invisible until someone measured it. A phase that silently drifts back
+  to 30 workers, or back to one, must be caught on the next run and not three weeks later.
 - ⚠️⚠️ **EVERY NESTED `Agent` DISPATCH MUST PASS `subagent_type: "general-purpose"` EXPLICITLY.
   Never omit it and never let it default.** The `wr-agents` plugin ships a `PreToolUse` hook
   (`hooks/enforce-subagents.sh`) that forces an interactive confirmation whenever an `Agent` call
