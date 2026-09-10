@@ -20,6 +20,29 @@ bulky work. Spawn an `Agent` per phase that invokes the named skill and returns 
 not file dumps** — the verbose output stays in the subagent. Each sub-skill carries its own
 instructions; dispatch and collect, do not restate them here.
 
+### ⚠️ Write the run's findings to ONE briefing file. Never paste them into each dispatch.
+
+**A finding repeated across N dispatch prompts is paid N times.** Measured 2026-09-10: the same
+~10K-token block of source deltas, service-doc findings and open decisions was pasted into **eight
+separate worker prompts** — about **80K tokens of pure duplication**, for content that had a single
+source of truth.
+
+**Do this instead:**
+
+1. Write the run's findings ONCE to `outputs/agents/brain-morning-start/<date>-briefing.md`.
+2. In each dispatch, give the **path** plus the two or three lines that worker specifically needs.
+3. Tell the worker to read the briefing for context it does not already have.
+
+⚠️ **Give a worker the findings that bear on ITS target, not the whole register.** A `team-stomp`
+worker does not need the gdrive export traps. The briefing exists so the shared context is
+addressable, **not so every worker reads all of it** — that would just move the duplication from
+the prompt into the worker's first tool call.
+
+⚠️ **This is one of only three real levers on run cost**, alongside fewer workers and a smaller
+always-loaded `AGENTS.md`. A worker's opening context is ~130K tokens of which only about **1.4%**
+is its own task prompt — so the prompt is not where the bulk sits, but duplicated bulk is the one
+part of it you control completely.
+
 **Gate every phase on a deterministic signal before spending a model on it.** `brain-pull-sources`
 moves 82 declared sources for ~7 model requests because it is a script; `brain-rebuild-services` was
 **55% of the entire routine** until it was gated on `.github-changed-repos.tsv`, because nothing told
