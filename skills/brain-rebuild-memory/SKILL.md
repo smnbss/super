@@ -597,6 +597,29 @@ Every AI coding assistant that lands in the brain project — Claude Code, Gemin
 
 **Anchor:** `<brain_root>` = the project directory found by the existing `$BRAIN_CONFIG` walk (same anchor as the rest of this skill). Never write to `$HOME`.
 
+### ⚠️⚠️ 3.5a-0. AUDIT the hand-maintained open-decisions register. Never edit it. Always report it.
+
+Most brains keep a hand-written **open-decisions register** at the very top of `AGENTS.md`, outside
+every marker. **This skill may not edit it** — 3.5a's byte-for-byte preservation rule covers it
+absolutely. But an unowned section with no budget and no eviction rule grows forever, and this one
+does: measured 2026-09-10 it was **18,618 B, 13% of the whole file**, carrying 25 items, several of
+them already closed.
+
+**So audit it every run and report, in the Phase 5 digest:**
+
+1. Its **byte size**, measured from disk.
+2. Its **item count**.
+3. ⚠️ **Every entry marked ✅ RESOLVED or ✅ CLOSED whose resolution is already recorded on
+   `[[hub]]`.** Name each one and say it is droppable. The register usually says so itself — "a
+   closed decision does not belong at the top of the always-loaded file" — and nothing enforces it,
+   so closed entries sit there for weeks paying full context on every worker boot.
+4. Any entry whose **detail duplicates a trap block verbatim**. The register should state the
+   decision and point at the mechanism, not restate it.
+
+⚠️ **REPORT, DO NOT EDIT.** A human decides what is closed. **An agent must never mark a decision
+resolved on its own** — that is the standing rule that a ✅ RESOLVED marker on this brain's own
+record is a CLAIM, not a measurement, and it has been falsified on six consecutive days before now.
+
 ### 3.5a. Regenerate ONLY this skill's block in `<brain_root>/AGENTS.md`
 
 ⚠️⚠️ **NEVER REWRITE THE WHOLE FILE.** `AGENTS.md` belongs to the brain it runs in, not to this
@@ -755,6 +778,58 @@ keep it, and keep its date, because the date is part of the claim. When in doubt
 durable and keep it. **The failure this rule prevents is unbounded growth, not thoroughness.** The
 carry-through rule still outranks brevity.
 
+#### ⚠️⚠️ Class 3 — a durable trap ALREADY WRITTEN on its owning page. Keep the pointer, not the text.
+
+**Evicting only dated lines is not enough, and the measurement says so. Durable traps accumulate
+too.** Measured 2026-09-10: `AGENTS.md` reached 139,414 B, about 34,000 tokens, and it loads into
+every interactive session AND into each of ~30 nested worker boots per morning run. `## Repository
+Layout` was 60,927 B of that, 44%. **Only 4,552 B was path-and-gloss layout. `### Durable traps, by
+source` alone was 34,884 B, a quarter of the whole file** — and every line of it was class 1, so the
+eviction rule protected all of it and the block grew anyway. That run added roughly 9 KB of
+genuinely new durable traps in a single day.
+
+**A trap does not have to live in the always-loaded file to be enforced. It has to live where the
+agent that could trip it will read it.** Every source in this block already has an owning
+`memory/L1` page, and that page already carries the same traps: a 21-phrase probe across
+`confluence`, `gdrive`, `github`, `linear`, `metabase`, `personio`, `gmeet`, `idp` and `outline` on
+2026-09-10 found **21 of 21 already duplicated** on the owning page. The block was paying ~35 KB per
+worker boot to restate what the worker reads anyway.
+
+**So classify every durable trap a third way, and prefer class 3:**
+
+3. **A DURABLE TRAP THAT IS ALREADY WRITTEN, IN FORCE, ON ITS OWNING `memory/` PAGE** — keep a
+   **pointer** in this block, not the trap text.
+
+**The eviction is conditional on proof, and the proof is a grep. Never evict on assumption.**
+
+```bash
+# Before you move a trap out, confirm the owning page really carries it.
+grep -qiF -- '<distinctive phrase from the trap>' memory/L1/<owner>.md && echo SAFE || echo WRITE-IT-FIRST
+```
+
+| Probe says | Action |
+|---|---|
+| `SAFE` | Replace the trap text here with a pointer line. The trap is not lost, it is one hop away. |
+| `WRITE-IT-FIRST` | ⚠️ **Write the trap onto the owning page FIRST, in this same run, then evict.** A trap that exists in exactly one place may not be deleted from that place. |
+| You cannot identify an owning page | **Keep the trap here verbatim** and flag it in the Phase 5 digest. A trap with no home stays in the always-loaded file. |
+
+**What the block keeps instead: a routing table, one line per source**, naming the path, the current
+count, and the owning page an agent MUST read before it touches that source. That is strictly
+stronger than today, where the traps are technically present but buried in 35 KB that a worker skims.
+
+⚠️⚠️ **THREE KINDS OF TRAP NEVER LEAVE THIS FILE, whatever the probe says.** They are the ones that
+fire *before* an agent has read any page, so a pointer is too late:
+1. **Traps about the memory system itself** — the page cap, the archive rotation rules, the
+   `SYNC_SKIP_FILES` basenames, the deleted-service-doc wikilink guard, the uppercase-extension gate.
+2. **Traps that govern how an agent is DISPATCHED** — above all the `subagent_type:
+   "general-purpose"` hook rule, which must be obeyed before any worker exists to read anything.
+3. **Traps about measurement discipline in general** — re-measure from disk, never carry a count
+   forward, state the scope of a negative result, a resolved marker is a claim not a measurement.
+
+⚠️ **This rule moves traps. It never deletes one.** If a run cannot prove the owning page carries a
+trap, that trap stays. **The carry-through rule still outranks every byte target in this section**,
+and class 3 exists precisely so that obeying it no longer forces the file to grow without bound.
+
 #### Byte budget — measure it, and report a breach
 
 `AGENTS.md` had no cap and no rotation target for its whole life, which is why it grew unbounded
@@ -771,6 +846,26 @@ stat -f '%z' AGENTS.md          # whole file  — target ≤ 61,440 B (60 KB), h
   the same way an over-cap service doc is escalated rather than silently cut.
 - Report the whole-file size and both block sizes in the Phase 5 digest **every run**, breach or not.
   A number nobody prints is a number nobody notices moving.
+
+⚠️⚠️ **ORDER OF OPERATIONS WHEN THIS FILE IS OVER BUDGET — and it is the same order every `memory/`
+page uses. Do NOT skip to the last rung.**
+
+1. **Evict class 2** (dated run-log lines) to the owning page. Free, and already mandatory.
+2. **Evict class 3** (durable traps the owning page provably carries) to a pointer. **This is the
+   rung that was missing until 2026-09-10, and it is why the file could only grow.** A run that
+   reports a breach without having applied class 3 has not finished its job.
+3. **Only then** report the residue and let a human decide.
+
+**Why this file needs its own rung 2 and a `memory/` page does not:** a `memory/` page rotates into
+a dated archive under `memory/L2/archive/`. **`AGENTS.md` has no archive and cannot have one** — it
+is a single always-loaded file, not a period-stamped series. **Its rotation target is the owning
+`memory/L1` page**, reached by pointer. Class 3 IS this file's rotation mechanism. Treat it as such.
+
+⚠️ **Weigh a byte here against ~30 worker boots, not one.** `CLAUDE.md` and `GEMINI.md` are symlinks
+to `AGENTS.md`, and a morning run boots roughly 30 nested workers that each pay the whole file. At
+139,414 B that is about 1M tokens per run for this file alone. **A kilobyte removed here is ~30 KB
+of context returned across the run** — which is why the skill's own cost discipline names "a smaller
+`AGENTS.md`" as one of only three real levers, alongside fewer workers and fewer enabled plugins.
 
 - **Re-measure every count from disk this run.** Never read a figure back out of the block you are
   about to rewrite — that is precisely how a stale count survives many rebuilds.
