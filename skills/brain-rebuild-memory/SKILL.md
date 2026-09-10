@@ -134,7 +134,61 @@ Outputs are read-only inputs — this command never modifies them.
 
 ---
 
-## Phase 1 — Inventory
+## Phase 0 — Validate the brain's own measurable claims. ZERO model requests.
+
+```bash
+bin/validate-brain-claims          # from the brain root; exit 1 on drift
+```
+
+Run this **before** any expensive phase, the same way the service-doc divergence gate runs before
+a worker is dispatched. It re-runs every claim in `memory/.brain-claims.tsv` — a TSV of
+`id · predicate · expected · owning page` — and reports where **disk no longer agrees with what a
+live page asserts**. One shell call, no model requests, about a second.
+
+**DRIFT is not a bug in the registry. It is the registry doing its job.** Update the **page and the
+registry together** — a registry edited alone stops describing what the brain says, and the check
+goes quiet while the page stays wrong.
+
+⚠️⚠️ **A BROKEN PREDICATE IS NOT A PASS.** The runner reports one separately and exits non-zero,
+because a predicate that returns nothing reads exactly like a clean result — the standing trap, and
+the reason this file already carries two worked examples of scoped searches that missed
+(`github/weroad/helm-charts` and `github/weroad/ai/`, neither of which exists).
+
+**Add a claim to the registry whenever you write a number into a live page that a shell command can
+re-derive.** That is the whole maintenance burden, and it is what keeps the check honest as the
+brain grows.
+
+### ⚠️ What this can and cannot validate — do not oversell it
+
+Measured on the WeRoad brain 2026-09-10 across `AGENTS.md` + `memory/L1` + `memory/L2`: **2,666
+warning-bearing lines**, classified by whether a machine can check them.
+
+| Class | Share | Mechanically checkable? |
+|---|---|---|
+| **A** — a shell predicate AND an expected value | **5%** (154) | ✅ **Yes. This is what Phase 0 covers.** |
+| **B** — a number or date, but no predicate written down | **46%** (1,242) | ⚠️ Only after someone writes the predicate. **This is the growth area — every B converted to an A is a claim that can never rot silently again.** |
+| **C** — a command with no expected value | 1% (47) | ⚠️ Runnable, but there is nothing to compare against. |
+| **D** — a prose rule with no number and no command | **45%** (1,223) | ❌ **No. And that is correct** — "spreadsheets export the first sheet only" and "a scoped search that misses is indistinguishable from a clean result" are timeless operational rules, not measurements. They do not rot on a schedule. |
+
+**So Phase 0 covers about a twentieth of the warnings today, and could cover about half.** The
+honest reading: **it catches the class of error the brain actually keeps making — a stale number
+asserted in the present tense** — and it catches nothing else. It is not a correctness proof for
+the brain's knowledge.
+
+⚠️ **Three false-positive shapes the runner cannot see, so a human must judge them:**
+1. **A dated register section** is history, not a stale claim. `memory/L1/metabase.md` correctly
+   keeps a `## register 2026-09-09 — 1,981 cards` block *below* its 2026-09-10 one.
+2. **A supersession note** legitimately quotes the old figure — "up from 6,347 across 53", "any
+   1,981 figure is SUPERSEDED". Quoting a banned number in order to ban it is correct usage.
+3. **An archive pointer** citing what the archived section said on its own date.
+
+**The failure this phase prevents, with the worked example that justified it.** On 2026-09-10 a
+by-hand sweep of banned figures found three live pages asserting superseded numbers in the present
+tense: `business-domains.md` said the `wemeet-hosted-ops` cron was **"26 of 26"** when the measured
+truth was **29 of 29** — a figure `AGENTS.md` explicitly bans by name; `team-cyclops.md` said
+**"NINETEEN files exceed the cap today"** against 18; `team-tium.md` said **"`src/outline` holds 53
+collections"** against 57. All three had survived a rebuild that same morning, on pages that phase
+had rewritten. **A rebuild does not re-check a number it did not happen to touch. Phase 0 does.**
 
 Scan inputs and record what's available. This drives everything else.
 

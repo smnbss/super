@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# validate-brain-claims — re-run every measurable claim the brain asserts, and
+# report where a live page still says something disk no longer agrees with.
+#
+# ZERO model requests. One shell call. Run it BEFORE the expensive phases, the
+# same way the service-doc divergence gate runs before any worker is dispatched.
+#
+#   validate-brain-claims            # check every claim, exit 1 on drift
+#   validate-brain-claims --quiet    # only print drift
+#
+# Registry: memory/.brain-claims.tsv — TAB separated, '#' comments ignored.
+#   id <TAB> predicate <TAB> expected <TAB> owning page
+#
+# The predicate is shell. The expected value is what the brain currently claims.
+# DRIFT means the world moved and the pages have not. It is not an error in the
+# registry; it is the registry doing its job.
+set -uo pipefail
+
+ROOT="${BRAIN_ROOT:-$(pwd)}"
+REG="$ROOT/memory/.brain-claims.tsv"
+QUIET=0; [ "${1:-}" = "--quiet" ] && QUIET=1
+
+[ -f "$REG" ] || { echo "no registry at $REG — nothing to validate"; exit 0; }
+
+pass=0; drift=0; broke=0
+DRIFTED=""
+
+while IFS=$'\t' read -r id pred expected owner; do
+  case "$id" in ''|'#'*) continue;; esac
+  actual=$(cd "$ROOT" && eval "$pred" 2>/dev/null | tr -d ' \n')
+  if [ -z "$actual" ]; then
+    broke=$((broke+1))
+    printf '  BROKEN   %-34s predicate produced nothing — %s\n' "$id" "$pred"
+    # A predicate that returns nothing reads exactly like a clean result.
+    # That is the standing trap. Never treat it as a pass.
+    continue
+  fi
+  if [ "$actual" = "$expected" ]; then
+    pass=$((pass+1))
+    [ "$QUIET" = 0 ] && printf '  ok       %-34s %s\n' "$id" "$actual"
+  else
+    drift=$((drift+1))
+    printf '  DRIFT    %-34s claimed %s, disk says %s   (owner: %s)\n' "$id" "$expected" "$actual" "$owner"
+    DRIFTED="$DRIFTED$id\t$expected\t$actual\t$owner\n"
+  fi
+done < "$REG"
+
+echo
+echo "claims: $pass ok · $drift drifted · $broke broken predicate(s)"
+
+if [ "$drift" != "0" ]; then
+  echo
+  echo "Every drifted claim below is asserted somewhere in a live page. Find it:"
+  printf "$DRIFTED" | while IFS=$'\t' read -r id was now owner; do
+    [ -z "$id" ] && continue
+    echo "  # $id — was $was, now $now"
+    echo "  grep -rn '$was' AGENTS.md memory/L1 memory/L2 --include='*.md'"
+  done
+  echo
+  echo "⚠️  Update the PAGE and the registry together. A registry that is edited"
+  echo "    alone stops describing what the brain says, and the check goes quiet."
+fi
+
+[ "$broke" != "0" ] && echo "⚠️  A BROKEN predicate is NOT a pass. A scoped search that misses reads exactly like a clean result."
+[ "$drift" != "0" ] || [ "$broke" != "0" ] && exit 1
+exit 0
