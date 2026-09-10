@@ -158,6 +158,41 @@ the reason this file already carries two worked examples of scoped searches that
 re-derive.** That is the whole maintenance burden, and it is what keeps the check honest as the
 brain grows.
 
+### The marker vocabulary — three tiers, and a ratchet that enforces them
+
+⚠️ **A marker on half the lines is not a warning system, it is decoration.** Measured 2026-09-10
+before this rule landed: **25% of all non-blank lines** across `AGENTS.md` + `memory/L1` + `L2`
+carried a marker, and **40–51% on the densest pages**. That is how a banned figure — the
+`wemeet-hosted-ops` cron at "26 of 26" against a measured 29 — survived a rebuild on a page that
+same run had rewritten. Nobody reads the 87th warning on a page.
+
+| Marker | Means | Test before you use it |
+|---|---|---|
+| 🚨 | **Blocks a decision. A human must act.** | Can you name the person and the decision? If not, it is not 🚨. |
+| ⚠️ | **A durable trap: doing X gives a wrong answer.** | Can you name the wrong answer someone would get? If not, it is not ⚠️. |
+| *(none)* | A finding, a consequence, a scope qualifier. | Use **bold**. A scope qualifier reads better inline: "treat as UNCONFIRMED", "scope of this negative". |
+
+⚠️⚠️ **THE SECOND TIER IS ABOLISHED. Never write `⚠️⚠️`.** It meant "extra important" with no
+stated threshold, which is the definition of inflation — 1,003 of them had accumulated against
+4,557 singles. All were collapsed to `⚠️` on 2026-09-10. **A marker with no defined bar always
+inflates; do not reintroduce one.**
+
+⚠️ **A heading does not need a marker when its own body already carries one.** 121 such headings
+were stripped in the same pass. The section still warns; the title stops shouting.
+
+⚠️ **Rotation bookkeeping is not a hazard.** "Trigger: CAP-DRIVEN" records which rule fired. It
+gets no marker. The *rule* it illustrates — "a cap-driven rotation can cut into the live window,
+so say which trigger fired every time" — keeps one.
+
+**Enforcement is a ratchet, in `memory/.marker-budget.tsv`, checked by Phase 0.** Each page
+carries a ceiling. **A page may HOLD or LOWER its ceiling. It may never raise it.**
+
+⚠️⚠️ **A FLAT CAP WAS CONSIDERED AND REJECTED ON MEASUREMENT.** The median live page carried 86
+markers, so a cap of 10 would have put **41 of 47 pages over on day one** — an unreachable number
+everyone learns to ignore, exactly like the 12,288 B `repository-layout` budget written the same
+morning and breached by 5× within hours. **A ratchet is always reachable and only ever improves.**
+Lower a ceiling whenever a page genuinely sheds a marker. Never edit one upward to make a run pass.
+
 ### ⚠️ What this can and cannot validate — do not oversell it
 
 Measured on the WeRoad brain 2026-09-10 across `AGENTS.md` + `memory/L1` + `memory/L2`: **2,666

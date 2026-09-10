@@ -61,6 +61,38 @@ if [ "$drift" != "0" ]; then
   echo "    alone stops describing what the brain says, and the check goes quiet."
 fi
 
+# ── marker budget ────────────────────────────────────────────────────────────
+# A RATCHET, not a cliff. A page may hold or lower its ceiling, never raise it.
+# Rationale: measured 2026-09-10 the median live page carried 86 warning
+# markers. A flat cap of 10 would have put 41 of 47 pages over on day one,
+# which is not a budget — it is an unreachable number everyone learns to
+# ignore. A ratchet is always reachable and only ever improves.
+BUD="$ROOT/memory/.marker-budget.tsv"
+if [ -f "$BUD" ]; then
+  echo; echo "marker budget:"
+  over=0
+  while IFS=$'\t' read -r page maxw maxa; do
+    case "$page" in ''|'#'*) continue;; esac
+    [ -f "$ROOT/$page" ] || continue
+    w=$(grep -o '⚠️' "$ROOT/$page" 2>/dev/null | wc -l | tr -d ' ')
+    a=$(grep -o '🚨' "$ROOT/$page" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$w" -gt "$maxw" ] || [ "$a" -gt "$maxa" ]; then
+      over=$((over+1))
+      printf '  OVER     %-38s warn %s/%s  alarm %s/%s\n' "$page" "$w" "$maxw" "$a" "$maxa"
+    fi
+  done < "$BUD"
+  if [ "$over" = 0 ]; then
+    echo "  ok       all pages within their ceiling"
+  else
+    echo
+    echo "⚠️  A page over its ceiling must DEMOTE a marker, not raise the number."
+    echo "    ⚠️ is a durable trap: doing X gives a wrong answer."
+    echo "    🚨 blocks a decision and a human must act."
+    echo "    Everything else is a finding — use bold, not a marker."
+    drift=$((drift+over))
+  fi
+fi
+
 [ "$broke" != "0" ] && echo "⚠️  A BROKEN predicate is NOT a pass. A scoped search that misses reads exactly like a clean result."
 [ "$drift" != "0" ] || [ "$broke" != "0" ] && exit 1
 exit 0
