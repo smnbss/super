@@ -549,3 +549,48 @@ One paragraph per month: focus, what shifted, what carried forward.
 ## Emerging Themes
 Threads spanning multiple months. What's accelerating? What stalled?
 ```
+
+---
+
+## ⚠️ OUTPUT BYTE BUDGETS — the run's own artifacts are the token cost
+
+**Measured 2026-09-14. Three workers spent 684,444 tokens before the memory rebuild started, and
+the memory rebuild then hit the account spend limit.** The work was small. The FILES were large.
+
+**A worker must READ the file it rewrites, then WRITE it back. So a file's size is paid TWICE,
+every run it changes.**
+
+| Artifact | Measured 2026-09-14 | Budget |
+|---|---|---|
+| a daily meeting digest | **59,920 B** for 10 meetings | **≤ 12,000 B** |
+| a weekly meeting digest | **145,394 B** | **≤ 30,000 B** |
+| a monthly digest | — | **≤ 30,000 B** |
+| `AGENTS.md` | **89,718 B** (~22,400 tok × EVERY worker) | ≤ 61,440 B |
+
+### Rules
+
+1. **A daily digest is a SUMMARY, not a transcript.** 59,920 B across 10 meetings is 6 KB per
+   meeting. That is an expansion of the source, not a digest of it. **Target ≤ 1,200 B per
+   meeting.**
+2. **NEVER restate a transcript, a notes body or a quote longer than one sentence.** Link to the
+   artifact. The raw file is already on disk and already indexed.
+3. **A weekly digest aggregates the dailies. It does NOT re-narrate them.** If the weekly is
+   larger than the sum of its dailies' Summary sections, it is wrong.
+4. ⚠️ **THE BUDGET NEVER OUTRANKS THE CARRY-THROUGH RULE.** Do not drop a caveat, a scope
+   qualifier, a date or a number to hit a byte count. **Cut NARRATION, never EVIDENCE.** If a
+   digest cannot fit its budget on evidence alone, write it and REPORT THE OVERAGE with the
+   reason. An honest overage is correct. A silent one is not.
+5. **Print the byte size of every artifact you write, in your return message.** A number nobody
+   prints is a number nobody notices moving.
+
+### Worker fan-out is the other multiplier
+
+**Every worker pays the always-loaded floor before it does anything**: `AGENTS.md` +
+`memory/L3/MEMORY.md` measured **111,309 B ≈ 27,800 tokens** on 2026-09-14. Twelve workers is
+~334,000 tokens of identical re-reading.
+
+- **Dispatch the fewest workers that can do the job.** Two small targets belong in ONE worker,
+  not two.
+- **Gate every phase on a deterministic signal first.** A phase that reports "nothing to do" for
+  zero model cost is the goal.
+- ⚠️ **Do NOT dispatch a worker for a target whose inputs did not change.**

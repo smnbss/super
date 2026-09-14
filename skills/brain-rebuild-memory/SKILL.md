@@ -632,3 +632,57 @@ Phase 1   (inventory src + outputs/services)
 - **Don't touch clean files**: in incremental mode, skipped targets must keep their existing `verified:` and `updated:` values byte-for-byte. Rewriting an unchanged file defeats the entire staleness signal.
 - **Content-hash short-circuit**: even for a dirty target, if the newly-synthesized content hashes identical to the file already on disk, leave the file unchanged and only update the state file.
 - **Never clobber real `CLAUDE.md` / `GEMINI.md`**: if either exists as a regular file (not a symlink), flag it and move on. Only manage symlinks this skill created.
+
+---
+
+## ⚠️ THE AGENTS.md BUDGET IS A TOKEN BUDGET, NOT A TIDINESS BUDGET
+
+**`AGENTS.md` is loaded into EVERY session on EVERY surface, because `CLAUDE.md` and `GEMINI.md`
+are symlinks to it — and into every worker this skill fans out.**
+
+**Measured 2026-09-14: `AGENTS.md` 89,718 B + `memory/L3/MEMORY.md` 21,591 B = 111,309 B ≈
+27,800 tokens that EVERY worker pays before it does anything.** At twelve workers that is
+**~334,000 tokens of identical re-reading, every run.**
+
+**Target ≤ 61,440 B. Hard warn 81,920 B.** Every 4 KB cut from `AGENTS.md` saves ~1,000 tokens
+per worker per run.
+
+### Apply the eviction rule (§3.5a-2) on EVERY run, not only when the file breaches
+
+1. **A dated run-log line is EVICTED** to the owning `memory/L1` page, which has a byte cap and a
+   rotating archive. It never belonged in `AGENTS.md`.
+2. **A durable trap is CARRIED THROUGH VERBATIM, forever.**
+3. **A closed decision is DROPPED from the open-decisions register** once it is recorded on
+   `hub`. ⚠️ **A closed decision does not belong at the top of the always-loaded file.**
+4. ⚠️ **CLASS 3 MOVES A TRAP. IT NEVER DELETES ONE.** A trap this file cannot prove is written
+   elsewhere STAYS VERBATIM.
+5. ⚠️ **NEVER cut a caveat, a scope qualifier, a date or a number to hit the budget.** The
+   carry-through rule OUTRANKS the budget. If the file cannot fit on durable content alone,
+   **that is a finding for Simone, not something to fix by deleting.**
+6. **Print `AGENTS.md` before and after bytes, plus the layout-block size, in your return.**
+
+## ⚠️ FAN OUT FEWER WORKERS
+
+Every worker pays the ~27,800-token floor above. **The worker count is a direct multiplier on the
+run's cost.**
+
+1. **Do NOT dispatch a worker for a page whose inputs did not change.** Re-derive the changed set
+   from `git status` and the source deltas. **A skipped page's old `verified:` date is CORRECT,
+   not stale.**
+2. **Batch small targets.** Several small related pages belong in ONE worker.
+3. **Give a worker only the briefing lines that bear on ITS target**, never the whole register.
+
+## ⚠️ ROTATE BEFORE YOU WRITE, NOT AFTER
+
+**Measured 2026-09-14: this skill wrote new content into `memory/L2/meetings.md` and
+`memory/L2/team-rocket.md`, then DIED on the account spend limit before its rotation step. Both
+pages were left OVER the 40,960 B cap, well-formed, with correct facts, and nothing warned.**
+
+⚠️ **A HALF-FINISHED REBUILD BREACHES A CAP SILENTLY. Only a byte measurement finds it.**
+
+1. **Measure every target page BEFORE you write to it.** If it is already within 2,000 B of the
+   cap, **rotate it FIRST**, then write.
+2. **Re-measure after writing. If a page is over cap, rotate it before you return** — do not
+   leave it for the next run.
+3. **Say which trigger fired, cap-driven or age-driven, every time.** ⚠️ A cap-driven rotation on
+   `meetings.md` can cut into its live ISO-week window.

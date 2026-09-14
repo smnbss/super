@@ -898,3 +898,43 @@ had deliberately dropped.
   reported, not recorded — the whole freshness system downstream assumes a
   `verified:` date means someone looked.
 - If updating an existing file, show a summary of what changed before writing.
+
+---
+
+## ⚠️ THE NO-GROWTH GATE — a rebuild must not silently inflate the doc
+
+**Measured 2026-09-14: `wemeet-hosted-ops.agent.md` grew 167,637 → 201,251 B in ONE rebuild,
++33,614 B, and its `.db` grew 94,134 → 107,587 B.** That doc is now **3.07× the 65,536 B cap**.
+The worker that did it spent **281,854 tokens on TWO docs**, of which roughly **143,000 was
+reading and writing those two oversized files**.
+
+**A doc's size is paid TWICE every run it changes — once to read it, once to write it back.**
+
+### Rules
+
+1. **MEASURE the doc before and after. Print both sizes and the delta in your return message.**
+   Never omit this, breach or not.
+2. **A rebuild that INCREASES a doc already over the 65,536 B cap MUST say so explicitly and give
+   the reason**, in one sentence, in its return. "New architecture" is a valid reason.
+   "Regenerated the section" is not.
+3. **Edit the sections the diff touched. Do NOT re-emit the whole document.** Re-emitting is what
+   turns a 19-file diff into a 200 KB write.
+4. ⚠️ **NEVER cut a live fact, a caveat, a scope qualifier, a date or a number to fit the cap.**
+   The carry-through rule outranks the cap. **Cut NARRATION, never EVIDENCE.**
+5. ⚠️ **DO NOT SPLIT A DOC ON YOUR OWN INITIATIVE.** This generator has no split logic, so a
+   hand-split evaporates on the next rebuild, which regenerates the parent and re-inlines the
+   section. **A split must be ratified by Simone and taught to this skill first.**
+6. **Apply the sanctioned changelog levers FIRST**, before reporting an overage: drop dated
+   run-record blocks (recoverable with `git log -p`), keep one dated comment per doc, and never
+   keep release narrative that carries no architecture or live caveat.
+
+### Where the excess actually sits — measured, not assumed
+
+The excess is **CONCENTRATED IN ONE OR TWO SECTIONS**, and it relocates without any fact loss:
+
+- `ai.agent.md`: `## Plugin & Skill Inventory` alone is **81,184 B — 60% of the doc.**
+- `wemeet-hosted-ops.agent.md`: `## API Surface` **57,176 B** + `## Data Sources` **37,175 B**.
+
+⚠️ **"The excess is steady-state architecture, not changelog" is TRUE and is NOT the same claim as
+"it cannot be reduced."** A SPLIT is not a COMPRESSION and loses nothing. **The blocker is that
+this skill cannot split, not that the content is irreducible.**
