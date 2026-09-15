@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Is a morning-start phase enabled? Deterministic, zero model requests.
+
+    phase-enabled services   # exit 0 = RUN it, exit 1 = SKIP it
+    phase-enabled --list     # print every phase and its state
+
+Reads `morning_start.skip_phases` from $BRAIN_CONFIG (default:
+<project-root>/.super/brain.config.yml, found by walking up from cwd to the nearest
+REAL .super/ — the <project>/.super/.super debug symlink to ~/.super is ignored).
+
+No PyYAML dependency: the block is a flat list, parsed directly.
+
+⚠️ A MISSING OR UNREADABLE CONFIG MEANS RUN EVERY PHASE. Failing open is deliberate —
+a typo in the config must not silently skip the rebuild that keeps memory current.
+"""
+import os, pathlib, sys
+
+PHASES = {
+    'services':   '1b  brain-rebuild-services',
+    'additional': '1b.5 agents/morning-start-additional',
+    'meetings':   '2b  meeting digest generation',
+    'memory':     '1c  brain-rebuild-memory',
+}
+
+def find_config():
+    env = os.environ.get('BRAIN_CONFIG')
+    if env:
+        return pathlib.Path(env)
+    home = pathlib.Path.home().resolve()
+    cur = pathlib.Path.cwd().resolve()
+    for d in [cur, *cur.parents]:
+        if d == home or d.parent == d:
+            break
+        s = d / '.super'
+        if s.is_dir() and s.resolve() != (home / '.super').resolve():
+            return s / 'brain.config.yml'
+    return None
+
+def skipped():
+    cfg = find_config()
+    if not cfg or not cfg.is_file():
+        return set(), cfg          # fail open
+    out, inblock, inlist = set(), False, False
+    for raw in cfg.read_text().splitlines():
+        line = raw.split('#', 1)[0].rstrip()
+        if not line:
+            continue
+        if line.startswith('morning_start:'):
+            inblock = True; continue
+        if inblock and not line[:1].isspace():
+            break                  # next top-level key ends the block
+        if inblock and line.strip().startswith('skip_phases:'):
+            inlist = True; continue
+        if inlist:
+            s = line.strip()
+            if s.startswith('- '):
+                out.add(s[2:].strip().strip('"\''))
+            elif not line[:1].isspace():
+                inlist = False
+    return out, cfg
+
+skip, cfg = skipped()
+if '--list' in sys.argv:
+    print(f'config: {cfg or "NOT FOUND — every phase runs"}')
+    for name, desc in PHASES.items():
+        print(f'  {"SKIP" if name in skip else "RUN "}  {name:<11} {desc}')
+    sys.exit(0)
+if len(sys.argv) != 2:
+    print(__doc__); sys.exit(2)
+name = sys.argv[1]
+if name not in PHASES:
+    print(f'unknown phase {name!r}; known: {", ".join(PHASES)}', file=sys.stderr)
+    sys.exit(2)
+sys.exit(1 if name in skip else 0)

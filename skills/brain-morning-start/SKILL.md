@@ -96,6 +96,35 @@ pull_sources still exporting, memory "Wave 1 dispatched" with 0 files written).
    these workers synthesize markdown and call MCP tools, never a stack-specialist persona. Tell every
    sub-skill you invoke to do the same, `brain-rebuild-memory` above all since it fans out its own workers.
 
+## Phase gating — check this BEFORE dispatching anything
+
+Some phases are disabled per-brain in `$BRAIN_CONFIG` under `morning_start.skip_phases`. **Check
+the gate first. A skipped phase costs zero model requests.**
+
+```bash
+.claude/skills/brain-morning-start/bin/phase-enabled --list          # what is on and off
+.claude/skills/brain-morning-start/bin/phase-enabled services        # exit 0 = RUN, 1 = SKIP
+```
+
+Gate each of the four phases on its own name: `services` (1b), `additional` (1b.5), `meetings`
+(2b), `memory` (1c). **Part 1a and the 2a harvest always run** — they are `pull_sources`, and they
+are what keeps `src/` current.
+
+⚠️ **A MISSING OR UNREADABLE CONFIG MEANS RUN EVERY PHASE.** The gate fails open on purpose: a
+typo must not silently skip the rebuild that keeps memory current.
+
+⚠️ **SKIPPING A PHASE DOES NOT MEAN ITS WORK IS DONE. IT MEANS ITS OUTPUTS ARE GOING STALE, AND
+NOTHING DOWNSTREAM REPORTS THEM AS STALE.** A skipped `services` phase leaves `outputs/services/`
+behind its clones, and the divergence sweep will not run to tell you by how much. A skipped
+`memory` phase leaves `verified:` dates that look current because they were correct on their own
+date.
+
+⚠️ **SAY WHICH PHASES WERE SKIPPED, AND WHY, IN THE PART 4 REPORT.** A run that silently does less
+than the reader expects is worse than one that fails. Print the `--list` output.
+
+⚠️ **A SKIP IS A STANDING CONFIG VALUE, NOT A ONE-RUN DECISION.** It stays until someone edits the
+config. Re-read it every run — never remember that a phase "was disabled".
+
 ## Part 0 — First-run bootstrap
 
 If `agents/morning-start-additional/SKILL.md` (relative to the brain root) does not exist, seed it
@@ -303,6 +332,7 @@ check that a freshly-rewritten page has outgoing links: `gbrain backlinks memory
 ```
 Morning start complete:
 
+Phases:   <all | skipped: services, …>   (from morning_start.skip_phases)
 Sources:  <N> exported (X ok, Y failed)
 Clones:   <N> repos with local work — <merged | skipped | CONFLICT> (else "all clean mirrors")
 Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
