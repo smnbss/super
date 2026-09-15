@@ -2,8 +2,8 @@
 name: brain-work-on
 description: >
   Bootstrap a working session on a specific project or capability by loading all
-  relevant context — DEVELOPER.md, matching repos in github, service docs in
-  outputs/services, and prior project workspace notes in outputs/projects. Use
+  relevant context — DEVELOPER.md, matching repos in github, each repo's own
+  docs/ tree, and prior project workspace notes in outputs/projects. Use
   when the user says "work on <name>", "/brain-work-on <name>", "start working on",
   "I want to build <x>", "let's build <x>", or passes a project/capability name
   and asks to set up context before coding. Also use when the user wants a working
@@ -47,7 +47,7 @@ the seam explicit up front saves the model from re-deriving it mid-task.
 
 Each name may match:
 - A repo under `github/<org>/<name>` (exact match preferred, then substring)
-- A service doc at `outputs/services/<name>.agent.md` or `*<name>*.agent.md`
+- A `docs/` tree inside the matched repo (see Step 3)
 - A session workspace at `outputs/projects-work-on/<repo|preset>/<session>/` (see Step 4)
 
 If no name is provided, stop and ask:
@@ -125,20 +125,55 @@ Greenfield framing changes the next step's work significantly — it shifts from
 "understand existing code" to "pick a reference implementation to mirror" — so
 it's worth one disambiguation question to avoid starting the wrong way.
 
-## Step 3 — Find service documentation
+## Step 3 — Read the repo's own `docs/` tree
 
-Look in `outputs/services/` for architecture docs:
+⚠️ **`outputs/services/*.agent.md` IS GONE. DO NOT LOOK THERE.** Simone deleted
+`outputs/services/weroad` on 2026-09-15, 50 files, and the `services` phase of
+`brain-morning-start` is permanently skipped. Nothing regenerates those docs.
+**A repo documents itself now.** Five docs survive for NON-weroad repos only
+(`smnbss/*`, `NikolaiGoMedicus/*`); they are outside this rule.
 
-1. Exact match: `outputs/services/<name>.agent.md` or
-   `outputs/services/weroad-<name>.agent.md`.
-2. Fuzzy match: any `*.agent.md` whose filename contains the input.
-3. If the repo includes a database, also look for `*.db.agent.md`.
-4. Check `outputs/services/cross/` for cross-cutting docs that mention the
-   capability (RabbitMQ topology, event flows, etc.) — use `mcp__gbrain__query`
-   if scanning filenames is not enough.
+Read the matched repo's own documentation, in this order:
 
-Read each matched doc. These are the source of truth for how existing services
-are built and what conventions to follow.
+1. **`docs/documentation-guide.md` FIRST.** It carries the per-project
+   conventions, the product and service display names, and the inventory of the
+   technical layer. Every other doc is read through it.
+2. **`docs/domain/index.md`** — the project front door, plus
+   `## Where it runs (production)`.
+3. **`docs/domain/tech/features/_features.md`** — the feature map. Then the
+   area docs it links that match the capability you were given.
+4. **`docs/domain/tech/glossary.md`** and **`docs/domain/tech/reference-data.md`**
+   for domain terms and flat enumerables.
+
+⚠️ **IN A MONOREPO THE TREE SITS UNDER THE PACKAGE, NOT THE REPO ROOT.** Check
+`<package>/docs/` (for example `api/docs/domain/`) before you conclude a repo has
+no docs. Match the repo's existing convention.
+
+⚠️ **`docs/domain` IS A CLOSED CORPUS. It never links the technical layer.** So
+`context/`, `.claude/rules/` and similar are NOT reachable from inside it — they
+are inventoried in `docs/documentation-guide.md` under "Technical layer". Read
+that section, or you will miss them.
+
+⚠️ **MOST REPOS DO NOT HAVE `docs/domain` YET. A FLAT `docs/` IS THE COMMON CASE,
+NOT AN EMPTY ONE.** Measured 2026-09-15 across three repos: only
+`jungle/buynana` had the full tree. `jungle/ai` carried flat `knowledge.md`,
+`plugins-inventory.md` and `plugins.md`. `wemeet-hosted-ops` carried flat
+`api.md`, `architecture.md`, `business-rules.md` and more, with its `docs/domain`
+tree still sitting in an unmerged PR. **When `docs/domain` is absent, READ THE
+FLAT `docs/*.md` FILES.** Sort by relevance to the capability you were given, and
+read `architecture.md` and `business-rules.md` first when they exist.
+
+⚠️ **`docs/` CAN ALSO HOLD NON-MARKDOWN.** `.docx` and `.sql` files sit there
+too. They are content, not noise. Name them in the summary even when you cannot
+read them, so the user knows they exist.
+
+⚠️ **A REPO WITH NO `docs/` AT ALL IS NOT A REPO WITH NO CONTEXT, AND THE ABSENCE
+IS NOT EVIDENCE THE SERVICE IS SIMPLE.** Say so plainly, then fall back to
+`mcp__gbrain__query` over `src/outline` (docs.weroad.com), which is the system of
+record for service knowledge. Offer to run `docs-init` plus `docs-backfill`.
+
+For cross-cutting seams that no single repo owns (RabbitMQ topology, event flows
+between services), use `mcp__gbrain__query` — do not look for a file.
 
 ## Step 4 — Find prior project notes
 
@@ -257,10 +292,10 @@ add the cross-project synthesis section if more than one name was given.
 - ...
 (or: "none — awaiting disambiguation" / "none — confirmed greenfield")
 
-**Service docs** (outputs/services):
-- <filename> — <one-line summary>
+**Repo docs** (`<repo>/docs/` — or `<package>/docs/` in a monorepo):
+- <path> — <one-line summary>
 - ...
-(or: "none")
+(or: "none — no docs/domain in this repo; wiki fallback used" / "none")
 
 **Prior workspace** (outputs/projects-work-on/<repo>/):
 - [session] <session-name> — <what it covers> <(this session's stream | other stream)>
@@ -303,9 +338,10 @@ After the last per-name briefing, add:
   shared module>
 ```
 
-Derive relationships from the service docs (which name their siblings), shared
-DB connections, shared packages in `package.json`/`composer.json`, and the
-`outputs/services/cross/` RabbitMQ topology files. Keep it to the seams that
+Derive relationships from each repo's `docs/domain` area docs (which name their
+siblings), shared DB connections, shared packages in
+`package.json`/`composer.json`, and a `mcp__gbrain__query` over `src/outline` for
+the cross-service seams no single repo owns. Keep it to the seams that
 actually matter — don't enumerate every shared dependency. The goal is: when
 the user names their first capability, neither of you has to re-learn how the
 pieces connect.
