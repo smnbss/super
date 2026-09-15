@@ -105,9 +105,14 @@ for dest in "${CANDIDATES[@]}"; do
     if ! diff -rq "${EXCL[@]}" "$d" "$dest/$name" >/dev/null 2>&1; then
       diffs=$((diffs+1))
       # Warn if the COPY is newer -- that is a local edit about to be overwritten.
+      # A newer mtime ALONE is not an edit: a previous resync copies files and
+      # stamps them with the copy time, so identical files routinely look newer.
+      # Compare CONTENT first -- byte-identical files can never be a lost edit,
+      # and warning on them vetoes the whole target for no reason.
       while IFS= read -r f; do
         rel="${f#$dest/$name/}"
         [[ -f "$d/$rel" ]] || continue
+        cmp -s "$f" "$d/$rel" && continue
         [[ "$f" -nt "$d/$rel" ]] && { echo "  ⚠ copy is NEWER: $name/$rel" >&2; newer=$((newer+1)); }
       done < <(find "$dest/$name" -type f -name '*.md' -o -type f -name '*.py' 2>/dev/null)
     fi
