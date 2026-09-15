@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Split archive pages over gbrain's warn threshold into sequenced continuation pages.
+
+Grain-independent: the constraint is BYTES, not the calendar, so a weekly grain would
+only move the cliff. A page rolls to <basename>-02, -03 ... when it exceeds TARGET.
+
+Sections move VERBATIM. Byte conservation is asserted: no section is dropped, reworded
+or reordered. Newest-first ordering is preserved, so the continuation holds the OLDEST
+sections.
+"""
+import re, sys, pathlib, argparse
+
+WARN   = 51200   # gbrain indexing warn threshold
+TARGET = 45000   # roll target, leaves headroom for one more append
+
+def split_page(path: pathlib.Path, apply: bool):
+    raw = path.read_text()
+    size = len(raw.encode())
+    if size <= WARN:
+        return None
+
+    # frontmatter
+    m = re.match(r'\A---\n.*?\n---\n', raw, re.S)
+    fm = m.group(0) if m else ''
+    body = raw[len(fm):]
+
+    # trailing Topics: footer
+    foot = ''
+    fm_topics = re.search(r'\n---\nTopics:.*$', body, re.S)
+    if fm_topics:
+        foot = fm_topics.group(0)
+        body = body[:fm_topics.start()]
+
+    # split into head (before first ## ) + sections
+    parts = re.split(r'(?m)^(?=## )', body)
+    head, sections = parts[0], parts[1:]
+    if len(sections) < 2:
+        return ('SKIP', path.name, size, 'fewer than 2 sections — cannot split safely')
+
+    # greedily keep newest sections in the parent up to TARGET
+    base = len(fm.encode()) + len(head.encode()) + len(foot.encode())
+    # ONCE A SECTION SPILLS, EVERY LATER SECTION MUST SPILL — otherwise a smaller
+    # later section slips back into the parent and REORDERS history. The byte-conservation
+    # assert below caught exactly that on the first run.
+    keep, spill, acc, spilling = [], [], base, False
+    for s in sections:
+        b = len(s.encode())
+        if spilling or (acc + b > TARGET and keep):
+            spilling = True
+            spill.append(s)
+        else:
+            keep.append(s); acc += b
+    if not spill:
+        return ('SKIP', path.name, size, 'single section exceeds target — needs a human')
+
+    stem = path.stem
+    # chunk the spill into continuation pages, each under TARGET
+    chunks, cur, cacc = [], [], base
+    for s in spill:
+        b = len(s.encode())
+        if cacc + b > TARGET and cur:
+            chunks.append(cur); cur, cacc = [s], base + b
+        else:
+            cur.append(s); cacc += b
+    if cur: chunks.append(cur)
+
+    written = []
+    for i, chunk in enumerate(chunks, start=2):
+        cont = path.with_name(f'{stem}-{i:02d}.md')
+        cfm = fm.replace('---\n', f'---\npart: {i}\ncontinues: {stem}\n', 1) if fm else ''
+        chead = (f"\nContinuation {i} of [[{stem}]], rolled out on a SIZE trigger, not a period\n"
+                 f"trigger. Sections are VERBATIM and stay newest-first.\n\n"
+                 f"⚠️ **An archive's period label is the ROTATION period, not the content period, and a\n"
+                 f"`-{i:02d}` suffix carries no date meaning at all. Read the date on each heading.**\n\n")
+        cont_text = cfm + chead + ''.join(chunk) + foot
+        written.append((cont, cont_text, len(cont_text.encode())))
+
+    ptr = (f"\n## Continued\n\nThis page rolled on a SIZE trigger at {WARN:,} B. Older sections live in "
+           + ' · '.join(f'[[{stem}-{i:02d}]]' for i in range(2, len(chunks) + 2))
+           + ".\n⚠️ **A rolled section is NOT old, superseded or retired. Cite it FROM the continuation page.**\n")
+    parent_text = fm + head + ''.join(keep) + ptr + foot
+
+    # byte conservation: every section survives, verbatim
+    orig_sections = ''.join(sections)
+    new_sections  = ''.join(keep) + ''.join(''.join(c) for c in chunks)
+    assert orig_sections == new_sections, f'SECTION LOSS in {path.name}'
+
+    if apply:
+        path.write_text(parent_text)
+        for cont, text, _ in written:
+            cont.write_text(text)
+    return ('SPLIT', path.name, size, len(parent_text.encode()), [(c.name, b) for c, _, b in written])
+
+ap = argparse.ArgumentParser()
+ap.add_argument('--apply', action='store_true')
+ap.add_argument('--dir', default='memory/L2/archive')
+a = ap.parse_args()
+
+results = [split_page(p, a.apply) for p in sorted(pathlib.Path(a.dir).glob('*.md'))]
+results = [r for r in results if r]
+split  = [r for r in results if r[0] == 'SPLIT']
+skip   = [r for r in results if r[0] == 'SKIP']
+newpages = sum(len(r[4]) for r in split)
+print(f"{'APPLIED' if a.apply else 'DRY RUN'}: {len(split)} page(s) split -> {newpages} continuation page(s); {len(skip)} skipped")
+for r in split:
+    print(f"  {r[1]:<46} {r[2]:>7} -> {r[3]:>6} B  + " + ', '.join(f'{n} {b}B' for n, b in r[4]))
+for r in skip:
+    print(f"  SKIP {r[1]:<41} {r[2]:>7} B  — {r[3]}")

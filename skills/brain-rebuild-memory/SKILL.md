@@ -686,3 +686,48 @@ pages were left OVER the 40,960 B cap, well-formed, with correct facts, and noth
    leave it for the next run.
 3. **Say which trigger fired, cap-driven or age-driven, every time.** ⚠️ A cap-driven rotation on
    `meetings.md` can cut into its live ISO-week window.
+
+---
+
+## ⚠️ AN ARCHIVE PAGE HAS A SIZE CAP TOO — roll it, do not let it grow forever
+
+**Measured 2026-09-15: 43 of 102 archive pages exceeded gbrain's 51,200 B warn threshold**, the
+worst at **134,113 B**, and `team-rocket-log-2026-09` had grown **LARGER than its own CLOSED
+quarterly page**. Cause: rotation appends to the current-period archive **forever**, and nothing
+ever capped the archive itself.
+
+⚠️ **A GRAIN CHANGE DOES NOT FIX THIS, AND THAT IS WHY IT WAS REJECTED.** Quarterly → monthly was
+already tried. **A monthly page cannot fix a parent already at monthly grain, and a weekly grain
+only moves the cliff** — a busy week still blows the threshold. **The constraint is BYTES, not the
+calendar.**
+
+### The fix: a size-driven sequenced roll, grain-independent
+
+```bash
+.claude/skills/brain-rebuild-memory/bin/split-oversized-archives            # dry run
+.claude/skills/brain-rebuild-memory/bin/split-oversized-archives --apply
+```
+
+A page over **51,200 B** rolls its OLDEST sections into `<basename>-02.md`, then `-03`, each
+under a **45,000 B** target that leaves headroom for one more append. **Run it after every
+rotation.** It is **idempotent** — a second run on a healthy tree is a no-op.
+
+1. **Sections move VERBATIM and stay newest-first.** The script **asserts byte conservation** and
+   aborts on any loss. ⚠️ **That assert earned its place on the first run: a smaller later section
+   slipped back into the parent and REORDERED history. Once a section spills, every later section
+   must spill.**
+2. **The parent gets a `## Continued` pointer** naming every continuation.
+3. ⚠️ **A `-02` SUFFIX CARRIES NO DATE MEANING.** An archive's period label is already the
+   ROTATION period, not the content period. **Never infer a date from a page name. Read the date
+   on each heading.**
+4. ⚠️ **A ROLLED SECTION IS NOT OLD, SUPERSEDED OR RETIRED.** Cite it FROM the continuation page.
+5. ⚠️ **NEVER READ A COUNT OUT OF AN ARCHIVED SECTION** — archived or continued, a figure was
+   right on its own date only.
+
+⚠️ **This splits CLOSED-period archives too, and that is correct.** The immutability rule exists
+to stop a later run REWRITING history. **A size roll moves sections byte-for-byte and rewrites
+nothing.** Content is conserved and asserted. **Do not use it as licence to edit a closed
+archive's text.**
+
+**Result of the first run: 102 → 163 pages, 43 over threshold → 0, largest 51,174 B.** More
+smaller pages index better than fewer huge ones — the threshold is a chunk-quality signal.
