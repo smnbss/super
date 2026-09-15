@@ -79,7 +79,7 @@ pull_sources still exporting, memory "Wave 1 dispatched" with 0 files written).
    |---|---|
    | 1a `brain-pull-sources` | `[ -z "$(find src github -newermt '-90 seconds' -type f 2>/dev/null \| head -1)" ]` |
    | 1b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` has a doc with today's mtime or is gated SKIP |
-   | 2 meeting harvest | `src/gmeet/` quiet AND a per-day `index.md` exists for every day since the last harvest |
+   | 2a meeting harvest | **no separate wait — it is a lane INSIDE 1a.** After 1a, assert a per-day `index.md` exists for every day since the last harvest |
    | 1c `brain-rebuild-memory` | `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null \| head -1)" ]` — the generator writes all three |
 
    **Before Part 3's commit, run `git status --porcelain` and read it.** It is the only check that
@@ -132,8 +132,9 @@ once from `resources/morning-start-additional.template.md` (relative to this ski
 
 ## Part 1 — Brain sync & rebuild (sequential chain, subagent per phase)
 
-- **1a `brain-pull-sources`** — export all external sources → `src/`. Heavy. **Run Part 2 in parallel
-  with this.**
+- **1a `brain-pull-sources`** — export all external sources → `src/`. Heavy. ⚠️ **This includes the
+  gmeet harvest (Part 2a), because `sources.md` declares it. Do NOT start a second `gmeet_to_md`
+  alongside it.** Part 2b, the digests, runs **after** 1a because it reads what 1a wrote.
 - **1b `brain-rebuild-services`** — regenerate `.agent.md` docs → `outputs/services/`. *After 1a.*
 
   **Read the work-list before dispatching anything.** `.github-changed-repos.tsv` is written by 1a,
@@ -227,23 +228,44 @@ once from `resources/morning-start-additional.template.md` (relative to this ski
   outranks the budget. If the file cannot fit on durable content alone, that is a finding for
   Simone, not something to fix by deleting.
 
-## Part 2 — Harvest meetings since last harvest (parallel with Part 1a)
+## Part 2 — Meeting digests (2a runs INSIDE Part 1a)
 
-**2a — Harvest raw artifacts (deterministic, no LLM).** Run the `gmeet_to_md` extractor from
-`skills/brain-pull-sources/bin/`. It walks Calendar, discovers Drive artifacts (Gemini notes,
-agendas, recordings, attachments, transcripts) and writes per-meeting folders plus a static per-day
-`index.md` under `src/gmeet/YYYY/WNN/MM-DD/`. Idempotent — it re-runs the last day safely, the
-full-span re-harvest self-heals gaps, and it **preserves existing `*-digest.md` and `transcript.md`**:
+**2a — Harvest raw artifacts (deterministic, no LLM). ⚠️ DO NOT RUN THIS YOURSELF. Part 1a
+ALREADY DID IT.** `sources.md` declares `gmeet_to_md <gws-email>` as an ordinary source, so
+`pull_sources` harvests gmeet in its own tool lane on every run. It walks Calendar, discovers Drive
+artifacts (Gemini notes, agendas, recordings, attachments, transcripts) and writes per-meeting
+folders plus a static per-day `index.md` under `src/gmeet/YYYY/WNN/MM-DD/`. It is idempotent, the
+full-span re-harvest self-heals gaps, and it **preserves existing `*-digest.md` and `transcript.md`**.
+
+⚠️ **A SECOND COPY IS A DUPLICATE AND IT IS ALSO NARROWER. Launching one is strictly worse than
+doing nothing.** Measured 2026-09-15, `resolve_range` in `utils/gmeet_to_md.py`:
+
+| invocation | days harvested |
+|---|---|
+| bare `gmeet_to_md <email>` — what `pull_sources` runs | `[last_harvested .. today]`, **today INCLUDED** |
+| `gmeet_to_md <email> --since <date>` | `[date .. yesterday]`, **today DROPPED** |
+
+⚠️ **AND THE REGISTRY HAS NO LOCK.** `load_registry`/`save_registry` take no file lock.
+`pull_sources` serializes same-tool lanes so its OWN lanes cannot collide, but that guard does not
+cover a copy you start from outside it. Two writers race on `src/gmeet/.registry.json`.
+
+⚠️ **`grep gmeet .claude/skills/brain-pull-sources/bin/pull_sources` RETURNS NOTHING, AND THAT IS
+NOT EVIDENCE.** The script is generic. The source list lives in `sources.md`. **Read `sources.md`,
+never the script.** This is exactly how the duplicate got written into this skill.
+
+**Gap-fill only, and only when a day is provably missing.** After 1a, check coverage. If a day has
+no folder, harvest that day alone, and only while nothing else is running:
 
 ```bash
-bin/gmeet_to_md <gws-email> --since "$LAST_HARVESTED"
+grep -n gmeet_to_md sources.md                      # confirm 1a owns the harvest
+bin/gmeet_to_md <gws-email> --day YYYY-MM-DD        # ONE missing day
 ```
 
-**2b — Generate digests (LLM synthesis).** For each harvested day generate the daily digest, then
-roll up weekly / monthly / YTD per the [digest appendix](#meeting-digest-generation). These are the
-rollups `gmeet_to_md` deliberately does not produce. ⚠️ Weekly rollups target the **ISO week each
-harvested day actually belongs to** — a Monday opens a new `WNN` folder, so don't assume the span
-stays in `LAST_HARVESTED`'s week.
+**2b — Generate digests (LLM synthesis). THIS is Part 2's real work.** For each harvested day
+generate the daily digest, then roll up weekly / monthly / YTD per the
+[digest appendix](#meeting-digest-generation). These are the rollups `gmeet_to_md` deliberately does
+not produce. ⚠️ Weekly rollups target the **ISO week each harvested day actually belongs to** — a
+Monday opens a new `WNN` folder, so don't assume the span stays in one week.
 
 ## Tool updates are NOT part of this routine
 
@@ -339,7 +361,7 @@ Changed:  <N> repos moved HEAD (from .github-changed-repos.tsv)
 Services: <N> docs refreshed, <M> repos skipped (HEAD unchanged)
 Memory:   L2 <N> files, L1 <N> MOCs · gbrain graph: <N> edges, <N> timeline
 Context:  AGENTS.md <N> B (<±N> B) · layout block <N> B · budget 61,440 B <ok | OVER>
-Meetings: <LAST_HARVESTED> → yesterday (<D> days), <N> processed → src/gmeet/
+Meetings: <last_harvested> → today (<D> days), <N> processed → src/gmeet/  (harvested by 1a)
 gbrain reindex: <N> chunks embedded
 ```
 
@@ -367,8 +389,10 @@ Worth one line a day.
 ## Dependency chain
 
 ```
-Part 1a pull-sources ──┬──→ 1b services ──→ 1b.5 additional ──→ 1c memory (markdown only)
-Part 2  harvest ───────┘  (2 runs parallel to 1a)                        ↓
+Part 1a pull-sources ─────→ 1b services ──→ 1b.5 additional ──→ 1c memory (markdown only)
+  └─ 2a gmeet harvest       └─ 2b digests (LLM)                          ↓
+     (a LANE inside 1a,        (reads what 2a wrote)
+      never a second run)
                                        Part 3 commit (brain-git-sync) → gbrain reindex
                                                                          ↓
                                                                   Part 4 report
