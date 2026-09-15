@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -188,16 +189,46 @@ def parse_confluence_url(url: str) -> tuple[str, str]:
 
 # -- API helpers --------------------------------------------------------------
 
+# Seconds to wait for each HTTP response before giving up on it.
+# urllib blocks FOREVER by default. Measured 2026-09-15: one export sat on a
+# single ESTABLISHED socket for 33 minutes and burned 0.22 s of CPU, and an
+# earlier one ran 19 h 44 m the same way. Both wrote nothing, printed nothing
+# and never exited. A hung exporter is indistinguishable from a slow one, so
+# every request must be able to fail.
+API_TIMEOUT = int(os.environ.get("CONFLUENCE_API_TIMEOUT", "60"))
+API_RETRIES = int(os.environ.get("CONFLUENCE_API_RETRIES", "3"))
+
+
 def api_get(url: str, email: str, token: str):
-    """Make authenticated GET request to Confluence API."""
+    """Make authenticated GET request to Confluence API.
+
+    Bounded: API_TIMEOUT per attempt, API_RETRIES attempts, then raise. A
+    timeout or a transient socket error is retried with a linear backoff. An
+    HTTPError is NOT retried -- 401/403/404 are answers, not stalls.
+    """
     credentials = base64.b64encode(f"{email}:{token}".encode()).decode()
     req = urllib.request.Request(url, headers={
         "Authorization": f"Basic {credentials}",
         "Accept": "application/json",
         "Content-Type": "application/json",
     })
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
+    last_err: Exception | None = None
+    for attempt in range(1, API_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=API_TIMEOUT) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            if attempt == API_RETRIES:
+                break
+            print(f"  timeout/error on attempt {attempt}/{API_RETRIES} ({e}) — retrying",
+                  file=sys.stderr, flush=True)
+            time.sleep(5 * attempt)
+    raise RuntimeError(
+        f"giving up after {API_RETRIES} attempts ({API_TIMEOUT}s each): {url} — {last_err}"
+    )
 
 
 def api_get_with_params(base_url: str, path: str, params: dict, email: str, token: str):
