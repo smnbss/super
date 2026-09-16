@@ -136,12 +136,28 @@ Also re-check each clone's HEAD resolves; report any that don't (`git -C <dir> r
 
 ### 1b. Service docs inventory
 
-Count `.agent.md` files under `outputs/services/**` (owner subdirs — `weroad/`, `weroad/jungle/`, `smnbss/`, …) and list `outputs/services/weroad/jungle/cross/` entries:
+Count every file, with one predicate, and record the number:
 
-- service docs, nested by owner (**re-measure; 64 `.agent.md` + 7 `.db.agent.md` on 2026-08-18** after 27 `.db` docs were superseded by `src/idp/<service>/database.md`): `<owner>/<service>.agent.md` (code/stack) + `<owner>/<service>.db.agent.md` (database schema). Filenames are de-prefixed (`weroad/community.agent.md`, not `weroad-community.agent.md`); the basename stays globally unique for `global_basename` resolution.
-- 3 cross-cutting: `<org>-rabbitmq-topology.md`, `<org>-rabbitmq-schema.md`, `<org>-rabbitmq-producers-consumers.md`
+```bash
+find outputs/services -type f | wc -l
+```
 
-Record all counts — they go in the Phase 5 digest.
+⚠️ **EXPECT A SMALL NUMBER, AND EXPECT NO WEROAD OWNER DIR AT ALL.** Simone deleted
+`outputs/services/weroad` on 2026-09-15 (50 files) and the `services` phase is permanently skipped.
+**A missing weroad doc is the expected state, never a gap to report and never a reason to run
+`brain-rebuild-services`.**
+
+⚠️ **The `weroad/jungle/cross/` RabbitMQ trio and `TRAPS-from-deleted-docs.md` went with that
+deletion. Do NOT list them, and do NOT report them missing.** They survive only in git:
+`git show 8d4188326:outputs/services/<path>`.
+
+⚠️ **Never name a specific doc, a byte figure or a carried count here.** Re-derive the surviving
+list from disk (`find outputs/services -type f`). Any "64 `.agent.md`", "7 `.db.agent.md`",
+"3 cross-cutting" or "55 files" figure is STALE — never repeat one.
+
+**Where a repo's architecture lives now:** `github/<org>/<repo>/docs/`, read
+`docs/documentation-guide.md` first. Fall back to `src/outline` (docs.weroad.com) when a repo
+carries no `docs/`. Record the count for the Phase 5 digest.
 
 ---
 

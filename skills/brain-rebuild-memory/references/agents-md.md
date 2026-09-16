@@ -291,11 +291,19 @@ of context returned across the run** — which is why the skill's own cost disci
 `DEVELOPER.md` is a hand-curated developer guide (setup steps, `bin/` script commands, env-var
 conventions, troubleshooting recipes). **Most of it never changes and this phase must never touch
 it.** Two parts of it do go stale on their own, silently, because the numbers and claims they carry
-are already computed correctly elsewhere in this same skill run (or in `brain-rebuild-services`) and
-nothing currently pushes that back into this file. That drift is real, not hypothetical: the file's
-own cap-breach line said "22 files... exceed the 40,960-byte cap" on 2026-08-26, the same day that
-cap was raised to 65,536 B and the true count dropped to 4 — the file was already wrong the moment
-the decision landed, because nothing told it.
+are already computed correctly elsewhere in this same skill run and nothing currently pushes that
+back into this file. That drift is real, not hypothetical, and it has now happened twice.
+
+1. The file's own cap-breach line said "22 files... exceed the 40,960-byte cap" on 2026-08-26, the
+   same day that cap was raised to 65,536 B and the true count dropped to 4. The file was wrong the
+   moment the decision landed, because nothing told it.
+2. On 2026-09-16 the block still listed `cli.agent.md` at 102,689 B as a live over-cap doc. Simone
+   had deleted `outputs/services/weroad` the day before — 50 files, including that one. **The block
+   was asserting byte figures for files that no longer existed.**
+
+⚠️ **The second failure is the worse shape, and 3.5b-1 now forbids the line that caused it.** A
+count re-measured from disk self-corrects. A register of named files does not, because the generator
+carried the names forward instead of re-deriving them.
 
 **Anchor:** same `<brain_root>` as the rest of this skill.
 
@@ -313,18 +321,27 @@ don't rewrite the file.
 
 **Block content — every count/cap claim currently scattered through `## Key Resources`, re-measured
 from disk this run, never copied from the file already on disk:**
-- `outputs/services/` file counts (`*.agent.md`, `*.db.agent.md`, total) and its byte cap — **the cap
-  value itself is hand-set policy** (currently 65,536 B, see `brain-rebuild-services/SKILL.md`
-  "Changelog & size discipline" — read it from there, never hardcode a remembered number), but the
-  *count of files over it* is derived and must be re-measured every run.
+- `outputs/services/` file count, measured with `find outputs/services -type f | wc -l`.
+  ⚠️ **DO NOT EMIT A BYTE CAP, AN OVER-CAP REGISTER, A NEAR-CAP LIST OR A `head:`-STAMP COUNT.
+  Simone deleted `outputs/services/weroad` on 2026-09-15 and the `services` phase is permanently
+  skipped, so nothing regenerates a weroad service doc and no cap governs one.** Emitting a cap
+  register here re-asserts deleted files as live. That defect was measured on 2026-09-16: the block
+  still named `cli.agent.md` at 102,689 B a day after the directory holding it was removed.
+  **Name the survivors instead** — the only docs left are non-weroad repos, and they sit outside
+  the deletion decision.
+- ⚠️ **A REPO DOCUMENTS ITSELF NOW. Point the reader at the repo's own `docs/` tree**, not at
+  `outputs/services/`. Read `docs/documentation-guide.md` first, then `docs/domain/index.md`, then
+  `docs/domain/tech/features/_features.md`. **A flat `docs/*.md` is the common case, not an empty
+  one**, and in a monorepo the tree sits under the package (`api/docs/`), not the repo root. Use
+  `src/outline` (docs.weroad.com) as the fallback when a repo carries no `docs/` at all.
 - `src/idp/` scale (services, total files) and its "declared but unserved" doc-gap breakdown, read
   from `src/idp/catalog.md`'s own table, never carried forward.
 - `src/outline/` scale (file count, collection count via `find -mindepth 1 -maxdepth 1 -type d`, not
   a bare `-maxdepth 1` which double-counts the root).
 - The service→team map's "all N services" figure in `## Service → Team Map`, matching `src/idp/catalog.md`.
 
-**Dirty when** `outputs/services/`, `src/idp/`, or `src/outline/` changed this run, when the
-`outputs/services/` cap value itself changed, or in full-rebuild mode.
+**Dirty when** `outputs/services/`, `src/idp/`, or `src/outline/` changed this run, or in
+full-rebuild mode.
 
 #### 3.5b-2. Merge-review the "Developer Traps" section — NEVER regenerate wholesale
 
@@ -335,7 +352,7 @@ never regenerated:
 | Case | Action |
 |---|---|
 | A trap's underlying fact changed this run (surfaced by 2b service-doc regen, 2c IDP catalog re-measurement, 2a GitHub HEAD-move detection, or a meeting-harvest Brain Update) | Update that bullet in place with the new fact. **Never delete a trap silently** — if it's fully resolved, prefix it `✅ RESOLVED <date>:` and keep one line of what changed, matching the house convention used everywhere else in this brain. |
-| A new fact from this run is genuinely trap-shaped — a developer will trip over it locally, not just "interesting to know" — and isn't already covered | Add a new bullet, sourced, at the end of the list. **Only when it's squarely developer-facing** (breaks local dev, a removed dependency, an auth/env change, a footgun in a script) — not every service-doc finding belongs here; most belong in `outputs/services/**/<repo>.agent.md` instead, which already exists for that. |
+| A new fact from this run is genuinely trap-shaped — a developer will trip over it locally, not just "interesting to know" — and isn't already covered | Add a new bullet, sourced, at the end of the list. **Only when it's squarely developer-facing** (breaks local dev, a removed dependency, an auth/env change, a footgun in a script) — not every service finding belongs here. ⚠️ **Do NOT route one to `outputs/services/**/<repo>.agent.md`. That tree is gone for weroad repos.** A service finding belongs in the repo's own `docs/` tree, or on docs.weroad.com. |
 | Nothing relevant changed this run | Leave the section untouched. |
 | Uncertain whether a bullet is still current | Leave it as-is and flag it in the Phase 5 digest rather than guessing. |
 

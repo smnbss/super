@@ -61,7 +61,14 @@ Examples below show the WeRoad defaults. Substitute whatever the user's config s
 
 **Inputs (read-only):**
 - `src/` — raw exports (ClickUp, Confluence, GDrive, GitHub, GWS, Linear, Medium, Metabase, Personio)
-- `outputs/services/` — per-service technical docs + cross-cutting concerns
+- `outputs/services/` — ⚠️ **NEARLY EMPTY, AND IT STAYS THAT WAY.** Simone deleted
+  `outputs/services/weroad` on 2026-09-15 (50 files) and the `services` phase is permanently
+  skipped. Only non-weroad docs survive. **Read a repo's own `docs/` tree instead**, and
+  `src/outline` (docs.weroad.com) when a repo has none. Re-measure with
+  `find outputs/services -type f | wc -l` — never assume a doc is there.
+- `github/<org>/<repo>/docs/` — **the system of record for a repo's architecture.** Read
+  `docs/documentation-guide.md` first, then `docs/domain/index.md`. A flat `docs/*.md` is the
+  common case. In a monorepo the tree sits under the package (`api/docs/`), not the repo root.
 - `outputs/agents/` — agent time-series reports (SEO, bugs, meetings, press, etc.)
 
 **Outputs:** `memory/L2/` (domain knowledge) + `memory/L1/` (navigation MOCs)
@@ -71,7 +78,9 @@ Outputs are read-only inputs — this command never modifies them.
 ## Prerequisites
 
 1. `src/` must be populated — invoke `brain-pull-sources` first if empty.
-2. `outputs/services/` must be populated — invoke `brain-rebuild-services` first if empty.
+2. ⚠️ **`outputs/services/` being nearly empty is the EXPECTED state, not a missing prerequisite.
+   Do NOT invoke `brain-rebuild-services` to "fill" it.** That phase is permanently skipped and
+   there are no weroad docs to regenerate. Read the repo's own `docs/` tree, or `src/outline`.
 
 ---
 
@@ -286,27 +295,31 @@ Each source MOC contains:
 | `system-map.md` | `.claude/agents/`, `.claude/skills/`, `.claude/commands/` — full system index |
 | `hub.md` | **Last** — reads all other L1 files, builds the top-level nav with counts. Keep only the last **7** "What changed" entries live; older entries rotate to `hub-changelog-YYYY-MM` archives (see "Size Caps & Archive Rotation") |
 
-> ⚠️ **Docs-first repos have NO `.agent.md` — do not treat that as a gap.** As of
-> 2026-08-12, `brain-rebuild-services` deletes rather than generates a per-repo doc for
-> any repo whose documentation lives in Outline via `doc-sync`; 26 were removed in that
-> run (api-catalog, api-partner, api-payments, booking, buynana, community,
-> coordinators, **dbt**, kaioh, my, myweroad, partner, weroad, wemeet, …). Consequences
-> for every `inputs` glob in this table and in Phase 2:
+> 🚨 **NO WEROAD REPO HAS AN `.agent.md` ANY MORE. THE WHOLE TREE IS GONE, NOT JUST THE
+> DOCS-FIRST SUBSET.** Simone deleted `outputs/services/weroad` on 2026-09-15 — 50 files —
+> and the `services` phase is permanently skipped in `morning_start.skip_phases`. Nothing
+> regenerates one. Consequences for every `inputs` glob in this table and in Phase 2:
 >
-> - `outputs/services/**/*.agent.md` now resolves to **62** files, not 88. Any target
->   whose knowledge came from a deleted doc must add
->   **`src/outline/<Collection> Wiki/**`** to its inputs — that tree is gbrain-indexed
->   and is the same content the owning team maintains. The clone's `docs/domain/` is the
->   byte-authoritative side if you need to disambiguate.
-> - **`outputs/services/**/*.db.agent.md` (34 files) survives untouched** and is still
->   the only source for columns, enums and status lifecycles. Schema knowledge did not
->   move.
-> - **`outputs/services/TRAPS-from-deleted-docs.md` is append-only** — 39 corrections
->   extracted from the deleted docs. Read it wherever you previously read a service
->   doc's `## Traps` section, and never regenerate it.
-> - Repo↔collection mapping is by **document-basename overlap**, never by collection
->   name (two collections are both titled `Partner Portal`). `n8n-workflows` has no
->   collection and therefore keeps its doc.
+> - ⚠️ **An `outputs/services/**/*.agent.md` glob now returns only NON-weroad docs.**
+>   Re-measure with `find outputs/services -type f | wc -l` every run. **Never name a
+>   specific weroad doc in an input list, a count or a byte figure** — on 2026-09-16
+>   `DEVELOPER.md` still carried `cli.agent.md` at 102,689 B, a day after the file was
+>   deleted.
+> - **Every target whose knowledge came from a deleted doc must read the repo's own
+>   `docs/` tree**, at `github/<org>/<repo>/docs/`. Read `docs/documentation-guide.md`
+>   first, then `docs/domain/index.md`, then `docs/domain/tech/features/_features.md`.
+>   ⚠️ **A flat `docs/*.md` is the common case, not an empty one**, and in a monorepo the
+>   tree sits under the package (`api/docs/`), not the repo root.
+> - **Add `src/outline/<Collection> Code Wiki/**` as the fallback** when a repo carries no
+>   `docs/` at all. That tree is gbrain-indexed and the owning team maintains it.
+> - ⚠️ **`.db.agent.md` IS NOT A SURVIVING SCHEMA SOURCE.** 26 were deleted on 2026-08-18
+>   and the weroad remainder went with the 2026-09-15 deletion. **`src/idp/<service>/database.md`
+>   is the schema source now** — and it introspects a local DEVELOPMENT database, not staging.
+> - ⚠️ **`outputs/services/TRAPS-from-deleted-docs.md` IS ALSO GONE**, taken by the same
+>   deletion. It survives only in git: `git show 8d4188326:outputs/services/TRAPS-from-deleted-docs.md`.
+>   **Do not instruct a worker to read it as a live path.**
+> - ⚠️ **Any "62 files", "88 files", "34 files" or "39 corrections" figure in an older copy
+>   of this note is STALE. Never repeat one.**
 >
 > A stale glob here **loses detail silently instead of failing**, which is why this note
 > sits next to the table rather than in a changelog.
