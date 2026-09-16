@@ -16,7 +16,6 @@ a typo in the config must not silently skip the rebuild that keeps memory curren
 import os, pathlib, sys
 
 PHASES = {
-    'services':   '1b  docs-drift sweep (read-only report)',
     'additional': '1b.5 agents/morning-start-additional',
     'meetings':   '2b  meeting digest generation',
     'memory':     '1c  brain-rebuild-memory',

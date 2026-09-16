@@ -234,9 +234,10 @@ Apply these updates during reconciliation. REMOVE marks facts as `<!-- supersede
 
 **Step 6: Per-service docs**
 
-⚠️ **A REPO DOCUMENTS ITSELF. `outputs/services/` IS GONE for every weroad repo** — Simone
-deleted `outputs/services/weroad` on 2026-09-15 (50 files) and the `services` phase is
-permanently skipped. **Do not look there, and do not create a doc there.**
+⚠️ **A REPO DOCUMENTS ITSELF. `outputs/services/` IS GONE ENTIRELY — the directory does not
+exist.** Simone deleted `outputs/services/weroad` on 2026-09-15 (50 files) and the last 5
+non-weroad docs on 2026-09-16. The `services` phase and `brain-rebuild-services` are DELETED.
+**Do not look there, and do not create a doc there.**
 
 For each `github/` repo that changed since last sync:
 - Read the repo's own tree: `github/<org>/<repo>/docs/`. Read `documentation-guide.md` first,

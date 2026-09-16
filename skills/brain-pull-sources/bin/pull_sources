@@ -224,7 +224,7 @@ if [[ -s "$GITHUB_CLONE_REPORT" ]]; then
 fi
 
 # --- Changed repos: the downstream work-list --------------------------------
-# Printed last because it is the handoff. The morning run's docs-drift sweep uses
+# Printed last because it is the handoff. The morning run uses
 # it as a STARTING POINT only — the sweep itself gates on each repo's own
 # docs/domain/tech/features/coverage.yml stamp, because a movement ledger can
 # never repair a repo whose docs were missed on an earlier run. Say the count out

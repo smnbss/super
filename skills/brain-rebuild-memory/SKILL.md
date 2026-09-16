@@ -61,11 +61,6 @@ Examples below show the WeRoad defaults. Substitute whatever the user's config s
 
 **Inputs (read-only):**
 - `src/` — raw exports (ClickUp, Confluence, GDrive, GitHub, GWS, Linear, Medium, Metabase, Personio)
-- `outputs/services/` — ⚠️ **NEARLY EMPTY, AND IT STAYS THAT WAY.** Simone deleted
-  `outputs/services/weroad` on 2026-09-15 (50 files) and the `services` phase is permanently
-  skipped. Only non-weroad docs survive. **Read a repo's own `docs/` tree instead**, and
-  `src/outline` (docs.weroad.com) when a repo has none. Re-measure with
-  `find outputs/services -type f | wc -l` — never assume a doc is there.
 - `github/<org>/<repo>/docs/` — **the system of record for a repo's architecture.** Read
   `docs/documentation-guide.md` first, then `docs/domain/index.md`. A flat `docs/*.md` is the
   common case. In a monorepo the tree sits under the package (`api/docs/`), not the repo root.
@@ -78,9 +73,9 @@ Outputs are read-only inputs — this command never modifies them.
 ## Prerequisites
 
 1. `src/` must be populated — invoke `brain-pull-sources` first if empty.
-2. ⚠️ **`outputs/services/` being nearly empty is the EXPECTED state, not a missing prerequisite.
-   Do NOT invoke `brain-rebuild-services` to "fill" it.** That phase is permanently skipped and
-   there are no weroad docs to regenerate. Read the repo's own `docs/` tree, or `src/outline`.
+2. 🚨 **`outputs/services/` DOES NOT EXIST AND MUST NEVER BE RECREATED.** The directory is GONE,
+   not empty. `brain-rebuild-services` is DELETED, and nothing regenerates a service doc. **A repo
+   documents itself** — read its own `docs/` tree, or `src/outline` when it has none.
 
 ---
 
@@ -149,7 +144,7 @@ Each L2 file draws from specific inputs. Read those inputs, synthesize, write th
 For each team, produce `memory/L2/team-<name>.md`:
 - **Members** — from `staff-roster.tsv` + any org config in github repos
 - **Services owned** — from each repo's `CODEOWNERS` and its `docs/documentation-guide.md`.
-  ⚠️ **NOT from `outputs/services/**/*.agent.md` — that tree is gone for every weroad repo.**
+  ⚠️ **NOT from `outputs/services/**/*.agent.md` — that tree does not exist.**
   ⚠️ **A repo with no `CODEOWNERS` is not unowned, it is unattributed.** Three repos are
   deliberately not squad-owned (`wemeet-hosted-ops`, `wetracker`, `coordinators`) — never
   attribute one to an engineering team. Say "no declared owner" instead of guessing.
@@ -164,7 +159,7 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 - Aggregate tech stacks from each repo's own `docs/` tree and its manifests
   (`package.json`, `composer.json`, `pyproject.toml`, `Dockerfile`) — language, framework,
-  DB, messaging. ⚠️ **NOT from `outputs/services/**/*.agent.md`, which is gone for weroad.**
+  DB, messaging. ⚠️ **NOT from `outputs/services/**/*.agent.md`, which does not exist.**
 - Group by layer: frontend, backend, data, infra
 - Note the most common patterns
 
@@ -303,12 +298,12 @@ Each source MOC contains:
 
 > 🚨 **NO WEROAD REPO HAS AN `.agent.md` ANY MORE. THE WHOLE TREE IS GONE, NOT JUST THE
 > DOCS-FIRST SUBSET.** Simone deleted `outputs/services/weroad` on 2026-09-15 — 50 files —
-> and the `services` phase is permanently skipped in `morning_start.skip_phases`. Nothing
+> and the `services` phase and `brain-rebuild-services` are DELETED in `morning_start.skip_phases`. Nothing
 > regenerates one. Consequences for every `inputs` glob in this table and in Phase 2:
 >
-> - ⚠️ **An `outputs/services/**/*.agent.md` glob now returns only NON-weroad docs.**
->   Re-measure with `find outputs/services -type f | wc -l` every run. **Never name a
->   specific weroad doc in an input list, a count or a byte figure** — on 2026-09-16
+> - 🚨 **An `outputs/services/` glob returns NOTHING — the directory is gone.** Remove any
+>   such glob from an `inputs` list rather than expecting it to be empty. **Never name a
+>   service doc in an input list, a count or a byte figure** — on 2026-09-16
 >   `DEVELOPER.md` still carried `cli.agent.md` at 102,689 B, a day after the file was
 >   deleted.
 > - **Every target whose knowledge came from a deleted doc must read the repo's own
@@ -502,7 +497,7 @@ These two files are the **canonical source** for `brain-prepare-my-deep-dives` a
 The whole point of L1/L2 is a navigable graph: gbrain materializes every `[[wikilink]]` into an edge (Phase 4.5) and uses those edges for backlink-boost ranking and `graph`/`graph-query` traversal. Maximize *correct* connection density. Apply these rules to every file written in Phases 2/3/3.5:
 
 1. **Never emit an empty or text-only "see also" entry.** Every `## Related` bullet and every cell in an `L3 References`-style table MUST contain a resolvable `[[link]]`. If there is no target, omit the bullet/row entirely — do NOT write `-  — description` (the historical bug that left dead bullets in `technologies.md`).
-2. **Reference pages as wikilinks, not code paths.** When a file points at another brain page, write `[[basename]]` — it resolves by `global_basename` regardless of the subdirectory. A bare code-span produces NO edge. Reserve code-spans for paths you are *not* linking (raw `src/` exports without wikilink syntax). ⚠️ **NEVER write `[[<service>.agent.md]]` OR `[[<service>.db.agent.md]]` FOR ANY WEROAD REPO — BOTH HALVES DANGLE FOR EVERY ONE OF THEM.** `outputs/services/weroad` was deleted on 2026-09-15 (50 files) and the `services` phase is permanently skipped. **A repo documents itself now.** Name the service in a code-span, and cite its documentation by path: `` `github/<org>/<repo>/docs/` `` (in a monorepo, `` `github/<org>/<repo>/<package>/docs/` ``). That path is in the gitignored `github/` tree, so it is deliberately NOT a wikilink and produces no edge — that is correct, not a missed link.
+2. **Reference pages as wikilinks, not code paths.** When a file points at another brain page, write `[[basename]]` — it resolves by `global_basename` regardless of the subdirectory. A bare code-span produces NO edge. Reserve code-spans for paths you are *not* linking (raw `src/` exports without wikilink syntax). ⚠️ **NEVER write `[[<service>.agent.md]]` OR `[[<service>.db.agent.md]]` FOR ANY WEROAD REPO — BOTH HALVES DANGLE FOR EVERY ONE OF THEM.** `outputs/services/weroad` was deleted on 2026-09-15 (50 files) and the `services` phase and `brain-rebuild-services` are DELETED. **A repo documents itself now.** Name the service in a code-span, and cite its documentation by path: `` `github/<org>/<repo>/docs/` `` (in a monorepo, `` `github/<org>/<repo>/<package>/docs/` ``). That path is in the gitignored `github/` tree, so it is deliberately NOT a wikilink and produces no edge — that is correct, not a missed link.
 3. **Bidirectional completeness.** Every L2 `Topics:` footer must link UP to **every L1 file that cites it** (the Phase 3 derivation table is the citation map) plus any obvious see-also L1s. Conversely every L1 must link DOWN (in a `## Related` block + body) to **every L2 it derives from**. Source MOCs (`github.md`, `metabase.md`, …) are the usual offenders — give each a `## Related` block pointing at the L2/L1 pages it feeds (e.g. `github → [[technologies]] · [[services]] · [[teams]]`; `metabase → [[data-model]] · [[team-data]]`). Footers are additive: when refreshing, never drop an existing valid link.
 4. **Inline first-mention links.** In body prose, the first mention of another team, domain, service, source, or person that owns its own page gets a `[[wikilink]]`. This produces far more edges than footers alone. Example: in `technologies.md`, "AI/ML stack" → `[[team-data]]`, "main platform" → `[[team-rocket]]`, "data & analytics" → `[[data-model]]`.
 5. **Concise frontmatter `description:`.** Keep `description:` a single topical sentence (≤ ~220 chars) naming the domain + its key entities — this is the page's summary vector. Put dated change-log detail in **body** sections under `<!-- verified: -->` blocks (which become chunks + timeline entries), not crammed into `description:`. Do not duplicate long WBR digests into the description.

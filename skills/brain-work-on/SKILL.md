@@ -127,11 +127,10 @@ it's worth one disambiguation question to avoid starting the wrong way.
 
 ## Step 3 — Read the repo's own `docs/` tree
 
-⚠️ **`outputs/services/*.agent.md` IS GONE. DO NOT LOOK THERE.** Simone deleted
-`outputs/services/weroad` on 2026-09-15, 50 files, and the `services` phase of
-`brain-morning-start` is permanently skipped. Nothing regenerates those docs.
-**A repo documents itself now.** Five docs survive for NON-weroad repos only
-(`smnbss/*`, `NikolaiGoMedicus/*`); they are outside this rule.
+🚨 **`outputs/services/` IS GONE. THE DIRECTORY DOES NOT EXIST. DO NOT LOOK THERE.** Simone
+deleted `outputs/services/weroad` on 2026-09-15 (50 files) and the last 5 non-weroad docs on
+2026-09-16. The `services` phase and `brain-rebuild-services` are DELETED, and nothing
+regenerates a service doc. **A repo documents itself now.**
 
 Read the matched repo's own documentation, in this order:
 

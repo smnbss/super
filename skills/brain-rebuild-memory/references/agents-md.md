@@ -321,14 +321,11 @@ don't rewrite the file.
 
 **Block content — every count/cap claim currently scattered through `## Key Resources`, re-measured
 from disk this run, never copied from the file already on disk:**
-- `outputs/services/` file count, measured with `find outputs/services -type f | wc -l`.
-  ⚠️ **DO NOT EMIT A BYTE CAP, AN OVER-CAP REGISTER, A NEAR-CAP LIST OR A `head:`-STAMP COUNT.
-  Simone deleted `outputs/services/weroad` on 2026-09-15 and the `services` phase is permanently
-  skipped, so nothing regenerates a weroad service doc and no cap governs one.** Emitting a cap
-  register here re-asserts deleted files as live. That defect was measured on 2026-09-16: the block
-  still named `cli.agent.md` at 102,689 B a day after the directory holding it was removed.
-  **Name the survivors instead** — the only docs left are non-weroad repos, and they sit outside
-  the deletion decision.
+- 🚨 **EMIT NO `outputs/services/` FIELD AT ALL. The directory does not exist.** Do not emit a
+  file count, a byte cap, an over-cap register, a near-cap list or a `head:`-stamp count for it.
+  Emitting any of them re-asserts deleted files as live. That defect was measured on 2026-09-16:
+  the block still named `cli.agent.md` at 102,689 B a day after the directory holding it was
+  removed.
 - ⚠️ **A REPO DOCUMENTS ITSELF NOW. Point the reader at the repo's own `docs/` tree**, not at
   `outputs/services/`. Read `docs/documentation-guide.md` first, then `docs/domain/index.md`, then
   `docs/domain/tech/features/_features.md`. **A flat `docs/*.md` is the common case, not an empty
@@ -341,7 +338,7 @@ from disk this run, never copied from the file already on disk:**
 - The service→team map's "all N services" figure in `## Service → Team Map`, matching `src/idp/catalog.md`.
 
 **Dirty when** `github/*/*/docs/`, `src/idp/`, or `src/outline/` changed this run, or in
-full-rebuild mode. ⚠️ **NOT `outputs/services/` — that tree is gone for every weroad repo and
+full-rebuild mode. ⚠️ **NOT `outputs/services/` — that tree does not exist and
 will never change again.**
 
 #### 3.5b-2. Merge-review the "Developer Traps" section — NEVER regenerate wholesale
@@ -353,7 +350,7 @@ never regenerated:
 | Case | Action |
 |---|---|
 | A trap's underlying fact changed this run (surfaced by 2b service-doc regen, 2c IDP catalog re-measurement, 2a GitHub HEAD-move detection, or a meeting-harvest Brain Update) | Update that bullet in place with the new fact. **Never delete a trap silently** — if it's fully resolved, prefix it `✅ RESOLVED <date>:` and keep one line of what changed, matching the house convention used everywhere else in this brain. |
-| A new fact from this run is genuinely trap-shaped — a developer will trip over it locally, not just "interesting to know" — and isn't already covered | Add a new bullet, sourced, at the end of the list. **Only when it's squarely developer-facing** (breaks local dev, a removed dependency, an auth/env change, a footgun in a script) — not every service finding belongs here. ⚠️ **Do NOT route one to `outputs/services/**/<repo>.agent.md`. That tree is gone for weroad repos.** A service finding belongs in the repo's own `docs/` tree, or on docs.weroad.com. |
+| A new fact from this run is genuinely trap-shaped — a developer will trip over it locally, not just "interesting to know" — and isn't already covered | Add a new bullet, sourced, at the end of the list. **Only when it's squarely developer-facing** (breaks local dev, a removed dependency, an auth/env change, a footgun in a script) — not every service finding belongs here. ⚠️ **Do NOT route one to `outputs/services/**/<repo>.agent.md`. That tree does not exist.** A service finding belongs in the repo's own `docs/` tree, or on docs.weroad.com. |
 | Nothing relevant changed this run | Leave the section untouched. |
 | Uncertain whether a bullet is still current | Leave it as-is and flag it in the Phase 5 digest rather than guessing. |
 

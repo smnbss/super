@@ -136,28 +136,21 @@ Also re-check each clone's HEAD resolves; report any that don't (`git -C <dir> r
 
 ### 1b. Service docs inventory
 
-Count every file, with one predicate, and record the number:
-
-```bash
-find outputs/services -type f | wc -l
-```
-
-⚠️ **EXPECT A SMALL NUMBER, AND EXPECT NO WEROAD OWNER DIR AT ALL.** Simone deleted
-`outputs/services/weroad` on 2026-09-15 (50 files) and the `services` phase is permanently skipped.
-**A missing weroad doc is the expected state, never a gap to report and never a reason to run
-`brain-rebuild-services`.**
+🚨 **`outputs/services/` DOES NOT EXIST. DO NOT COUNT IT, DO NOT LOOK FOR IT, DO NOT REPORT IT
+MISSING.** The weroad docs went on 2026-09-15 (50 files) and the last 5 non-weroad docs went on
+2026-09-16. `brain-rebuild-services` is DELETED. **There is no service-doc validation step any
+more.**
 
 ⚠️ **The `weroad/jungle/cross/` RabbitMQ trio and `TRAPS-from-deleted-docs.md` went with that
 deletion. Do NOT list them, and do NOT report them missing.** They survive only in git:
-`git show 8d4188326:outputs/services/<path>`.
+`git show 8d4188326:outputs/services/<path>` — that sha holds all 55 files.
 
-⚠️ **Never name a specific doc, a byte figure or a carried count here.** Re-derive the surviving
-list from disk (`find outputs/services -type f`). Any "64 `.agent.md`", "7 `.db.agent.md`",
-"3 cross-cutting" or "55 files" figure is STALE — never repeat one.
+⚠️ **Never name a service doc, a byte figure or a carried count.** Any "64 `.agent.md`",
+"7 `.db.agent.md`", "3 cross-cutting", "55 files" or "5 files" figure is STALE — never repeat one.
 
 **Where a repo's architecture lives now:** `github/<org>/<repo>/docs/`, read
 `docs/documentation-guide.md` first. Fall back to `src/outline` (docs.weroad.com) when a repo
-carries no `docs/`. Record the count for the Phase 5 digest.
+carries no `docs/`.
 
 ---
 
