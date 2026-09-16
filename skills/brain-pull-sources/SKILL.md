@@ -234,14 +234,29 @@ Apply these updates during reconciliation. REMOVE marks facts as `<!-- supersede
 
 **Step 6: Per-service docs**
 
+⚠️ **A REPO DOCUMENTS ITSELF. `outputs/services/` IS GONE for every weroad repo** — Simone
+deleted `outputs/services/weroad` on 2026-09-15 (50 files) and the `services` phase is
+permanently skipped. **Do not look there, and do not create a doc there.**
+
 For each `github/` repo that changed since last sync:
-- Check if `outputs/services/<service>.agent.md` exists and compare `verified:` date against `git log -1`
-- Stale service docs: re-read repo source and update stack, schema, messaging, auth, APIs sections
-- New repos without service docs: flag in the digest as candidates for doc creation
+- Read the repo's own tree: `github/<org>/<repo>/docs/`. Read `documentation-guide.md` first,
+  then `docs/domain/index.md`.
+- ⚠️ **In a monorepo the tree sits under the package** (`booking/api/docs/`), not the repo root.
+  A flat `docs/*.md` is the common case, not an empty one.
+- A repo with no `docs/` tree: fall back to `src/outline/` for that service.
+- **Do NOT update a repo's `docs/` tree from here.** This phase only reads. A docs change belongs
+  in the repo, through `docs-feature` or `docs-backfill`, with a pull request.
+- Flag a changed repo that has no `docs/` tree in the digest as a `docs-init` candidate.
 
 **Step 7: Cross-cutting concerns**
 
-After service doc updates, check if changes affect `outputs/services/cross/` topics (RabbitMQ topology, message schemas, producers/consumers). If messaging config, exchanges, or queue bindings changed, update the relevant cross file and mermaid diagrams.
+⚠️ **`outputs/services/cross/` NO LONGER EXISTS.** The three cross-cutting RabbitMQ docs went with
+the 2026-09-15 deletion and **nothing recreates them** — they were not per-repo generated docs.
+They survive only in git: `git show 8d4188326:outputs/services/weroad/jungle/cross/<file>.md`.
+
+If messaging config, exchanges, or queue bindings changed, record the change against the owning
+repo's own `docs/` tree and name the affected exchange or queue in the digest. Cross-service
+RabbitMQ topology now lives on docs.weroad.com, not in this repo.
 
 **Step 8: L1 — Navigation MOCs**
 

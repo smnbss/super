@@ -1652,9 +1652,9 @@ def render_database(service: str, databases: list, detail: dict, source_url: str
         if attempts:
             out += ["Connection attempts:", ""] + [f"- {md_escape(a)}" for a in attempts] + [""]
         out += [f"In the meantime the closest available column-level"
-                f" documentation is `outputs/services/` — the `.db.agent.md`"
-                f" doc for this service's repository, generated from its"
-                f" migrations rather than from a live server.", ""]
+                f" documentation is the service repository's own `docs/` tree"
+                f" (`github/<org>/<repo>/docs/`), which describes the schema"
+                f" from its migrations rather than from a live server.", ""]
         return "\n".join(out).rstrip() + "\n"
 
     described = sum(r["counts"]["column_comments"] for r in reps)

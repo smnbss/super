@@ -95,7 +95,7 @@ Outputs are read-only inputs — this command never modifies them.
      "run_at": "2026-04-19T08:00:00Z",
      "targets": {
        "memory/L2/team-buktu.md": {
-         "inputs": ["src/personio/staff-roster.tsv", "src/outline/**", "outputs/services/**/*.agent.md"],
+         "inputs": ["src/personio/staff-roster.tsv", "src/outline/**", "github/*/*/docs/**"],
          "max_mtime": 1713398400,
          "content_hash": "sha256:..."
        },
@@ -144,11 +144,15 @@ Each L2 file draws from specific inputs. Read those inputs, synthesize, write th
 
 ### 2a. Team files (`team-*.md`)
 
-**Inputs:** `src/personio/staff-roster.tsv` + `src/outline/**` + `src/linear/<org>/` + `outputs/services/**/*.agent.md` (ownership)
+**Inputs:** `src/personio/staff-roster.tsv` + `src/outline/**` + `src/linear/<org>/` + `github/<org>/<repo>/docs/` and `github/<org>/<repo>/CODEOWNERS` (ownership)
 
 For each team, produce `memory/L2/team-<name>.md`:
 - **Members** — from `staff-roster.tsv` + any org config in github repos
-- **Services owned** — from service docs tagged to this team (scan agent.md frontmatter/headers)
+- **Services owned** — from each repo's `CODEOWNERS` and its `docs/documentation-guide.md`.
+  ⚠️ **NOT from `outputs/services/**/*.agent.md` — that tree is gone for every weroad repo.**
+  ⚠️ **A repo with no `CODEOWNERS` is not unowned, it is unattributed.** Three repos are
+  deliberately not squad-owned (`wemeet-hosted-ops`, `wetracker`, `coordinators`) — never
+  attribute one to an engineering team. Say "no declared owner" instead of guessing.
 - **Active projects** — from `src/linear/<org>/all/` (match team labels)
 - **Docs pointers** — paths to their ClickUp docs folder, Confluence pages
 
@@ -156,9 +160,11 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2b. technologies.md
 
-**Inputs:** `outputs/services/**/*.agent.md` (stack sections) + `github/<org>/` (repo languages/frameworks)
+**Inputs:** `github/<org>/<repo>/docs/` (architecture) + `github/<org>/` (repo languages/frameworks, manifests)
 
-- Aggregate tech stacks from all service docs (language, framework, DB, messaging)
+- Aggregate tech stacks from each repo's own `docs/` tree and its manifests
+  (`package.json`, `composer.json`, `pyproject.toml`, `Dockerfile`) — language, framework,
+  DB, messaging. ⚠️ **NOT from `outputs/services/**/*.agent.md`, which is gone for weroad.**
 - Group by layer: frontend, backend, data, infra
 - Note the most common patterns
 
@@ -262,7 +268,7 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ## Phase 3 — L1 Rebuild (Navigation MOCs)
 
-Regenerate only the L1 targets marked dirty in Phase 1.5 (including cascades from dirty L2 files). Same content-hash short-circuit as Phase 2 — identical content = leave file alone, just refresh state. L1 files are navigation maps. Each derives from L2 + outputs/services + src structure.
+Regenerate only the L1 targets marked dirty in Phase 1.5 (including cascades from dirty L2 files). Same content-hash short-circuit as Phase 2 — identical content = leave file alone, just refresh state. L1 files are navigation maps. Each derives from L2 + `github/<org>/<repo>/docs/` + src structure.
 
 ### Source MOCs
 
@@ -288,7 +294,7 @@ Each source MOC contains:
 | `team-members.md` | `src/personio/staff-roster.tsv` + `memory/L2/team-*.md` members sections + **`$BRAIN_CONFIG` `teams[]`** (for the Linear-team column) |
 | `product-areas.md` | Team L2 files (group features by product area) |
 | `business-domains.md` | `memory/L2/exco.md` + `memory/L2/intranet.md` + `memory/L2/one-pagers.md` |
-| `data-model.md` | **`src/outline/BI Wiki/**`** (dbt's documentation home — see the docs-first note below) + `outputs/services/**/*.db.agent.md` + BigQuery metadata |
+| `data-model.md` | **`src/outline/BI Wiki/**`** (dbt's documentation home — see the docs-first note below) + `github/<org>/<repo>/docs/` (schema sections) + BigQuery metadata |
 | `entities.md` | Full scan of all L2 files — anything appearing in 2+ sources gets an entry |
 | `tone-of-voice.md` | `src/medium/smnbss/` — Simone's writing voice analysis |
 | `skills.md` | `.claude/skills/*/SKILL.md` — enumerate all skills |
@@ -496,7 +502,7 @@ These two files are the **canonical source** for `brain-prepare-my-deep-dives` a
 The whole point of L1/L2 is a navigable graph: gbrain materializes every `[[wikilink]]` into an edge (Phase 4.5) and uses those edges for backlink-boost ranking and `graph`/`graph-query` traversal. Maximize *correct* connection density. Apply these rules to every file written in Phases 2/3/3.5:
 
 1. **Never emit an empty or text-only "see also" entry.** Every `## Related` bullet and every cell in an `L3 References`-style table MUST contain a resolvable `[[link]]`. If there is no target, omit the bullet/row entirely — do NOT write `-  — description` (the historical bug that left dead bullets in `technologies.md`).
-2. **Reference pages as wikilinks, not code paths.** When a file points at another brain page, write `[[basename]]` — including service docs (`[[community.agent.md]]`, resolves by `global_basename` regardless of the `outputs/services/<owner>/` subdir) and DB docs (`[[unison.db.agent.md]]`). A bare `` `outputs/services/x.agent.md` `` code-span produces NO edge. Reserve code-spans for paths you are *not* linking (raw `src/` exports without wikilink syntax).
+2. **Reference pages as wikilinks, not code paths.** When a file points at another brain page, write `[[basename]]` — it resolves by `global_basename` regardless of the subdirectory. A bare code-span produces NO edge. Reserve code-spans for paths you are *not* linking (raw `src/` exports without wikilink syntax). ⚠️ **NEVER write `[[<service>.agent.md]]` OR `[[<service>.db.agent.md]]` FOR ANY WEROAD REPO — BOTH HALVES DANGLE FOR EVERY ONE OF THEM.** `outputs/services/weroad` was deleted on 2026-09-15 (50 files) and the `services` phase is permanently skipped. **A repo documents itself now.** Name the service in a code-span, and cite its documentation by path: `` `github/<org>/<repo>/docs/` `` (in a monorepo, `` `github/<org>/<repo>/<package>/docs/` ``). That path is in the gitignored `github/` tree, so it is deliberately NOT a wikilink and produces no edge — that is correct, not a missed link.
 3. **Bidirectional completeness.** Every L2 `Topics:` footer must link UP to **every L1 file that cites it** (the Phase 3 derivation table is the citation map) plus any obvious see-also L1s. Conversely every L1 must link DOWN (in a `## Related` block + body) to **every L2 it derives from**. Source MOCs (`github.md`, `metabase.md`, …) are the usual offenders — give each a `## Related` block pointing at the L2/L1 pages it feeds (e.g. `github → [[technologies]] · [[services]] · [[teams]]`; `metabase → [[data-model]] · [[team-data]]`). Footers are additive: when refreshing, never drop an existing valid link.
 4. **Inline first-mention links.** In body prose, the first mention of another team, domain, service, source, or person that owns its own page gets a `[[wikilink]]`. This produces far more edges than footers alone. Example: in `technologies.md`, "AI/ML stack" → `[[team-data]]`, "main platform" → `[[team-rocket]]`, "data & analytics" → `[[data-model]]`.
 5. **Concise frontmatter `description:`.** Keep `description:` a single topical sentence (≤ ~220 chars) naming the domain + its key entities — this is the page's summary vector. Put dated change-log detail in **body** sections under `<!-- verified: -->` blocks (which become chunks + timeline entries), not crammed into `description:`. Do not duplicate long WBR digests into the description.
@@ -617,10 +623,10 @@ Bare-basename wikilinks (`[[meetings]]`, `[[hub]]`) are correct in archives — 
 ## Execution Order
 
 ```
-Phase 1   (inventory src + outputs/services)
+Phase 1   (inventory src + github/*/*/docs)
   → Phase 1.5 (load state, detect dirty targets, cascade)     [skipped in full mode]
-    → Phase 2   (rebuild dirty L2 from src + outputs/services)
-      → Phase 3   (rebuild dirty L1 from L2 + outputs/services + src structure)
+    → Phase 2   (rebuild dirty L2 from src + github/*/*/docs)
+      → Phase 3   (rebuild dirty L1 from L2 + github/*/*/docs + src structure)
         → Phase 3.5 (regenerate AGENTS.md + CLAUDE.md/GEMINI.md symlinks)
           → Phase 4   (verify)
             → Phase 4.5 (writes markdown only; gbrain index/links/embeddings refreshed by the caller's single `gbrain sync`)

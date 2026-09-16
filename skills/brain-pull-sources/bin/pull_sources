@@ -55,9 +55,9 @@ export GITHUB_CLONE_REPORT="${GITHUB_CLONE_REPORT:-$REPO_ROOT/.github-clone-repo
 # --- Changed-repo ledger -----------------------------------------------------
 # `github_clone` appends one TSV line per repo whose HEAD actually moved. This is
 # the work-list for every downstream consumer that would otherwise re-derive
-# "what changed" by re-reading all 136 clones — above all `brain-rebuild-services`
-# (its Step 0 gate). Truncated per run, so an EMPTY file means "nothing moved,
-# skip the phase" — not "unknown". Exported so parallel lanes share it.
+# "what changed" by re-reading all 136 clones. Truncated per run, so an EMPTY
+# file means "nothing moved, skip the phase" — not "unknown". Exported so
+# parallel lanes share it.
 export GITHUB_CLONE_CHANGED="${GITHUB_CLONE_CHANGED:-$REPO_ROOT/.github-changed-repos.tsv}"
 : > "$GITHUB_CLONE_CHANGED" 2>/dev/null || true
 
@@ -224,11 +224,11 @@ if [[ -s "$GITHUB_CLONE_REPORT" ]]; then
 fi
 
 # --- Changed repos: the downstream work-list --------------------------------
-# Printed last because it is the handoff. `brain-rebuild-services` reads this file
-# and regenerates ONLY these repos; an empty ledger means that whole phase costs
-# nothing. Say the count out loud either way — a silent zero is indistinguishable
-# from a broken ledger, and that is exactly the failure that would quietly stop
-# service docs from ever being refreshed again.
+# Printed last because it is the handoff. The morning run's docs-drift sweep uses
+# it as a STARTING POINT only — the sweep itself gates on each repo's own
+# docs/domain/tech/features/coverage.yml stamp, because a movement ledger can
+# never repair a repo whose docs were missed on an earlier run. Say the count out
+# loud either way — a silent zero is indistinguishable from a broken ledger.
 changed_n=$(grep -c . "$GITHUB_CLONE_CHANGED" 2>/dev/null | tr -d ' ')
 changed_n="${changed_n:-0}"
 echo ""

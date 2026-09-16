@@ -153,8 +153,8 @@ Skills for building and syncing a personal knowledge brain (formerly the `smnbss
 | Skill | Description |
 |-------|-------------|
 | **brain-pull-sources** | Export ClickUp, Confluence, GDrive, Linear, GitHub, Medium, Metabase into `src/` |
-| **brain-rebuild-services** | Generate `.AGENT.MD` service docs from cloned GitHub repos |
-| **brain-rebuild-memory** | Rebuild L1/L2 memory from `src/` + `outputs/services/` |
+| **brain-rebuild-services** | RETIRED redirect — a repo documents itself in `github/<org>/<repo>/docs/` |
+| **brain-rebuild-memory** | Rebuild L1/L2 memory from `src/` + `github/<org>/<repo>/docs/` |
 | **brain-prepare-my-one-on-one** | Prepare 1:1 agendas from Linear + brain context |
 | **brain-prepare-my-deep-dives** | Prepare deep-dive agendas per team |
 | **brain-morning-start** | Daily bootstrap (sync + meeting notes + agendas) |

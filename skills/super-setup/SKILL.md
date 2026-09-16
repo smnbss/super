@@ -222,8 +222,8 @@ Then suggest:
 Next steps (run from inside the brain project):
   1. Edit sources.md (non-GitHub) + sources.github.md (repos) with your actual URLs
   2. /brain-pull-sources         → populate src/
-  3. /brain-rebuild-services     → generate service docs
-  4. /brain-rebuild-memory       → build L1/L2 navigation
+  3. /brain-rebuild-memory       → build L1/L2 navigation
+     (service docs live in each repo's own docs/ tree — see /docs-init)
   5. Set up gbrain (gbrain import <dir> --no-embed + gbrain embed --stale,
      then gbrain extract links) → build the hybrid search index
 ```

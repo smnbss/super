@@ -181,7 +181,7 @@ another dated paragraph and no run ever removed one.
 **Where a dated line belongs instead.** Every source in this block already has an owning `memory/L1`
 page with a working cap and a rotating archive. `src/gdrive/` → [[gdrive]]. `src/confluence/` →
 [[confluence]]. `src/linear/` → [[linear]]. `src/metabase/` → [[metabase]]. `src/idp/` and
-`outputs/services/` → [[services]]. `github/` → [[github]]. `src/personio/` → [[team-members]].
+`github/<org>/<repo>/docs/` → [[services]]. `github/` → [[github]]. `src/personio/` → [[team-members]].
 `src/gmeet/` → [[meetings]]. `src/workflowly/` → [[workflowy]]. **Write the dated fact to that page,
 which Phase 3 already does. Then leave it out of here.** This block carries the CURRENT count and the
 durable traps, and points at the owning page for the history.
@@ -340,8 +340,9 @@ from disk this run, never copied from the file already on disk:**
   a bare `-maxdepth 1` which double-counts the root).
 - The service→team map's "all N services" figure in `## Service → Team Map`, matching `src/idp/catalog.md`.
 
-**Dirty when** `outputs/services/`, `src/idp/`, or `src/outline/` changed this run, or in
-full-rebuild mode.
+**Dirty when** `github/*/*/docs/`, `src/idp/`, or `src/outline/` changed this run, or in
+full-rebuild mode. ⚠️ **NOT `outputs/services/` — that tree is gone for every weroad repo and
+will never change again.**
 
 #### 3.5b-2. Merge-review the "Developer Traps" section — NEVER regenerate wholesale
 

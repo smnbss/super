@@ -1031,18 +1031,18 @@ HELP
 }
 
 # Ship the brain context the VM cannot reach. Claude runs there, and there is no
-# gbrain, no service docs and no DEVELOPER.md on that machine.
+# gbrain and no DEVELOPER.md on that machine.
+#
+# ⚠️ SERVICE DOCS ARE NOT SHIPPED, AND THAT IS CORRECT. `outputs/services/` was
+#    deleted for every weroad repo on 2026-09-15. A repo documents itself now, in
+#    its own `docs/` tree, and the VM clones the jungle repo to ~/jungle — so
+#    ~/jungle/<repo>/docs/ is already on the machine. Read it there.
+#    In a monorepo the tree sits under the package (~/jungle/<repo>/api/docs/).
 ship_context_pack() {
   local name="$1" repo="$2" brain_root="${BRAIN_ROOT:-$PWD}"
   local pack; pack="$(mktemp -d)"
-  mkdir -p "$pack/services"
 
   [[ -f "$brain_root/DEVELOPER.md" ]] && cp "$brain_root/DEVELOPER.md" "$pack/"
-  local doc
-  for doc in "$brain_root"/outputs/services/**/*"$repo"*.agent.md \
-             "$brain_root"/outputs/services/*"$repo"*.agent.md; do
-    [[ -f "$doc" ]] && cp "$doc" "$pack/services/"
-  done
 
   run vm_ssh "$name" "mkdir -p ~/session-context"
   run vm_scp "$name" "$pack" "~/session-context"

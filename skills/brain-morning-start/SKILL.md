@@ -78,7 +78,7 @@ pull_sources still exporting, memory "Wave 1 dispatched" with 0 files written).
    | Phase | Completion predicate |
    |---|---|
    | 1a `brain-pull-sources` | `[ -z "$(find src github -newermt '-90 seconds' -type f 2>/dev/null \| head -1)" ]` |
-   | 1b `brain-rebuild-services` | `outputs/services/` quiet AND every repo in `.github-changed-repos.tsv` has a doc with today's mtime or is gated SKIP |
+   | 1b docs-drift sweep | **no wait — it writes nothing.** It is a read-only report. Assert the sweep printed a list (possibly empty) and carry it to Part 4 |
    | 2a meeting harvest | **no separate wait — it is a lane INSIDE 1a.** After 1a, assert a per-day `index.md` exists for every day since the last harvest |
    | 1c `brain-rebuild-memory` | `[ -z "$(find memory AGENTS.md DEVELOPER.md -newermt '-90 seconds' 2>/dev/null \| head -1)" ]` — the generator writes all three |
 
@@ -114,10 +114,10 @@ are what keeps `src/` current.
 typo must not silently skip the rebuild that keeps memory current.
 
 ⚠️ **SKIPPING A PHASE DOES NOT MEAN ITS WORK IS DONE. IT MEANS ITS OUTPUTS ARE GOING STALE, AND
-NOTHING DOWNSTREAM REPORTS THEM AS STALE.** A skipped `services` phase leaves `outputs/services/`
-behind its clones, and the divergence sweep will not run to tell you by how much. A skipped
-`memory` phase leaves `verified:` dates that look current because they were correct on their own
-date.
+NOTHING DOWNSTREAM REPORTS THEM AS STALE.** A skipped `services` phase means the docs-drift sweep
+does not run, so **nothing tells you how far any repo's `docs/` tree is behind its clone.** A
+skipped `memory` phase leaves `verified:` dates that look current because they were correct on
+their own date.
 
 ⚠️ **SAY WHICH PHASES WERE SKIPPED, AND WHY, IN THE PART 4 REPORT.** A run that silently does less
 than the reader expects is worse than one that fails. Print the `--list` output.
@@ -135,7 +135,19 @@ once from `resources/morning-start-additional.template.md` (relative to this ski
 - **1a `brain-pull-sources`** — export all external sources → `src/`. Heavy. ⚠️ **This includes the
   gmeet harvest (Part 2a), because `sources.md` declares it. Do NOT start a second `gmeet_to_md`
   alongside it.** Part 2b, the digests, runs **after** 1a because it reads what 1a wrote.
-- **1b `brain-rebuild-services`** — regenerate `.agent.md` docs → `outputs/services/`. *After 1a.*
+- **1b docs-drift sweep** — report which repos' own `docs/` trees are behind their clones. *After 1a.*
+
+  🚨 **THIS PHASE NO LONGER GENERATES ANYTHING, AND IT IS PERMANENTLY SKIPPED BY DEFAULT.**
+  `outputs/services/weroad` was deleted on 2026-09-15 (50 files) and `services` sits in
+  `morning_start.skip_phases`. **`brain-rebuild-services` has no weroad target left. Do not
+  invoke it.** **A repo documents itself now**, in its own `docs/` tree.
+
+  ⚠️ **AND THIS PHASE MUST NOT WRITE.** A docs change belongs in the repo, through `docs-feature`
+  or `docs-backfill`, on a branch, in a pull request. **Never commit into a clone under
+  `github/`** — `pull_sources` skips any clone with uncommitted changes, so a write here makes
+  that repo stale and invisible to every later health figure.
+
+  **What 1b produces is a LIST for the Part 4 report.** Nothing else.
 
   **Read the work-list before dispatching anything.** `.github-changed-repos.tsv` is written by 1a,
   one line per repo whose HEAD moved.
@@ -145,62 +157,94 @@ once from `resources/morning-start-additional.template.md` (relative to this ski
   cut -f1 .github-changed-repos.tsv
   ```
 
-  ⚠️⚠️ **THE LEDGER IS A STARTING POINT, NOT THE WORK-LIST. GATE ON DIVERGENCE, NEVER ON MOVEMENT.**
-  `brain-rebuild-services` §0.1 is explicit about this and this phase must match it. The ledger
-  records *"HEAD moved during this run"*, which is a different question from *"is this doc behind its
-  clone?"*. A repo whose HEAD moves on a day its doc is **not** regenerated — the run failed, was
-  interrupted, or the clone was skipped for uncommitted work — never appears in a later ledger, so a
-  ledger-driven work-list can **never** repair it. Measured 2026-09-04: the divergence sweep read
-  **25 MATCH · 26 DIVERGED · 18 NO-STAMP · 2 BAD-SRC**, and it caught `weroad/cli` (3 files stale)
+  ⚠️⚠️ **THE LEDGER IS A STARTING POINT, NOT THE WORK-LIST. GATE ON DRIFT, NEVER ON MOVEMENT.**
+  The ledger
+  records *"HEAD moved during this run"*, which is a different question from *"are this repo's docs
+  behind its clone?"*. A repo whose HEAD moves on a day its docs are **not** regenerated — the run
+  failed, was interrupted, or the clone was skipped for uncommitted work — never appears in a later
+  ledger, so a ledger-driven work-list can **never** repair it. Measured 2026-09-17 against the
+  repos' own `coverage.yml` stamps: **53 stamps · 39 DRIFTED · 2 NO-STAMP · 5 LOST-SHA**.
+  ⚠️ **Do not carry those four figures forward — re-measure every run.**
+  The same shape was measured on the old `outputs/services/` gate, which caught `weroad/cli` (3 files stale)
   plus **both** `.db.agent.md` docs, for `wemeet-hosted-ops` and `wetracker` — **all three absent from
   that day's 56-line ledger.**
 
   **Zero ledger lines does NOT mean zero work.** Run the divergence sweep anyway.
 
-  ⚠️ **Pass the CHANGED FILE LIST, not just the repo name.** A repo name invites a full working-tree
-  read; a file list does not. It is one `git -C` per doc and zero model requests:
+  ⚠️ **GATE ON THE REPO'S OWN COVERAGE STAMP, NOT ON A BRAIN-SIDE DOC.** The docs convention
+  writes `docs/domain/tech/features/coverage.yml` carrying `source_commit:` (the sha the docs were
+  generated from) and `watched_roots:` (the paths a docs change must follow). **That pair is the
+  replacement for the deleted `<!-- verified: … head: … -->` stamp.** Measured 2026-09-17:
+  53 repos under `github/weroad/` carry one.
+
+  ⚠️ **SCOPE THE DIFF TO `watched_roots`. A CHANGE OUTSIDE THEM DOES NOT STALE THE DOCS**, and an
+  unscoped diff reports every repo as drifted on every run, which trains the reader to ignore the
+  list.
 
   ```bash
-  # ⚠️ TWO TRAPS LIVE IN THIS LOOP AND BOTH FAIL SILENTLY IN THE EXPENSIVE DIRECTION.
+  # ⚠️ THREE TRAPS LIVE IN THIS LOOP AND ALL THREE FAIL SILENTLY.
   #
   # 1. NEVER name a shell variable `path`. In zsh `path` is a special array TIED TO $PATH, so
   #    `read -r repo path` overwrites PATH and EVERY later command in the loop dies with
-  #    "command not found" - grep, head, cut and git all fail, every `rec` comes back empty, and
-  #    the rule below reads that as "inert, do not dispatch". Measured on a real ledger
+  #    "command not found" - grep, head, cut and git all fail, every stamp comes back empty, and
+  #    the rule below reads that as "inert, do not report". Measured on a real ledger
   #    2026-09-04: 0 work-list entries against a true 25.
   #
-  # 2. NEVER glob the doc path. `"outputs/services/**/$repo.agent.md"` is WRONG twice over: `**`
-  #    does not recurse without globstar, and inside double quotes it is not glob-expanded at all,
-  #    so grep receives a literal path that never exists. `rec` is then empty for EVERY repo and
-  #    the whole work-list reads as inert. Verified 2026-09-04 against a real doc: the quoted glob
-  #    returns "No such file or directory" while `find` returns head 7a43190d. USE `find`.
+  # 2. NEVER glob the doc path with `**` inside double quotes. `**` does not recurse without
+  #    globstar, and inside double quotes it is not glob-expanded at all, so the consumer gets a
+  #    literal path that never exists and the whole sweep reads as inert. USE `find`.
   #
-  # 3. ANCHOR the stamp read to the `verified:` comment. A bare `head: [0-9a-f]+` grep matches the
-  #    FIRST occurrence anywhere in the doc, and a dated note or a YAML frontmatter field can carry
-  #    an OLDER sha. Measured 2026-09-04: unison.agent.md returned acbbd5e4 from its frontmatter
-  #    while its verified stamp read cad5b77c, so the gate reported a false DIVERGED on a doc that
-  #    was current. (That frontmatter field was itself stale and has been corrected.)
+  # 3. ANCHOR the stamp read to the start of the line (`^source_commit:`). A bare grep matches the
+  #    first sha-shaped string anywhere in the file, and coverage.yml carries many `source:` paths
+  #    with line numbers below it.
   #
-  # Drive the loop from the DOCS, not from the ledger - that is what makes it a divergence gate.
-  find outputs/services -name '*.agent.md' | while read -r doc; do
-    rec=$(grep -m1 -oE '<!-- verified:[^>]*head: [0-9a-f]{7,40}' "$doc" | grep -oE '[0-9a-f]{7,40}$')
-    src=$(grep -m1 -oE '<!-- verified:[^>]*source: [^ |]+' "$doc" | grep -oE '[^ ]+$' | sed 's#/$##')
-    [ -z "$rec" ] && { echo "NO-STAMP $doc"; continue; }
-    [ -d "$src/.git" ] || { echo "BAD-SRC $doc -> $src"; continue; }
-    cur=$(git -C "$src" rev-parse HEAD 2>/dev/null)
+  # 4. DO NOT `find github -maxdepth 4` FOR THE COVERAGE FILE. The file sits 8 or 9 path segments
+  #    deep (`github/<org>/<repo>/docs/...` and `github/weroad/jungle/<repo>/docs/...`), so a
+  #    maxdepth-4 find returns NOTHING and reads as "no repo has drifted". Measured 2026-09-17:
+  #    0 hits against a true 53. Drive the loop from the REPO DIRS instead - it is also far
+  #    cheaper than an unbounded find over a 446K-file tree.
+  #
+  # Drive the loop from the REPOS, not from the ledger - that is what makes it a drift gate.
+  for repo_root in github/*/*/ github/weroad/jungle/*/; do
+    repo_root=${repo_root%/}
+    cov="$repo_root/docs/domain/tech/features/coverage.yml"
+    [ -f "$cov" ] || continue
+    rec=$(grep -m1 -oE '^source_commit: *[0-9a-f]{7,40}' "$cov" | grep -oE '[0-9a-f]{7,40}$')
+    [ -z "$rec" ] && { echo "NO-STAMP $repo_root"; continue; }
+    [ -d "$repo_root/.git" ] || repo_root=$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null)
+    [ -n "$repo_root" ] && [ -d "$repo_root/.git" ] || { echo "BAD-SRC $cov"; continue; }
+    git -C "$repo_root" cat-file -e "$rec^{commit}" 2>/dev/null || { echo "LOST-SHA $repo_root $rec"; continue; }
+    cur=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null)
     case "$cur" in "$rec"*) continue;; esac          # MATCH, nothing to do
-    printf '=== %s | %s | %s..%s\n%s\n' "$doc" "$src" "$rec" "${cur:0:8}" \
-      "$(git -C "$src" diff --name-only "$rec..HEAD" 2>/dev/null)"
+    # Scope the diff to watched_roots. No roots declared = whole repo.
+    roots=$(sed -n 's/^watched_roots: *\[\(.*\)\]/\1/p' "$cov" | tr -d '"' | tr ',' ' ')
+    changed=$(git -C "$repo_root" diff --name-only "$rec..HEAD" -- $roots 2>/dev/null)
+    [ -z "$changed" ] && continue                    # moved, but not under watched_roots
+    printf '=== %s | %s..%s\n%s\n' "$repo_root" "$rec" "${cur:0:8}" "$changed"
   done
   ```
 
-  A doc whose file list comes back **empty is inert — do not dispatch it at all.** The worker is
-  instructed to stop rather than fall back to a full read if the list is missing, so omitting the
-  list does not fail safe: it fails expensive.
+  A repo whose scoped file list comes back **empty is inert — do not report it as drifted.** Its
+  HEAD moved outside `watched_roots`, which is exactly the case the scoping exists to filter out.
 
-  ⚠️ **`NO-STAMP` and `BAD-SRC` are findings, not errors to swallow.** A doc with no `head:` can never
-  take the cheap path and needs a human. A `BAD-SRC` doc declares a `source:` that is not a git repo —
-  **report it, and correct nothing until a human decides which path is right.**
+  ⚠️ **`NO-STAMP`, `BAD-SRC` and `LOST-SHA` are findings, not errors to swallow.** `NO-STAMP` means
+  the docs were never generated by the convention. `LOST-SHA` means the recorded commit is not in
+  the clone — usually a force-push or a shallow clone — and the drift is **unmeasurable**, not zero.
+  **Report each one and correct nothing until a human decides.**
+
+  ⚠️ **A REPO WITH NO `docs/` TREE AT ALL IS THE LARGER GAP, AND THIS LOOP CANNOT SEE IT.** The
+  sweep is driven by existing `coverage.yml` files, so a repo that never adopted the convention
+  never appears. **List those separately** — they are `docs-init` / `docs-backfill` candidates:
+
+  ```bash
+  for d in github/*/*/ github/weroad/jungle/*/; do
+    [ -d "$d/.git" ] || continue
+    [ -d "$d/docs" ] || echo "NO-DOCS $d"
+  done
+  ```
+
+  ⚠️ **STATE THE SCOPE OF THAT NEGATIVE.** A skipped clone is stale and invisible here, and
+  `github/` is gitignored so `rg` will not see it either.
 - **1b.5 additional agents** — if `agents/morning-start-additional/SKILL.md` exists, run its
   `run <path>` directives in order. *After 1b, before 1c.*
 - **1c `brain-rebuild-memory`** — rebuild L2 + L1 → `memory/`, plus `AGENTS.md` and `DEVELOPER.md`.
@@ -407,7 +451,7 @@ the reverse. On Postgres the sync runs concurrently with the always-on server, s
 | Skill | Output |
 |-------|--------|
 | `brain-pull-sources` | `src/<source>/` |
-| `brain-rebuild-services` | `outputs/services/` |
+| 1b docs-drift sweep (inline, no skill) | a report only — **writes nothing** |
 | `brain-rebuild-memory` | `memory/L1/`, `memory/L2/`, `AGENTS.md`, `DEVELOPER.md` |
 | `gmeet_to_md` (in `brain-pull-sources`) + [digest appendix](#meeting-digest-generation) | `src/gmeet/` |
 

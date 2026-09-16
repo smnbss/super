@@ -44,8 +44,12 @@ jungle_up_gcp.sh session refresh-ip <s>
 ## Steps
 
 1. Read the context on the laptop. Read `DEVELOPER.md`, the matching repo under
-   `github/weroad/jungle/`, the service docs in `outputs/services/`, and any prior
+   `github/weroad/jungle/`, **that repo's own `docs/` tree**, and any prior
    session in `outputs/projects-work-on/<repo|preset>/`.
+   ⚠️ **`outputs/services/` IS GONE for every weroad repo.** A repo documents itself:
+   read `github/weroad/jungle/<repo>/docs/documentation-guide.md` first, then
+   `docs/domain/index.md`. In a monorepo the tree sits under the package
+   (`<repo>/api/docs/`). Fall back to `src/outline/` when a repo has no `docs/`.
 2. Confirm a golden image exists. Run `golden build` when it does not.
 3. Run `session create <repo|preset> <session>`.
 4. Run `session agent start <session> "<prompt>"`.
