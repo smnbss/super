@@ -125,10 +125,55 @@ Outputs are read-only inputs — this command never modifies them.
 
 ---
 
+## Phase 1.6 — Resolve every input GLOB to a bounded FILE LIST
+
+⚠️ **RUN THIS BEFORE YOU DISPATCH ANY WORKER. It is what makes the 25-call worker budget
+achievable.** See "A WORKER'S COST IS ITS TOOL-CALL COUNT" below for the measurement that forced
+this phase into existence.
+
+A target's `inputs` are globs, and some of them are enormous: `src/outline/**` is 6,749 files,
+`src/linear/<org>/` is 1,869, `src/gmeet/**` is 2,989. **A worker handed a glob greps and reads
+its way to a 240K context and 148 tool calls.** The orchestrator resolves them once, cheaply,
+with shell — not eight times, expensively, with a model.
+
+For each dirty target:
+
+1. **Resolve its globs to the files that actually CHANGED**, using the recorded `max_mtime` from
+   Phase 1.5 as the cutoff. ⚠️ **Use an ISO timestamp, never a relative one** — this machine's
+   `find` is `bfs`, whose relative `-newermt 'today'` errors to stderr and lets `| wc -l` print a
+   confident 0.
+   ```bash
+   cutoff=$(date -u -r "$recorded_max_mtime" '+%Y-%m-%d %H:%M:%S')
+   find $globs -type f -name '*.md' -newermt "$cutoff" 2>/dev/null | sort
+   ```
+2. ⚠️ **A COUNTING PREDICATE THAT QUOTES PATHS UNDERCOUNTS, SILENTLY.** If you resolve through
+   `git ls-tree`, use `-z` plus `tr '\0' '\n'` — it quotes any path with special characters and a
+   naive line count drops those paths. Measured 2026-09-05: the Linear `all/` lane read 654
+   against a true 717.
+3. **Cap the list at 40 files per target.** If the resolved list is longer, take the 40 most
+   recently modified, and **record the count you dropped**. The worker must state that its page
+   was built from a truncated input set, and name the figure. ⚠️ **A truncation nobody prints is
+   indistinguishable from a complete read.**
+4. **Write the resolved lists to the run's briefing file**, one block per target. Each worker gets
+   the briefing PATH plus its own block — never another target's list, and never the raw glob.
+5. **A target whose resolved list is EMPTY is not dirty after all.** Drop it from the dirty set
+   and leave its `verified:` date alone. ⚠️ An mtime can move without content changing — a
+   re-export rewrites files byte-identically. The empty list is the cheaper, truer signal.
+
+⚠️ **STATE THE SCOPE OF THIS RESOLUTION ALONGSIDE ANY NEGATIVE RESULT A WORKER REPORTS.** A
+worker that says "no mention of X" saw only its resolved list, not the whole source. **A scoped
+search that misses is indistinguishable from a clean result.**
+
+---
+
 ## Phase 2 — L2 Rebuild (Domain Knowledge)
 
 Regenerate only the L2 targets marked dirty in Phase 1.5. For each dirty target:
-1. Read its declared inputs.
+1. Read **the file list Phase 1.6 resolved for this target**, from the run's briefing file.
+   ⚠️ **Read that list, NOT the glob printed under "Inputs:" below.** The `Inputs:` lines in this
+   phase declare which globs a target DEPENDS ON, for Phase 1.5's mtime check. They are not a
+   reading instruction, and expanding one inside a worker is what produced a 148-tool-call worker
+   on 2026-09-17.
 2. Synthesize. For accretive targets, then apply "Size Caps & Archive Rotation" (section below): the live window of dated sections stays, older sections move verbatim to `memory/L2/archive/`.
 3. Compute new content. **Compare against the existing file's content_hash** — if identical, leave the file untouched (don't churn mtime / git), but still refresh the state file's `max_mtime` for this target.
 4. If content changed: write the file, set frontmatter `updated: <today>`, refresh `verified:` markers only on fact blocks whose source actually changed.
@@ -264,6 +309,16 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 ## Phase 3 — L1 Rebuild (Navigation MOCs)
 
 Regenerate only the L1 targets marked dirty in Phase 1.5 (including cascades from dirty L2 files). Same content-hash short-circuit as Phase 2 — identical content = leave file alone, just refresh state. L1 files are navigation maps. Each derives from L2 + `github/<org>/<repo>/docs/` + src structure.
+
+⚠️ **RUN PHASE 3 BEFORE PHASE 2 IF THE RUN IS AT RISK OF BEING CUT SHORT, AND SAY THAT YOU DID.**
+On 2026-09-17 the fan-out spent 79% of the run's tokens on Phase 2 and then died on the account
+spend limit with **ZERO L1 MOCs rebuilt.** An L1 MOC is the navigation layer every reader enters
+through, it is far cheaper to build than an L2 page, and a stale one silently misroutes every
+later lookup. ⚠️ **An L2 page rebuilt behind a stale L1 is only half-reachable.**
+
+⚠️ **A SOURCE MOC READS STRUCTURE, NOT CONTENT.** File counts come from `find`/`ls` in the
+orchestrator, not from a worker reading files. **A Phase 3 worker should rarely exceed 10 tool
+calls.** One that does has been handed a glob — see Phase 1.6.
 
 ### Source MOCs
 
@@ -620,7 +675,8 @@ Bare-basename wikilinks (`[[meetings]]`, `[[hub]]`) are correct in archives — 
 ```
 Phase 1   (inventory src + github/*/*/docs)
   → Phase 1.5 (load state, detect dirty targets, cascade)     [skipped in full mode]
-    → Phase 2   (rebuild dirty L2 from src + github/*/*/docs)
+   → Phase 1.6 (resolve each dirty target's globs to a bounded CHANGED-file list, ≤40)
+    → Phase 2   (rebuild dirty L2 from the resolved lists — workers get lists, never globs)
       → Phase 3   (rebuild dirty L1 from L2 + github/*/*/docs + src structure)
         → Phase 3.5 (regenerate AGENTS.md + CLAUDE.md/GEMINI.md symlinks)
           → Phase 4   (verify)
@@ -630,7 +686,8 @@ Phase 1   (inventory src + github/*/*/docs)
 
 ## Rules
 
-- **Discover, don't assume**: Scan directories to find what exists. The table above is a guide — new sources or files may have appeared.
+- ⚠️ **Budget every worker at 25 tool calls, and hand it a FILE LIST, never a glob**: Phase 1.6 resolves each dirty target's inputs to a bounded changed-file list. A worker that hits 25 calls STOPS, writes what it has, and returns the reason plus the inputs it did not reach. **A partial page that reports its own gap is correct; a complete page that costs the L1 wave is not.** Print every worker's tool-call count in the return. Measured 2026-09-17: the fan-out was 79% of the run's tokens and one worker made 148 calls, and the run died before the L1 wave started.
+- **Discover, don't assume**: Scan directories to find what exists. The table above is a guide — new sources or files may have appeared. ⚠️ **Discovery is the ORCHESTRATOR's job in Phase 1.6, done with shell.** A worker discovers nothing — it reads the list it was given.
 - **Source wins**: If a source contradicts existing memory, update memory.
 - **Outputs are read-only**: Never modify service doc files — they are inputs, not outputs.
 - **Skip, don't fabricate**: If a source doesn't provide data for a section, use `<!-- TODO: source not available -->`.
@@ -675,16 +732,59 @@ per worker per run.
    **that is a finding for Simone, not something to fix by deleting.**
 6. **Print `AGENTS.md` before and after bytes, plus the layout-block size, in your return.**
 
-## ⚠️ FAN OUT FEWER WORKERS
+## ⚠️ A WORKER'S COST IS ITS TOOL-CALL COUNT, NOT ITS PAGE SIZE
 
-Every worker pays the ~27,800-token floor above. **The worker count is a direct multiplier on the
-run's cost.**
+⚠️ **THIS IS THE DOMINANT COST OF THE WHOLE ROUTINE. READ IT BEFORE YOU DISPATCH ANYTHING.**
 
-1. **Do NOT dispatch a worker for a page whose inputs did not change.** Re-derive the changed set
+**A worker's context grows with every tool result, and EVERY later request re-sends ALL of it.**
+So a worker that makes 148 tool calls pays for its first tool result 148 times. **The cost of a
+worker is roughly quadratic in its tool-call count.** It is NOT proportional to the size of the
+page it writes.
+
+**Measured 2026-09-17, from the run transcripts, whole routine:**
+
+| | |
+|---|---|
+| requests | **1,103** |
+| cache-read tokens | **176,767,774** |
+| average context per request | **165,260 tokens** |
+| **Phase 2+3 fan-out — orchestrator plus 8 workers** | **775 requests (70%) and 139.3M cache reads (79% of the entire run)** |
+| worst single worker | **148 requests, 29.9M cache reads, ~202K average context** |
+| second worst | **119 requests, 28.8M cache reads, ~242K average context** |
+
+**Those two workers alone were 33% of the run's total token traffic.** The run then died on the
+account spend limit, having rebuilt 10 L2 pages and ZERO L1 MOCs.
+
+⚠️ **AND THE ALWAYS-LOADED FLOOR IS NOT THE MAIN DRIVER.** `AGENTS.md` + `memory/L3/MEMORY.md`
+across 1,103 requests is about **29.8M tokens, 17% of cache reads.** Accumulated tool output is
+the other **83%**. Trimming `AGENTS.md` is worth doing and is NOT sufficient. **Do not report a
+budget breach as the cause of a spend-limit failure.**
+
+### The four rules, in order of payoff
+
+1. ⚠️ **BUDGET EVERY WORKER AT 25 TOOL CALLS. This is the highest-payoff rule in this file.**
+   A worker that cannot finish its target in 25 calls has been given a target that is too broad,
+   or a glob instead of a file list. **It must STOP, write what it has, and RETURN the reason
+   and the list of inputs it did not reach.** ⚠️ **A worker must NEVER keep reading to "be
+   thorough" — an unbounded worker is how a run dies before the L1 wave starts.** A partial page
+   that reports its own gap is correct. A complete page that costs the L1 wave is not.
+2. ⚠️ **NEVER HAND A WORKER A GLOB. HAND IT AN EXPLICIT FILE LIST.** `src/outline/**` is 6,749
+   files and `src/linear/<org>/` is 1,869. A worker given a glob greps and reads its way to a
+   240K context. **Phase 1.6 below resolves every declared input to a bounded list of CHANGED
+   files before any worker starts.** This is what makes rule 1 achievable rather than a wish.
+3. **Do NOT dispatch a worker for a page whose inputs did not change.** Re-derive the changed set
    from `git status` and the source deltas. **A skipped page's old `verified:` date is CORRECT,
    not stale.**
-2. **Batch small targets.** Several small related pages belong in ONE worker.
-3. **Give a worker only the briefing lines that bear on ITS target**, never the whole register.
+4. **Batch small targets** — several small related pages belong in ONE worker — and **give a
+   worker only the briefing lines that bear on ITS target**, never the whole register. ⚠️ Worker
+   count is only a LINEAR multiplier, so it is the weakest of these four. Cutting 8 workers to 4
+   while leaving each one unbounded does not fix this.
+
+### Report the cost every run
+
+**Print, in the return message: total workers dispatched, and each worker's tool-call count.**
+A worker over 25 is a finding. ⚠️ **A number nobody prints is a number nobody notices moving** —
+the 148-call worker had been growing for several runs with nothing reporting it.
 
 ## ⚠️ ROTATE BEFORE YOU WRITE, NOT AFTER
 
