@@ -135,7 +135,55 @@ Write `outputs/agents/brain-sync/YYYY-MM-DD-rebuild.md` with:
 - Broken links found
 - Items flagged for review
 
-Finally, write the updated `memory/.rebuild-state.json` with fresh `max_mtime` + `content_hash` for every target (including skipped ones — their mtimes may have advanced even if content matched).
+### ⚠️⚠️ Persist state — ONLY for targets this run actually PROCESSED
+
+🚨 **NEVER WRITE A FRESH `max_mtime` FOR A TARGET THIS RUN DID NOT PROCESS. THAT ONE LINE FREEZES
+A PAGE FOREVER.** The bookmark then sits ahead of the page, Phase 1.5 compares the next run's
+inputs against it, finds no change, and marks the target clean on every run after. Nothing errors.
+The page keeps correct frontmatter and a plausible date.
+
+⚠️ **THE SUPERSEDED INSTRUCTION READ "for every target (including skipped ones)". DO NOT RESTORE
+IT.** Measured 2026-09-18, it froze THREE live pages: `memory/L1/tone-of-voice.md` missed SEVEN
+Medium posts behind a bookmark of 2026-08-18 against a newest `verified:` of 2026-05-11, and
+`memory/L1/medium-post-template.md` plus `memory/L1/medium-post.md` sat 62 and 51 days behind the
+same bookmark. The template still carried the WEEKLY format after the series went monthly on
+2026-07-20, so every draft made from it used a retired format.
+
+**Classify every target into exactly one of three outcomes, then write state accordingly:**
+
+| Outcome | What happened | Write `max_mtime`? | Write `content_hash`? |
+|---|---|---|---|
+| **REBUILT** | A worker computed new content and the file was written | YES | YES, the new hash |
+| **VERIFIED-IDENTICAL** | A worker computed new content, it matched `content_hash`, so the file was deliberately left untouched to avoid churning mtime and git | YES | YES, unchanged |
+| **NOT PROCESSED** | No worker ran it, a worker failed or hit its 25-call budget, the target was dropped from the wave, or the run ended early | 🚨 **NO — LEAVE THE OLD VALUE** | **NO** |
+
+⚠️ **"SKIPPED AS CLEAN" IS NOT ONE OF THESE THREE. Phase 1.5 decides clean BEFORE any worker
+runs, and a target it never marked dirty keeps its existing state untouched — there is nothing to
+write.** The dangerous case is a target that WAS dirty and then never got processed. **That target
+must stay dirty. Its old `max_mtime` is what keeps it dirty.**
+
+⚠️ **A WORKER THAT RETURNS A PARTIAL PAGE IS "REBUILT", NOT "NOT PROCESSED".** It wrote the file,
+so advance its state — and record the gap it reported in the digest. **Do not leave a written page
+permanently dirty.**
+
+⚠️ **ONLY THE ORCHESTRATOR WRITES THE STATE FILE, AND ONLY AFTER PHASE 4 VERIFY.** A worker must
+never write it. A run that dies before Phase 5 must leave the state file **untouched** — a whole
+run repeated is cheap, a silently frozen page is not.
+
+**Report the three counts in the digest, separately**, and NAME every NOT PROCESSED target with the
+reason. ⚠️ **A target that is NOT PROCESSED two runs running is a FINDING for Simone, not a
+retry** — something is wrong with that target, not with the run.
+
+**Verify before you finish:**
+
+```bash
+.claude/skills/brain-rebuild-memory/bin/check-input-globs   # exit 0 = no bookmark ahead of its page
+```
+
+It reports any target whose recorded input date is NEWER than the page's newest `verified:` date,
+and falls back to the file's last commit date when a page carries no `verified:` block at all.
+⚠️ **A PAGE WITH NO `verified:` BLOCK IS NOT EXEMPT — IT IS UNCHECKABLE BY DATE, WHICH IS WORSE.**
+Both Medium pages carry zero `verified:` blocks, which is exactly why their freeze went unseen.
 
 ---
 

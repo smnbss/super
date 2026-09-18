@@ -230,10 +230,16 @@ Regenerate only the L2 targets marked dirty in Phase 1.5. For each dirty target:
    reading instruction, and expanding one inside a worker is what produced a 148-tool-call worker
    on 2026-09-17.
 2. Synthesize. For accretive targets, then apply "Size Caps & Archive Rotation" (section below): the live window of dated sections stays, older sections move verbatim to `memory/L2/archive/`.
-3. Compute new content. **Compare against the existing file's content_hash** — if identical, leave the file untouched (don't churn mtime / git), but still refresh the state file's `max_mtime` for this target.
+3. Compute new content. **Compare against the existing file's content_hash** — if identical, leave the file untouched (don't churn mtime / git), but still refresh the state file's `max_mtime` for this target. **That is the VERIFIED-IDENTICAL outcome, and it is the ONLY case where a bookmark advances without a write.** It is legitimate because a worker DID compute the content and compare it.
 4. If content changed: write the file, set frontmatter `updated: <today>`, refresh `verified:` markers only on fact blocks whose source actually changed.
 
 Clean targets: skip entirely. Do not touch `verified:` or `updated:`.
+
+🚨 **A DIRTY TARGET THAT NO WORKER PROCESSED KEEPS ITS OLD `max_mtime`. NEVER ADVANCE ONE FOR WORK
+THAT DID NOT HAPPEN.** Advancing it marks the target clean on every future run — the page freezes
+and nothing reports it. Measured 2026-09-18, this froze THREE live pages, one of which had missed
+SEVEN source posts. **The three outcomes and the exact state-write rule live in
+`references/orchestration.md`, Phase 5. The orchestrator applies it. A worker NEVER writes state.**
 
 Each L2 file draws from specific inputs. Read those inputs, synthesize, write the L2 file.
 
