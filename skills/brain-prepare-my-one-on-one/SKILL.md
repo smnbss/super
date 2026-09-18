@@ -218,8 +218,14 @@ gbrain MCP tools:
 
 Check:
 - `src/gmeet/` — recent meeting notes mentioning this person
-- `outputs/agents/my-workflowy/` — recent WorkFlowy entries for their section
-- `outputs/agents/tech-linear-project-updates/` — recent project update reports
+- `src/workflowly/` — recent WorkFlowy entries for their section
+  ⚠️ **NOT `outputs/agents/my-workflowy/`. That directory DOES NOT EXIST and never did.** A read
+  of it returns nothing and the person's section comes out empty with no warning. Measured
+  2026-09-18. ⚠️ **Note the spelling: the directory is `workflowly`, the topic is `workflowy`.**
+- `outputs/agents/.old/tech-linear-project-updates/` — project update reports
+  ⚠️ **CLOSED CORPUS. The producer is RETIRED and nothing writes to it.** The reports are real but
+  they stop at the date the producer was archived. **Say so in the agenda, or a stale update reads
+  as current.** ⚠️ **The live path `outputs/agents/tech-linear-project-updates/` resolves to ZERO.**
 
 Extract any relevant decisions, blockers, or action items from the last 1-2 weeks.
 

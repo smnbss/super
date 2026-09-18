@@ -90,12 +90,12 @@ Outputs are read-only inputs — this command never modifies them.
      "run_at": "2026-04-19T08:00:00Z",
      "targets": {
        "memory/L2/team-buktu.md": {
-         "inputs": ["src/personio/staff-roster.tsv", "src/outline/**", "github/*/*/docs/**"],
+         "inputs": ["src/personio/personio-staff.tsv", "src/outline/**", "github/*/*/docs/**"],
          "max_mtime": 1713398400,
          "content_hash": "sha256:..."
        },
        "memory/L1/teams.md": {
-         "inputs": [".super/brain.config.yml", "memory/L2/team-*.md", "src/personio/staff-roster.tsv"],
+         "inputs": [".super/brain.config.yml", "memory/L2/team-*.md", "src/personio/personio-staff.tsv"],
          "max_mtime": 1713398400,
          "content_hash": "sha256:..."
        }
@@ -122,6 +122,52 @@ Outputs are read-only inputs — this command never modifies them.
    - If any L1 file is dirty → `memory/L1/hub.md` is dirty → top-level `AGENTS.md` is dirty.
 
 5. Record the full dirty set and feed it to Phases 2–5. Clean targets are **read** (other phases may need their contents) but never rewritten.
+
+---
+
+## Phase 1.55 — PROVE every input glob resolves. This gate is not optional.
+
+⚠️ **RUN THIS BEFORE PHASE 1.6, AND BEFORE YOU DISPATCH ANY WORKER.**
+
+```bash
+.claude/skills/brain-rebuild-memory/bin/check-input-globs     # exit 0 = proceed, 1 = STOP
+```
+
+**What it does.** It parses the `**Inputs:**` line of every target out of this file, resolves each
+declared path against disk, and prints the file count. It exits 1 when any path resolves to ZERO
+and is not explicitly declared retired.
+
+**Why it exists.** A rebuild target whose input glob resolves to zero files is FROZEN, and a frozen
+page LOOKS HEALTHY. It scores clean on every incremental run, keeps correct frontmatter, and keeps
+a plausible `verified:` date. Nothing errors and nothing warns. Measured 2026-09-18: NINE declared
+paths resolved to zero and four pages had been frozen for weeks.
+
+⚠️ **A ZERO HAS TWO CAUSES AND THEY NEED OPPOSITE FIXES. Decide which one you have.**
+
+1. **The path is WRONG.** Fix the `**Inputs:**` line. Worked examples, all found 2026-09-18:
+   `src/personio/staff-roster.tsv` when the file is `personio-staff.tsv`;
+   `outputs/agents/my-workflowy/` when the source is `src/workflowly/`;
+   `src/confluence/Monkeys Wiki/` after that space migrated to Outline.
+   ⚠️ **A SOURCE RENAME DOES THIS TOO** — the same day, `workflowly_to_md` renamed
+   `📆 Calendart/` to `📆 Calendar/` and `[DEEP DIVE] Saian/` to `[DEEP DIVE] Saia/`, each LOSING
+   ITS LAST CHARACTER, so every glob naming the old path matched nothing.
+2. **The producer was RETIRED on purpose.** The data still exists and the page being static is
+   CORRECT. Repoint the glob at where the data actually went — the `tech-*` and `biz-*` agent
+   folders moved to `outputs/agents/.old/` — and say on the page that the corpus is closed.
+
+⚠️ **NEVER SILENCE A FAILURE YOU HAVE NOT EXPLAINED.** The script's `RETIRED` set takes a path only
+with its reason, and only when a human has decided the source is gone for good. A check that cries
+wolf gets trained away, which is why this one distinguishes the two cases instead of asserting
+non-zero everywhere.
+
+**Two resolver traps the script already handles. Do not reintroduce them by hand-rolling a check:**
+
+- ⚠️ **`glob` DOES NOT DESCEND INTO A DOT-DIRECTORY, EVEN WITH `**`.** `github/**/CODEOWNERS`
+  returned **8** against a true **136**, because most of them sit in `.github/CODEOWNERS`. That is
+  a 94% undercount reporting as a clean number. Walk the tree instead.
+- ⚠️ **AN `**Inputs:**` DECLARATION CAN WRAP ONTO CONTINUATION LINES.** Reading only the first line
+  silently skips every path after the wrap — `seo-reports` declares 4 paths and a first-line-only
+  read checked 2.
 
 ---
 
@@ -160,6 +206,15 @@ For each dirty target:
    and leave its `verified:` date alone. ⚠️ An mtime can move without content changing — a
    re-export rewrites files byte-identically. The empty list is the cheaper, truer signal.
 
+   🚨 **THIS STEP IS THE EXACT MECHANISM THAT FREEZES A PAGE, AND IT CANNOT TELL THE TWO CASES
+   APART ON ITS OWN.** An empty list because nothing changed, and an empty list because the glob
+   points at a path that DOES NOT EXIST, look identical here. Both read as "not dirty". Both leave
+   a plausible `verified:` date. Measured 2026-09-18: four L2 pages sat frozen for weeks this way —
+   `tech-reports` since 2026-07-31, `press-and-market` and `seo-reports` since 2026-08-14,
+   `monthly-updates` since 2026-09-03 — and every run scored them clean.
+   ⚠️ **NEVER APPLY THIS STEP UNTIL PHASE 1.55 HAS PASSED.** Phase 1.55 proves the glob resolves to
+   a non-zero UNFILTERED file count, which is what makes an empty CHANGED list trustworthy.
+
 ⚠️ **STATE THE SCOPE OF THIS RESOLUTION ALONGSIDE ANY NEGATIVE RESULT A WORKER REPORTS.** A
 worker that says "no mention of X" saw only its resolved list, not the whole source. **A scoped
 search that misses is indistinguishable from a clean result.**
@@ -184,10 +239,27 @@ Each L2 file draws from specific inputs. Read those inputs, synthesize, write th
 
 ### 2a. Team files (`team-*.md`)
 
-**Inputs:** `src/personio/staff-roster.tsv` + `src/outline/**` + `src/linear/<org>/` + `github/<org>/<repo>/docs/` and `github/<org>/<repo>/CODEOWNERS` (ownership)
+**Inputs:** `src/personio/personio-staff.tsv` + `src/outline/**` + `src/linear/<org>/` + `github/<org>/<repo>/docs/` and `github/**/CODEOWNERS` (ownership)
+
+⚠️ **The roster file is `personio-staff.tsv`. A `staff-roster.tsv` glob resolves to ZERO and freezes
+every team page.**
+
+⚠️ **MATCH CODEOWNERS AT ANY DEPTH, THEN PRUNE.** A `github/<org>/<repo>/CODEOWNERS` glob is two
+levels deep and misses every jungle repo, which sits at `github/weroad/jungle/<repo>/`. Measured
+2026-09-18: the two-level form matched **0** files and a full walk matched **136**.
+⚠️ **BUT 29 OF THOSE 136 SIT INSIDE `node_modules` OR `vendor` AND BELONG TO THIRD PARTIES.**
+Attributing a vendored `CODEOWNERS` to a WeRoad squad is a wrong ownership fact. Prune those trees,
+and read only `@weroad/*` handles. By org: `weroad` 131, `smnbss` 3, `simonenolgowr` 1, `danberger` 1.
+
+⚠️ **CODEOWNERS IS A WEAK OWNERSHIP SOURCE. DO NOT READ ITS SILENCE AS A FINDING.** Measured
+2026-09-18, only ELEVEN distinct `@weroad/*` handles appear at all, and `@weroad/devops` alone
+accounts for 295 of the lines: `devops` 295, `data-engineers` 22, `php` 21, `staff` 12, `tium` 6,
+`data-analysts` 4, `martech` 2, `yodata` 1, `voyager` 1, `monkeys` 1, `buktu` 1. **Most squads —
+saian, saitama, cyclops, stomp, rocket, content-seo — have NO handle here.** A repo with no
+CODEOWNERS is UNATTRIBUTED, not unowned. Say "no declared owner" and use the other inputs.
 
 For each team, produce `memory/L2/team-<name>.md`:
-- **Members** — from `staff-roster.tsv` + any org config in github repos
+- **Members** — from `personio-staff.tsv` + any org config in github repos
 - **Services owned** — from each repo's `CODEOWNERS` and its `docs/documentation-guide.md`.
   ⚠️ **NOT from `outputs/services/**/*.agent.md` — that tree does not exist.**
   ⚠️ **A repo with no `CODEOWNERS` is not unowned, it is unattributed.** Three repos are
@@ -210,7 +282,10 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2c. monkeys-wiki.md
 
-**Inputs:** `src/outline/🐵 Monkeys Wiki/` + `src/confluence/Monkeys Wiki/`
+**Inputs:** `src/outline/🐵 Monkeys Wiki/`
+
+⚠️ **DO NOT ADD `src/confluence/Monkeys Wiki/` BACK.** That space migrated to Outline in 2026-06 and
+the Confluence export holds only `Intranet` and `IT Governance`. Outline is the live source.
 
 - Section inventory from both sources
 - Merge overlapping content, note which source is authoritative for what
@@ -218,7 +293,11 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2d. confluence-monkeys-wiki.md
 
-**Inputs:** `src/confluence/Monkeys Wiki/`
+**Inputs:** RETIRED — no live input. This page is a tombstone.
+
+⚠️ **The Confluence Monkeys Wiki space migrated to Outline (docs.weroad.com) in 2026-06.**
+`src/confluence/Monkeys Wiki/` is GONE and MUST NOT be declared as an input. The page records the
+migration and must not be rebuilt from a source. The live wiki is `monkeys-wiki.md`, from Outline.
 
 - Section inventory (platforms, insights, product, etc.)
 - File counts per section
@@ -257,7 +336,11 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2i. workflowy.md
 
-**Inputs:** `outputs/agents/my-workflowy/` (daily exports)
+**Inputs:** `src/workflowly/` (the mirrored WorkFlowy tree, written by `workflowly_to_md`)
+
+⚠️ **`outputs/agents/my-workflowy/` DOES NOT EXIST and never resolves.** It is not in
+`outputs/agents/` and not in `outputs/agents/.old/`. The real source is the `src/workflowly/`
+export. ⚠️ **Note the spelling: the directory is `workflowly`, the page is `workflowy`.**
 
 - Summarize latest export structure
 - Date range covered
@@ -271,30 +354,48 @@ Known teams come from `teams[]` in `$BRAIN_CONFIG`. WeRoad defaults: Buktu, Tium
 
 ### 2k. seo-reports.md
 
-**Inputs:** `outputs/agents/seo/`, `outputs/agents/seo-geo/`, `outputs/agents/seo-site-architecture/`
+**Inputs:** `outputs/agents/seo-geo/` (LIVE) + `outputs/agents/.old/seo/`,
+`outputs/agents/.old/seo-geo/`, `outputs/agents/.old/seo-site-architecture/` (CLOSED)
 
-- Summarize latest audit findings
+⚠️ **MIXED CORPUS. `seo-geo` is the ONLY live producer.** `seo` and `seo-site-architecture` are
+retired and their output moved to `outputs/agents/.old/`. ⚠️ **`seo-geo` exists in BOTH trees — the
+live folder and the archive.** State which one a figure came from.
+- Summarize latest audit findings, and say which findings come from the CLOSED corpus
 - Date range covered
 
 ### 2l. tech-reports.md
 
-**Inputs:** `outputs/agents/tech-bugs/`, `outputs/agents/tech-linear-project-updates/`, `outputs/agents/tech-post-mortem-summary/`
+**Inputs:** `outputs/agents/.old/tech-bugs/`, `outputs/agents/.old/tech-linear-project-updates/`,
+`outputs/agents/.old/tech-post-mortem-summary/`
 
-- Summarize latest reports
+⚠️ **CLOSED CORPUS. All three producers are RETIRED and nothing writes to them.** This page
+describes a frozen corpus, not a live feed. A `verified:` date that does not move is CORRECT here.
+⚠️ **The producers are under `outputs/agents/.old/`, NOT `outputs/agents/`.** The live-tree glob
+resolves to ZERO and froze this page from 2026-07-31 to 2026-09-18 with nothing reporting it.
+- Summarize the reports, and state the date the corpus closed
 - Date range covered
 
 ### 2m. press-and-market.md
 
-**Inputs:** `outputs/agents/biz-global-press-review/`, `outputs/agents/biz-middle-east-impact/`, `outputs/agents/biz-war-hp-optimization/`
+**Inputs:** `outputs/agents/.old/biz-global-press-review/`,
+`outputs/agents/.old/biz-middle-east-impact/`, `outputs/agents/.old/biz-war-hp-optimization/`
 
-- Summarize latest press/market reports
+⚠️ **CLOSED CORPUS. All three producers are RETIRED and nothing writes to them.** This page
+describes a frozen corpus, not a live feed. A `verified:` date that does not move is CORRECT here.
+⚠️ **The producers are under `outputs/agents/.old/`, NOT `outputs/agents/`.** The live-tree glob
+resolves to ZERO and froze this page from 2026-08-14 to 2026-09-18 with nothing reporting it.
+- Summarize the press and market reports, and state the date the corpus closed
 - Date range covered
 
 ### 2n. monthly-updates.md
 
-**Inputs:** `outputs/agents/tech-monkeys-monthly-updates/`
+**Inputs:** `outputs/agents/.old/tech-monkeys-monthly-updates/`
 
-- List generated decks with dates
+⚠️ **CLOSED CORPUS. The producer is RETIRED and nothing writes to it.** This page describes a
+frozen corpus, not a live feed. A `verified:` date that does not move is CORRECT here.
+⚠️ **The producer is under `outputs/agents/.old/`, NOT `outputs/agents/`.** The live-tree glob
+resolves to ZERO and froze this page from 2026-09-03 to 2026-09-18 with nothing reporting it.
+- List generated decks with dates, and state the date the corpus closed
 - Note latest month covered
 
 ### 2o. cross-references.md
@@ -340,8 +441,8 @@ Each source MOC contains:
 
 | L1 File | Derives from |
 |---------|-------------|
-| `teams.md` | All `memory/L2/team-*.md` files + `src/personio/staff-roster.tsv` + **`$BRAIN_CONFIG` `teams[]`** |
-| `team-members.md` | `src/personio/staff-roster.tsv` + `memory/L2/team-*.md` members sections + **`$BRAIN_CONFIG` `teams[]`** (for the Linear-team column) |
+| `teams.md` | All `memory/L2/team-*.md` files + `src/personio/personio-staff.tsv` + **`$BRAIN_CONFIG` `teams[]`** |
+| `team-members.md` | `src/personio/personio-staff.tsv` + `memory/L2/team-*.md` members sections + **`$BRAIN_CONFIG` `teams[]`** (for the Linear-team column) |
 | `product-areas.md` | Team L2 files (group features by product area) |
 | `business-domains.md` | `memory/L2/exco.md` + `memory/L2/intranet.md` + `memory/L2/one-pagers.md` |
 | `data-model.md` | **`src/outline/BI Wiki/**`** (dbt's documentation home — see the docs-first note below) + `github/<org>/<repo>/docs/` (schema sections) + BigQuery metadata |
@@ -382,7 +483,7 @@ Each source MOC contains:
 
 #### `memory/L1/teams.md`
 
-Generate this file from `$BRAIN_CONFIG` `teams[]` + `memory/L2/team-*.md` + `src/personio/staff-roster.tsv` + any team data in `src/linear/` or `src/outline/`.
+Generate this file from `$BRAIN_CONFIG` `teams[]` + `memory/L2/team-*.md` + `src/personio/personio-staff.tsv` + any team data in `src/linear/` or `src/outline/`.
 
 **`$BRAIN_CONFIG` is a declared input of this target** — it MUST appear in the target's `inputs` list in `memory/.rebuild-state.json` (as `.super/brain.config.yml`), so that editing `teams[]` marks `teams.md` dirty on the next incremental run. Without it a new team row sits in config and never reaches the table, and the prep skills go on re-deriving that calendar event by hand every run (observed 2026-08-06: the `GED - Deep dive` recurring event had no row).
 
@@ -405,7 +506,7 @@ Below the table, keep human-readable sections (services owned, deep dive links, 
 
 #### `memory/L1/team-members.md`
 
-Generate this file from `src/personio/staff-roster.tsv` + the Members sections of `memory/L2/team-*.md` + **a live Linear read** (see *Linear-teams join* below).
+Generate this file from `src/personio/personio-staff.tsv` + the Members sections of `memory/L2/team-*.md` + **a live Linear read** (see *Linear-teams join* below).
 
 **Read the roster's real header, never a remembered column list.** The export carries
 `ID | First Name | Last Name | Email | Position | Department | Team | Office | Hire Date | Status | Supervisor | Contract End Date | Occupation Type`.
@@ -675,6 +776,9 @@ Bare-basename wikilinks (`[[meetings]]`, `[[hub]]`) are correct in archives — 
 ```
 Phase 1   (inventory src + github/*/*/docs)
   → Phase 1.5 (load state, detect dirty targets, cascade)     [skipped in full mode]
+   → Phase 1.55 (PROVE every input glob resolves — bin/check-input-globs, exit 1 = STOP)
+                 ⚠️ NEVER SKIPPED, not even in full mode. A dead glob freezes a page
+                 SILENTLY, and Phase 1.6's empty list then reads as "not dirty".
    → Phase 1.6 (resolve each dirty target's globs to a bounded CHANGED-file list, ≤40)
     → Phase 2   (rebuild dirty L2 from the resolved lists — workers get lists, never globs)
       → Phase 3   (rebuild dirty L1 from L2 + github/*/*/docs + src structure)

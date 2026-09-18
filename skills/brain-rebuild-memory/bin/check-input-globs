@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Resolve every declared rebuild input to a file count. Fail on an unexplained zero.
+
+WHY THIS EXISTS
+---------------
+A rebuild target whose input glob resolves to ZERO files is FROZEN, and a frozen page
+LOOKS HEALTHY. It scores clean on every incremental run. It keeps correct frontmatter and
+a plausible `verified:` date. Nothing errors and nothing warns.
+
+Measured 2026-09-18: NINE declared input paths resolved to zero. Four pages had been
+frozen for weeks -- `tech-reports` since 2026-07-31, `press-and-market` and `seo-reports`
+since 2026-08-14, `monthly-updates` since 2026-09-03. Two causes, and they need OPPOSITE
+fixes:
+
+  1. A PATH WAS SIMPLY WRONG. `src/personio/staff-roster.tsv` does not exist -- the file
+     is `personio-staff.tsv`. That one glob feeds every `team-*.md` page.
+  2. A PRODUCER WAS RETIRED ON PURPOSE. The `tech-*` and `biz-*` agent folders moved to
+     `outputs/agents/.old/`. The data still exists and the page being static is CORRECT.
+
+A blanket "assert non-zero" check cannot tell those apart. It would flag the retired set
+on every run forever, and a check that cries wolf gets trained away. So this script reads
+THREE states, and only the third fails the run.
+
+HOW IT READS THE INPUTS
+-----------------------
+It parses the `**Inputs:**` lines straight out of SKILL.md. Those lines are the rebuild's
+own contract, they are already uniform, and every path in them is backtick-quoted. Keeping
+one source of truth is deliberate: a separate manifest would drift from the prose, and the
+drift would be invisible in exactly the way this script exists to prevent.
+
+⚠️ A SCOPED SEARCH THAT MISSES IS INDISTINGUISHABLE FROM A CLEAN RESULT. This script
+prints the predicate it ran for every path, so a zero can be read as a zero rather than as
+a missing check.
+
+Exit 0 = every declared input resolves, or is declared RETIRED.
+Exit 1 = at least one input resolves to zero with no declaration. The rebuild MUST NOT
+         treat that target as clean.
+"""
+
+import os
+import re
+import sys
+import glob
+import fnmatch
+
+SKILL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "SKILL.md")
+
+# A path may legitimately resolve to zero ONLY when it appears here, with the reason.
+# ⚠️ ADD TO THIS SET ONLY WHEN A HUMAN HAS DECIDED THE SOURCE IS GONE FOR GOOD.
+# Never add a path to silence a failure you have not explained.
+RETIRED = {
+    "RETIRED": "the Confluence Monkeys Wiki migrated to Outline in 2026-06; tombstone page",
+}
+
+# An `**Inputs:**` line may carry a prose declaration instead of a path, but ONLY one of
+# these. Anything else with no resolvable path is an unparseable line and FAILS -- a
+# target whose inputs nobody can read is exactly the silent freeze this script prevents.
+PROSE_DECLARATIONS = (
+    "RETIRED",             # the source is gone for good; the page is a tombstone
+    "ALL OTHER L2 FILES",  # derived from siblings written earlier in the same run
+)
+
+
+def is_path(token: str) -> bool:
+    """A backticked token is an input PATH only when it looks like one.
+
+    An `**Inputs:**` line also backticks tool names (`workflowly_to_md`) and file
+    basenames in prose. Treating those as globs produces a confident false ZERO, which is
+    the same failure mode this script exists to catch -- so require a separator.
+    """
+    return "/" in token or token.endswith((".tsv", ".md", ".json", ".yml"))
+
+
+def expand(pattern: str) -> str:
+    """Turn the prose placeholders into a real glob.
+
+    `<org>/<repo>` is two levels, but a jungle repo sits three levels down at
+    `github/weroad/jungle/<repo>/`. A two-level glob silently misses every one of them,
+    so the org/repo form expands with `**` rather than a fixed depth.
+    """
+    p = pattern.strip().rstrip("/")
+    p = p.replace("<org>/<repo>", "**")
+    p = p.replace("<org>", "*").replace("<Org>", "*")
+    return p
+
+
+def count(pattern: str) -> int:
+    """Count files matching a pattern. A directory counts as everything under it.
+
+    ⚠️ `glob` DOES NOT DESCEND INTO A DOT-DIRECTORY, EVEN WITH `**`. Measured 2026-09-18:
+    `github/**/CODEOWNERS` returned 8 where a full walk found 136, because most of them
+    sit in `.github/CODEOWNERS`. That is a 94% undercount that reports as a clean number.
+    So a `**` pattern is resolved by walking the tree, not by `glob`.
+    """
+    expanded = expand(pattern)
+
+    if "**" in expanded:
+        # ⚠️ DERIVE THE WALK ROOT FROM THE LAST COMPLETE DIRECTORY BEFORE THE FIRST
+        # WILDCARD, NOT BY SPLITTING ON THE WILDCARD. A pattern like
+        # `outputs/agents/.old/biz-*/**/*.md` puts the wildcard INSIDE a basename, so a
+        # naive split yields the non-directory root `outputs/agents/.old/biz-` and the
+        # count reads a confident, wrong ZERO. That false alarm is worse than no check --
+        # a guard that cries wolf gets trained away.
+        head = expanded.split("*")[0]
+        root = head if os.path.isdir(head.rstrip("/")) else os.path.dirname(head)
+        root = root.rstrip("/") or "."
+        if not os.path.isdir(root):
+            return 0
+        # `fnmatch`'s `*` crosses a `/`, which is exactly `**` semantics, so match the
+        # whole path rather than the basename. ⚠️ THE TAIL CAN BE A DIRECTORY, NOT A
+        # FILENAME -- `github/<org>/<repo>/docs/` ends in a directory, and matching only
+        # filenames read ZERO against 7,692 real files.
+        # ⚠️ `**/` MEANS ZERO OR MORE DIRECTORIES, NOT ONE OR MORE. `fnmatch`'s `*` crosses
+        # a `/`, but the literal `/` around it still demands a separator, so a one-form
+        # match requires an intermediate directory that need not exist. Measured
+        # 2026-09-18: `outputs/agents/.old/biz-*/**/*.md` read ZERO while
+        # `.old/biz-global-press-review/` held 4 markdown files, all at its top level.
+        # Match BOTH forms -- with the intermediate segment, and collapsed away.
+        wants = {expanded.replace("**", "*"),
+                 expanded.replace("/**/", "/").replace("**", "*")}
+        total = 0
+        for dirpath, dirnames, filenames in os.walk(root):
+            # ⚠️ PRUNE TREES THAT ARE NOT THE REPO'S OWN CONTENT, OR THE COUNT IS A LIE.
+            # A worktree is a second checkout of a repo already counted -- counting it
+            # doubles the same file. `node_modules` and `vendor` hold THIRD-PARTY code:
+            # measured 2026-09-18, 29 of 136 CODEOWNERS files under `github/` were
+            # vendored (mapbox, and other upstreams), and attributing one of those to a
+            # WeRoad squad is a wrong ownership fact, not a rounding error.
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in (".worktrees", "node_modules", "vendor")
+            ]
+            matched = [d for d in dirnames
+                       if any(fnmatch.fnmatch(os.path.join(dirpath, d), w) for w in wants)]
+            for d in matched:
+                for _, _, files in os.walk(os.path.join(dirpath, d)):
+                    total += len(files)
+            # Do not descend into a directory already counted whole.
+            dirnames[:] = [d for d in dirnames if d not in matched]
+            for name in filenames:
+                if any(fnmatch.fnmatch(os.path.join(dirpath, name), w) for w in wants):
+                    total += 1
+        return total
+
+    total = 0
+    for hit in glob.glob(expanded, recursive=True):
+        if os.path.isdir(hit):
+            for _, _, files in os.walk(hit):
+                total += len(files)
+        elif os.path.isfile(hit):
+            total += 1
+    return total
+
+
+def main() -> int:
+    with open(SKILL, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+
+    section = "(before the first target)"
+    rows = []
+    for i, line in enumerate(lines):
+        heading = re.match(r"^### (\d\S*\.?\s+.*)$", line)
+        if heading:
+            section = heading.group(1).strip()
+        if not line.startswith("**Inputs:**"):
+            continue
+
+        # ⚠️ AN INPUTS DECLARATION CAN WRAP ONTO CONTINUATION LINES, and reading only the
+        # first line silently skips every path after the wrap. Measured while writing this
+        # script: `seo-reports` declared 4 paths and a first-line-only read checked 2.
+        # Consume forward to the blank line that ends the declaration.
+        block = [line]
+        for nxt in lines[i + 1:]:
+            if not nxt.strip():
+                break
+            if nxt.startswith(("###", "**", "- ", "⚠️")):
+                break
+            block.append(nxt)
+        blob = " ".join(block)
+
+        paths = [p for p in re.findall(r"`([^`]+)`", blob) if is_path(p)]
+        if not paths:
+            declared = any(d in blob.upper() for d in PROSE_DECLARATIONS)
+            label = blob.replace("**Inputs:**", "").strip()[:48]
+            rows.append((section, label, -1, declared))
+            continue
+        for p in paths:
+            rows.append((section, p, count(p), p in RETIRED))
+
+    # ⚠️ SKILL.md IS NOT THE ONLY SOURCE OF TRUTH. `memory/.rebuild-state.json` carries its
+    # OWN `inputs` array per target, and PHASE 1.5 READS THAT ONE AT RUNTIME. A path can be
+    # correct in the prose and dead in the state file, and only the state file decides
+    # whether a target goes dirty. Check both, or the gate has a blind spot the size of the
+    # bug it was written for.
+    state_path = os.path.join(os.path.dirname(SKILL), "..", "..", "..",
+                              "memory", ".rebuild-state.json")
+    state_path = os.path.normpath(state_path)
+    state_rows = []
+    if os.path.isfile(state_path):
+        import json
+        with open(state_path, encoding="utf-8") as fh:
+            state = json.load(fh)
+        for target, meta in sorted(state.get("targets", {}).items()):
+            for p in meta.get("inputs", []):
+                state_rows.append((target, p, count(p)))
+
+    broken = []
+    print(f"{'files':>9}  {'target':<34} input")
+    print("-" * 100)
+    for section, path, n, declared in rows:
+        if n == -1:
+            state = "DECLARED, no path input" if declared else "NO PATH -- UNPARSEABLE"
+            print(f"{'--':>9}  {section[:34]:<34} {path}   [{state}]")
+            if not declared:
+                broken.append((section, path))
+            continue
+        if n == 0 and not declared:
+            print(f"{n:>9}  {section[:34]:<34} {path}   <<<< ZERO, NOT DECLARED")
+            broken.append((section, path))
+        elif n == 0:
+            print(f"{n:>9}  {section[:34]:<34} {path}   [RETIRED, declared]")
+        else:
+            print(f"{n:>9}  {section[:34]:<34} {path}")
+
+    # --- the runtime state file, the source Phase 1.5 actually reads ---
+    if state_rows:
+        print()
+        print(f"{'files':>9}  {'target (memory/.rebuild-state.json)':<44} input")
+        print("-" * 100)
+        dead = [r for r in state_rows if r[2] == 0]
+        for target, path, n in dead:
+            print(f"{n:>9}  {target[:44]:<44} {path}   <<<< ZERO")
+            broken.append((f"state:{target}", path))
+        print(f"  checked {len(state_rows)} state-file input path(s) across "
+              f"{len(set(r[0] for r in state_rows))} target(s); {len(dead)} dead.")
+
+    print()
+    if broken:
+        print(f"FAIL: {len(broken)} declared input(s) resolve to ZERO files.")
+        print("A target whose inputs resolve to zero is FROZEN. It will still look healthy.")
+        print("Fix the path, or add it to RETIRED in this script with the reason.")
+        for section, path in broken:
+            print(f"  - {section}: {path}")
+        return 1
+
+    print(f"OK: all {len(rows)} declared inputs resolve, or are declared RETIRED.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
