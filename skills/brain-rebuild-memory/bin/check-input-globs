@@ -42,6 +42,7 @@ import re
 import sys
 import glob
 import fnmatch
+import datetime
 
 SKILL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "SKILL.md")
 
@@ -209,8 +210,8 @@ def main() -> int:
     print("-" * 100)
     for section, path, n, declared in rows:
         if n == -1:
-            state = "DECLARED, no path input" if declared else "NO PATH -- UNPARSEABLE"
-            print(f"{'--':>9}  {section[:34]:<34} {path}   [{state}]")
+            label = "DECLARED, no path input" if declared else "NO PATH -- UNPARSEABLE"
+            print(f"{'--':>9}  {section[:34]:<34} {path}   [{label}]")
             if not declared:
                 broken.append((section, path))
             continue
@@ -234,11 +235,58 @@ def main() -> int:
         print(f"  checked {len(state_rows)} state-file input path(s) across "
               f"{len(set(r[0] for r in state_rows))} target(s); {len(dead)} dead.")
 
+    # --- STATE ADVANCED PAST WORK THAT NEVER HAPPENED ---
+    # ⚠️ A SECOND, DISTINCT FREEZE MECHANISM. The dead-glob case is an input that cannot
+    # be seen. THIS case is an input that WAS seen, recorded in `max_mtime`, and never
+    # processed -- a run died, or a target was dropped, and the state persisted anyway.
+    # From then on Phase 1.5 compares new work against that advanced bookmark, finds no
+    # change, and marks the target clean FOREVER.
+    # Measured 2026-09-18: `memory/L1/tone-of-voice.md` carried max_mtime 2026-08-18 for
+    # two new Medium posts, while its newest `verified:` block read 2026-05-11 and the
+    # page never mentioned them. A 99-day gap that every run scored as clean.
+    # The signal: the recorded input mtime is NEWER than the page's newest verified: date.
+    stale_rows = []
+    if os.path.isfile(state_path):
+        for target, meta in sorted(state.get("targets", {}).items()):
+            mt = meta.get("max_mtime")
+            if not mt or not os.path.isfile(target):
+                continue
+            txt = open(target, encoding="utf-8").read()
+            seen = re.findall(r"verified:\s*(\d{4}-\d{2}-\d{2})", txt)
+            if not seen:
+                continue
+            newest = max(datetime.date(*map(int, d.split("-"))) for d in seen)
+            recorded = datetime.date.fromtimestamp(mt)
+            if recorded <= newest:
+                continue
+            thr = re.search(r"staleness_threshold:\s*(\d+)d", txt)
+            thr = int(thr.group(1)) if thr else 14
+            gap = (recorded - newest).days
+            stale_rows.append((gap, target, recorded, newest, thr))
+
+    if stale_rows:
+        print()
+        print("STATE BOOKMARK AHEAD OF THE PAGE (input recorded, page never rebuilt):")
+        print("-" * 100)
+        for gap, target, recorded, newest, thr in sorted(stale_rows, reverse=True):
+            over = gap > thr
+            mark = "   <<<< PAST ITS OWN staleness_threshold" if over else "   (within threshold, noise)"
+            print(f"  {gap:>4}d  {target:<44} input {recorded}  vs verified {newest}{mark}")
+            if over:
+                broken.append((f"state-ahead:{target}", f"input {recorded} vs verified {newest}"))
+
     print()
     if broken:
-        print(f"FAIL: {len(broken)} declared input(s) resolve to ZERO files.")
-        print("A target whose inputs resolve to zero is FROZEN. It will still look healthy.")
-        print("Fix the path, or add it to RETIRED in this script with the reason.")
+        zeros = [b for b in broken if not b[0].startswith("state-ahead:")]
+        ahead = [b for b in broken if b[0].startswith("state-ahead:")]
+        print(f"FAIL: {len(broken)} problem(s). Both classes freeze a page SILENTLY.")
+        if zeros:
+            print(f"  {len(zeros)} declared input(s) resolve to ZERO files -- the input cannot be SEEN.")
+            print("  Fix the path, or add it to RETIRED in this script with the reason.")
+        if ahead:
+            print(f"  {len(ahead)} target(s) have a state bookmark AHEAD of the page -- the input WAS")
+            print("  seen, recorded in max_mtime, and never processed. The target is now clean")
+            print("  FOREVER. Rebuild the page, then let the run re-record max_mtime.")
         for section, path in broken:
             print(f"  - {section}: {path}")
         return 1
