@@ -253,9 +253,29 @@ def main() -> int:
                 continue
             txt = open(target, encoding="utf-8").read()
             seen = re.findall(r"verified:\s*(\d{4}-\d{2}-\d{2})", txt)
-            if not seen:
-                continue
-            newest = max(datetime.date(*map(int, d.split("-"))) for d in seen)
+            if seen:
+                newest = max(datetime.date(*map(int, d.split("-"))) for d in seen)
+            else:
+                # ⚠️ A PAGE WITH NO verified: BLOCK IS NOT EXEMPT -- IT IS UNCHECKABLE BY
+                # DATE, WHICH IS WORSE. Skipping it here is exactly how it stays frozen.
+                # Measured 2026-09-18: memory/L1/medium-post-template.md and
+                # memory/L1/medium-post.md both carried max_mtime 2026-08-18 for two new
+                # Medium posts, were never rebuilt, and carry ZERO verified: blocks -- so
+                # the first version of this check skipped both in silence. The template
+                # still held the WEEKLY format after the series went monthly on
+                # 2026-07-20, so drafting from it produced a dead format.
+                # Fall back to the file's last COMMIT date, which is a real measurement.
+                try:
+                    import subprocess
+                    out = subprocess.run(
+                        ["git", "log", "-1", "--format=%cs", "--", target],
+                        capture_output=True, text=True, timeout=20,
+                    ).stdout.strip()
+                    newest = datetime.date(*map(int, out.split("-"))) if out else None
+                except Exception:
+                    newest = None
+                if newest is None:
+                    continue
             recorded = datetime.date.fromtimestamp(mt)
             if recorded <= newest:
                 continue
