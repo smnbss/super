@@ -1,7 +1,7 @@
 // tests/test_catalog.mjs — Tests for catalog module
 import { strict as assert } from 'assert';
-import { isInstalled, installedClis, computeYoloSettingsUpdate, CLI_BINARY, buildMcpEntry, discoverPluginContents } from '../lib/catalog.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { isInstalled, installedClis, computeYoloSettingsUpdate, CLI_BINARY, buildMcpEntry, discoverPluginContents, ensureGeminiContextFileNames } from '../lib/catalog.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -217,6 +217,76 @@ test('discoverPluginContents omits sharedLibs when there is no lib/', () => {
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// ─── gemini context.fileName ────────────────────────────────────────────────
+
+// Run one case with HOME and the project root pointed at temp directories.
+// `setup` receives { home, root } and prepares the files the case needs.
+function withGeminiDirs(setup) {
+  const home = mkdtempSync(join(tmpdir(), 'super-gemini-home-'));
+  const root = mkdtempSync(join(tmpdir(), 'super-gemini-root-'));
+  const oldHome = process.env.HOME, oldRoot = process.env.SUPER_PROJECT_DIR;
+  process.env.HOME = home;
+  process.env.SUPER_PROJECT_DIR = root;
+  try {
+    setup({ home, root });
+    ensureGeminiContextFileNames();
+    const read = (path) => existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
+    return {
+      user: read(join(home, '.gemini', 'settings.json')),
+      project: read(join(root, '.gemini', 'settings.json')),
+    };
+  } finally {
+    process.env.HOME = oldHome;
+    if (oldRoot === undefined) delete process.env.SUPER_PROJECT_DIR;
+    else process.env.SUPER_PROJECT_DIR = oldRoot;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+if (!isInstalled('gemini')) {
+  console.log('  ⊘ gemini context.fileName tests skipped — gemini is not installed');
+} else {
+  test('ensureGeminiContextFileNames writes AGENTS.md first into user settings', () => {
+    const { user } = withGeminiDirs(() => {});
+    assert.deepStrictEqual(user.context.fileName, ['AGENTS.md', 'GEMINI.md']);
+  });
+
+  test('ensureGeminiContextFileNames keeps other settings and extra names', () => {
+    const { user } = withGeminiDirs(({ home }) => {
+      mkdirSync(join(home, '.gemini'), { recursive: true });
+      writeFileSync(join(home, '.gemini', 'settings.json'), JSON.stringify({
+        security: { auth: { selectedType: 'oauth-personal' } },
+        context: { fileName: ['CONTEXT.md'], importFormat: 'flat' },
+      }));
+    });
+    assert.deepStrictEqual(user.context.fileName, ['AGENTS.md', 'GEMINI.md', 'CONTEXT.md']);
+    assert.strictEqual(user.context.importFormat, 'flat');
+    assert.strictEqual(user.security.auth.selectedType, 'oauth-personal');
+  });
+
+  test('ensureGeminiContextFileNames accepts a single string name', () => {
+    const { user } = withGeminiDirs(({ home }) => {
+      mkdirSync(join(home, '.gemini'), { recursive: true });
+      writeFileSync(join(home, '.gemini', 'settings.json'), JSON.stringify({ context: { fileName: 'GEMINI.md' } }));
+    });
+    assert.deepStrictEqual(user.context.fileName, ['AGENTS.md', 'GEMINI.md']);
+  });
+
+  test('ensureGeminiContextFileNames patches an existing project settings file', () => {
+    const { project } = withGeminiDirs(({ root }) => {
+      mkdirSync(join(root, '.gemini'), { recursive: true });
+      writeFileSync(join(root, '.gemini', 'settings.json'), JSON.stringify({ mcpServers: {} }));
+    });
+    assert.deepStrictEqual(project.context.fileName, ['AGENTS.md', 'GEMINI.md']);
+  });
+
+  test('ensureGeminiContextFileNames creates no project settings file', () => {
+    const { project } = withGeminiDirs(() => {});
+    assert.strictEqual(project, null);
+  });
+}
 
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
