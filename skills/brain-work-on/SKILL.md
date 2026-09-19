@@ -7,7 +7,8 @@ description: >
   when the user says "work on <name>", "/brain-work-on <name>", "start working on",
   "I want to build <x>", "let's build <x>", or passes a project/capability name
   and asks to set up context before coding. Also use when the user wants a working
-  session tracked in Linear, or names a Linear project or issue to work under. Run
+  session tracked in Linear or in GitHub Issues, or names a Linear project, a Linear
+  issue or a GitHub issue to work under. Run
   this BEFORE writing code so the session has the full picture.
 ---
 
@@ -18,12 +19,20 @@ find the relevant repos, pull in existing architecture docs, and read any prior
 workspace notes — then summarize what was found and wait for the user's direction.
 
 This skill does **not** write code. It loads context, agrees a plan, and opens the
-Linear record the session is tracked in.
+tracker record the session is tracked in.
+
+⚠️ **Read `../brain-work-on-new-issue/references/tracking.md` before Step 7.** It holds the
+tracker contract: the three tiers, the tracker-resolution order, the `.tracking.json` schema,
+the session-directory naming and the per-tracker verbs.
+
+⚠️ **The tracker is Linear or GitHub Issues, and the repo decides.** A repo that declares
+`<!-- tracker: github -->` in its own `AGENTS.md` gets a GitHub issue. Every other repo gets a
+Linear issue, exactly as before.
 
 **Superpowers is active by default.** Steps 1–7 are the read phase; Step 8 hands
 off to `superpowers:brainstorming` and then `superpowers:writing-plans`. Do not
 skip to implementation because the context looked sufficient — the plan file is
-what Step 9 projects into Linear, so there is nothing to track without it.
+what Step 9 projects into the tracker, so there is nothing to track without it.
 
 ## Input
 
@@ -228,7 +237,7 @@ bare-`plans/` variant (`partner/ai-creation`, 2026-08-07):
 outputs/projects-work-on/<repo|preset>/<session>/
 ├── <session>-notes.md                 primary doc — NOT README.md, see below
 ├── HANDOFF.md                         state to carry into the next session
-├── .linear.json                       tracking pointer (Step 7d)
+├── .tracking.json                     tracking pointer (Step 7d)
 ├── .jungle-vm.json                    cloud-session VM state, when there is one —
 │                                      owned by brain-work-on-google-cloud, never edit
 ├── superpowers-artifacts/
@@ -311,9 +320,12 @@ add the cross-project synthesis section if more than one name was given.
 - <any repo-specific patterns worth flagging>
 
 **Tracking (proposed — confirm in Step 7):**
+- Tracker: <linear | github> (resolved by <repo marker | prose fallback | default>)
 - Linear team: <KEY> (from owning team `<owner>` via config | fallback_team — none resolved)
+  *(Linear only — omit both this line and the next for a GitHub-tracked repo.)*
 - Project: <best-matching active project | none found>
-- Existing record: <STM-412 from .linear.json — will reattach | none, will create>
+- GitHub repo: <owner/repo> *(GitHub only.)*
+- Existing record: <STM-412 or #34, from .tracking.json — will reattach | none, will create>
 
 **Open questions before we start:**
 1. <question about scope / surface area>
@@ -345,16 +357,34 @@ actually matter — don't enumerate every shared dependency. The goal is: when
 the user names their first capability, neither of you has to re-learn how the
 pieces connect.
 
-## Step 7 — Resolve the Linear tracking target
+## Step 7 — Resolve the tracking target
 
 Propose a specific target and have the user confirm it. Never open with a blank
-"which Linear project?" — Steps 2–3 already found the repo, so the owning team is
+"which project?" — Steps 2–3 already found the repo, so the target is
 derivable and the question should be a yes/no, not an interrogation.
 
 If Step 2 ended in a disambiguation question ("did you mean…"), wait for that
 answer first. Never stack the two questions.
 
-### 7a — Derive the owning team from the repo
+### 7-pre — Resolve the TRACKER first
+
+Read the matched repo's own `AGENTS.md`, then its `CLAUDE.md`, for `<!-- tracker: github -->`.
+The full four-rule order and the snippet are in
+`../brain-work-on-new-issue/references/tracking.md`.
+
+1. `tracker` is `github` → **skip 7a and 7b entirely** and go to 7c.
+2. Nothing found → Linear, by 7a and 7b, unchanged.
+
+⚠️ **A missing marker is not evidence the repo uses Linear.** It is the absence of a
+declaration. Rule 4 catches it. **Say which rule answered.**
+
+⚠️ **Never test the brain's own root `AGENTS.md`.** Read the marker only from
+`github/<org>/<repo>/`. Never walk up from the current directory.
+
+⚠️ **Do not derive an owning team for a GitHub-tracked repo.** There is none. `src/idp/` and
+`brain.config.yml` do not describe it.
+
+### 7a — Derive the owning team from the repo *(Linear only)*
 
 **First resolve the repo name to IDP service directories — they are not the same
 thing.** A repo commonly maps to two prefixed services, and `src/idp/<repo>/` may
@@ -399,7 +429,7 @@ For reference, WeRoad's ten mappings resolve as `staff`→`STF`, `buktu`→`BUK`
 `cyclops`→`CYC`, `saian`→`AI`, `rocket`→`RKT`. **That is one org's config, not this
 skill's contract** — read the file, don't copy the list.
 
-### 7b — No owning team → `linear.fallback_team`, or ask
+### 7b — No owning team → `linear.fallback_team`, or ask *(Linear only)*
 
 When 7a resolves nothing, use `linear.fallback_team` from the config — a personal or
 scratch team. It is the fallback, **not the default**. Legitimate cases:
@@ -415,7 +445,27 @@ defaulting it to a personal team hides the work from the team that actually owns
 Do not emit `Idea:`/`Task:` title prefixes anywhere, on any team. Those belong to
 other skills' conventions.
 
-### 7c — Pick the project, then propose
+### 7c — Pick the target, then propose
+
+#### `tracker: "github"`
+
+There is no project to list. GitHub's nearest analogue is a milestone, and this family of repos
+uses none. Propose the repo:
+
+> Tracking in **smnbss/tastetheworld** (GitHub Issues), new issue.
+> Confirm, name a different repo, or say "no tracking".
+
+⚠️ **Do not call `list_projects`.** It is skipped for GitHub, not replaced.
+
+Before creating anything, read the open issues — the repo may already carry one that covers this:
+
+```bash
+gh issue list --repo <owner>/<repo> --state open --limit 100
+```
+
+Then go to 7d.
+
+#### `tracker: "linear"`
 
 List the team's active projects with the **MCP** `list_projects` (resolve the tool
 name as in Step 9), passing `team: "<KEY>"` and `state: "started"`.
@@ -464,11 +514,12 @@ never the repo dir — one repo carries several concurrently-tracked sessions, s
 repo-level pointer would bind them all to one issue and reattach to the wrong work:
 
 ```
-outputs/projects-work-on/<repo|preset>/<session>/.linear.json
+outputs/projects-work-on/<repo|preset>/<session>/.tracking.json
 ```
 
 ```json
 {
+  "tracker": "linear",
   "repo": "cashew",
   "session": "cost-approval-checklist",
   "team": "STM",
@@ -479,6 +530,14 @@ outputs/projects-work-on/<repo|preset>/<session>/.linear.json
   "logThreadId": "<comment id>"
 }
 ```
+
+**The full schema for both trackers is in
+`../brain-work-on-new-issue/references/tracking.md`.** A GitHub pointer replaces `team`,
+`linearProject` and `logThreadId` with `githubRepo`, `issueNodeId` and `logCommentId`.
+
+⚠️ **A `.linear.json` or a `.github-issue.json` is a PRE-RENAME pointer.** Read it, rewrite it
+as `.tracking.json` in the same directory, and say that you did. **Never read one as an
+untracked session** — that opens a duplicate issue.
 
 If it exists and the issue is still open, **reattach to that issue** — a re-run
 continues the session, it does not start a second one. Write the file as soon as
@@ -510,7 +569,10 @@ direction only: plan → Linear. Never read state back out of Linear and into th
 plan — the moment both are authoritative they diverge on the first update that
 lands in only one, and then neither can be trusted.
 
-## Step 9 — Project the plan into Linear
+## Step 9 — Project the plan into the tracker
+
+**The per-tracker verbs are in `../brain-work-on-new-issue/references/tracking.md`.** What
+follows is what this skill adds on top.
 
 ### Resolving the Linear tools
 
@@ -531,11 +593,13 @@ the MCP.
 
 ### The three tiers
 
-| Tier | Linear object | Holds |
-|---|---|---|
-| Session | one issue | the goal, the plan file path + commit sha |
-| Phase | sub-issue per plan phase (`parentId`) | one top-level plan task each |
-| Request log | one comment thread on the session issue | every request, chronologically |
+| Tier | Linear | GitHub | Holds |
+|---|---|---|---|
+| Session | one issue, `save_issue` | one issue, `gh issue create` | the goal, the plan file path + commit sha |
+| Phase | sub-issue per plan phase (`parentId`) | sub-issue per plan phase (`addSubIssue`) | one top-level plan task each |
+| Request log | one comment thread on the session issue | one comment, appended in place | every request, chronologically |
+
+#### Linear
 
 Create the session issue with `save_issue`: `title`, `team`, `project`,
 `description` (goal + `planFile` path + commit sha so the projection is
@@ -547,27 +611,49 @@ it's their codebase. Do not set a label unless the user names one that already
 exists on that team — **never create a label**, labels are per-team board
 configuration and heterogeneous across teams.
 
+#### GitHub
+
+The three tiers are the same. The verbs are in
+`../brain-work-on-new-issue/references/tracking.md`. Four things differ:
+
+1. **The title states the observed problem, not the proposed fix.**
+2. There is no `estimate` and no `cycle`. GitHub has neither.
+3. **Never create a label.** Apply an existing one when it fits. Apply none when none fits.
+4. **Record `issueNodeId` at once.** `addSubIssue` cannot attach a phase without it.
+
+⚠️ **Never put a credential in an issue body.** An issue body reaches every collaborator and is
+copied into notifications.
+
 Use the `patch` array for later description edits rather than rewriting the whole
 description. Anchors must match exactly once and the whole patch aborts if one
 fails, so it either applies cleanly or changes nothing.
 
 ## Step 10 — Log requests as the session runs
 
-Every request the user makes gets appended as a **reply in the single log thread**
-on the session issue (`save_comment` with `parentId` = the thread's root comment,
-id stored as `logThreadId`).
+Every request the user makes is appended to the **single log** on the session issue.
 
-One issue per request is wrong — a session is dozens of conversational turns, and
+On **Linear**, that is a reply in the log thread — `save_comment` with `parentId` set to the
+thread's root comment, whose id is stored as `logThreadId`.
+
+On **GitHub**, comments are flat. There is no `parentId` and no thread. Append one dated line to
+the single log comment instead, by a PATCH on `logCommentId`. The mechanics are in
+`../brain-work-on-new-issue/references/tracking.md`.
+
+One issue per request is wrong. A session is dozens of conversational turns, and
 issue-per-request makes the board untriageable and distorts every count. The
-thread is the log; issues are the structure.
+log is the record. Issues are the structure.
+
+⚠️ **Never write a verbatim transcript into the log.** Write one line per request, in the user's
+words, with no pasted output.
 
 When the session moves on to a **new goal** the session issue's title does not
 describe, that is not a thread reply — hand off to `brain-work-on-new-issue`, which
 opens the next issue in the same project and merges the pointer file rather than
 overwriting it.
 
-As each plan phase completes, move its sub-issue's `state` forward. That is the
-only Linear write driven by progress rather than by a user request.
+As each plan phase completes, move its sub-issue forward — `state` on Linear, `gh issue close`
+on GitHub. That is the
+only tracker write driven by progress rather than by a user request.
 
 ## Why this shape
 
@@ -588,6 +674,10 @@ second source of truth for what the plan says.
 | Mistake | Why it breaks |
 |---|---|
 | Asking "which Linear project?" cold | The owning team is derivable from the repo. Propose; don't interrogate. |
+| Deriving an owning team for a GitHub-tracked repo | There is none. Resolve the tracker in 7-pre, before 7a. |
+| Reading the brain's root `AGENTS.md` for a tracker marker | Only `github/<org>/<repo>/` declares a tracker. |
+| Calling `list_projects` for a GitHub repo | GitHub has no Linear project. The step is skipped, not replaced. |
+| Creating a GitHub label | The default set is the whole set. Apply an existing label, or none. |
 | `grep`ing `src/idp/<repo>/service.md` directly | Repo ≠ service dir. `cashew` is `admin-cashew` + `api-cashew`. Glob first. |
 | `wr-linear projects list --team` | Returns a silent 0 for every team. Use the MCP `list_projects`. |
 | Trusting the first page of `list_projects` | Caps at 50 and truncates silently. Follow `cursor`. |
@@ -598,12 +688,12 @@ second source of truth for what the plan says.
 | Setting `estimate` or `cycle` | Pulls the session into the owning team's burndown. |
 | Creating a label to tag the work | Labels are per-team board config. Only use one that exists. |
 | Reading state back from Linear into the plan | Two sources of truth diverge. Plan → Linear, one direction. |
-| Creating a second issue on re-run | Read `.linear.json` first and reattach. |
+| Creating a second issue on re-run | Read `.tracking.json` first and reattach. |
 | Looking in `outputs/projects/<name>/` for prior work | Migrated to `projects-<family>/`. Check `projects-work-on/<repo>/*/` first. |
 | Writing code-session files to bare `outputs/projects/` | That's the long-tail bucket. Code work goes to `projects-work-on/<repo|preset>/<session>/`. |
 | One workspace per repo | A repo has many sessions — `super/` holds `gmeet-to-md` **and** `super/`. |
 | Two issues in one workspace's pointer | One workspace, one issue. A new goal gets a new dir via `brain-work-on-new-issue`. |
-| `.linear.json` in the repo dir | Binds every session on that repo to one issue. It goes in the session dir. |
+| `.tracking.json` in the repo dir | Binds every session on that repo to one issue. It goes in the session dir. |
 | Naming the primary doc `README.md` | gbrain skips that basename silently. Five session docs are already invisible. |
 | Emitting `Idea:`/`Task:` titles | Those belong to other skills' conventions. Plain titles here. |
 
