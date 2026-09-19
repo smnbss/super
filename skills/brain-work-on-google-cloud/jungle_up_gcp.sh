@@ -480,7 +480,7 @@ cmd_golden_build() {
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-$PWD/outputs/projects-work-on}"
 
 # The workspace is <repo|preset>/<session>/, the same shape brain-work-on uses, so
-# one session's notes, plan, .linear.json and .jungle-vm.json sit together and a repo
+# one session's notes, plan, .tracking.json and .jungle-vm.json sit together and a repo
 # with several sessions groups them. `create` knows the scope; every other verb takes
 # only <session>, so resolve the directory by searching for it.
 #

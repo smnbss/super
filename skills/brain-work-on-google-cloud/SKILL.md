@@ -169,7 +169,7 @@ preset list. The grep is the mechanism.
 
 The session workspace is `outputs/projects-work-on/<repo|preset>/<session>/`, the
 same shape `brain-work-on` uses, so a local session and a cloud session on the same
-repo group together and one session's notes, plan, `.linear.json` and
+repo group together and one session's notes, plan, `.tracking.json` and
 `.jungle-vm.json` sit side by side.
 
 ⚠️ **This layout changed on 2026-08-29.** It used to be flat —
@@ -300,6 +300,13 @@ skill's.** It reads `.jungle-vm.json` for the repo, VM, zone, image and branch, 
 cloud session created without tracking can still get its first issue — and it knows
 not to close an issue whose branch exists only on the VM.
 
+⚠️ **This skill tracks in Linear ONLY.** A cloud VM for a GitHub-tracked repo is not supported.
+The pointer file is still `.tracking.json`, and its `tracker` field reads `linear`.
+
+**The full contract is in `../brain-work-on-new-issue/references/tracking.md`** — the three
+tiers, the `.tracking.json` schema, and the Linear verbs. What follows is this skill's own
+tracking rules.
+
 Three tiers. One session issue. One sub-issue for each plan phase. One comment
 thread as the request log.
 
@@ -310,7 +317,7 @@ thread as the request log.
 3. Leave `estimate` and `cycle` unset.
 4. Never create a label.
 5. Sync one direction only: the plan file to Linear.
-6. Read `.linear.json` first and reattach. Never create a second issue on a re-run.
+6. Read `.tracking.json` first and reattach. Never create a second issue on a re-run.
 7. Record the VM name, the zone, the golden image version and the branch.
 8. **One workspace, one issue.** A session dir tracks exactly one issue, and its
    sub-issues stay in that dir. A new GOAL gets a new dir, created by
@@ -328,7 +335,7 @@ local skills' `<session>` is not. So the issue-derived directory name
    is a real benefit.
 
 Choose the session name for the VM and the branch. Record the issue in
-`.linear.json`, and let the workspace directory carry the issue-derived name.
+`.tracking.json`, and let the workspace directory carry the issue-derived name.
 
 ## Cost
 
